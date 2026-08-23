@@ -9,6 +9,8 @@ public class BARUGame : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
+		PrivatePCHHeaderFile = "BARUGame.h";
+		
 		PublicIncludePaths.AddRange(new string[] {
 			ModuleDirectory
 		});
@@ -22,13 +24,20 @@ public class BARUGame : ModuleRules
 			"GameplayAbilities",
 			"GameplayTags",
 			"GameplayTasks",
-			"ModelViewViewModel",
-			"UMG"
+			"NetCore",
+			"HTTP",
+			"Json",
+			"JsonUtilities",
+			"OnlineSubsystem",
+			"OnlineSubsystemUtils",
+			"SQLiteCore",
+			"SQLiteSupport"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"UMG"
 		});
 
 		// Uncomment if you are using Slate UI
