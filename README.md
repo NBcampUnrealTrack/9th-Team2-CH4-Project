@@ -38,10 +38,9 @@
 ### 프로젝트 설치 및 에디터 실행
 ```bash
 # 1. 원격 레포지토리 클론 (Git LFS 에셋 자동 다운로드)
-git clone [https://github.com/](https://github.com/)[Organization]/BARUGame.git
 
 # 2. develop 브랜치로 전환
-git checkout develop
+git checkout dev
 ```
 * `BARUGame.uproject`를 우클릭하거나 JetBrains Rider에서 `.uproject`를 직접 열어 C++ 프로젝트를 빌드합니다.
 * 에디터 실행 시 자동으로 **Dedicated Server + 2 Clients (960x540 FHD 분할)** 테스트 환경이 로드됩니다.
