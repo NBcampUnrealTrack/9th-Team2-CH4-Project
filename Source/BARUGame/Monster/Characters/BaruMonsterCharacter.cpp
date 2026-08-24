@@ -3,6 +3,7 @@
 
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Monster/AI/BaruMonsterAIController.h"
+#include "Monster/Data/BaruMonsterDataAsset.h"
 #include "BaruLog.h"
 
 
@@ -37,6 +38,26 @@ void ABaruMonsterCharacter::BeginPlay()
 		Log,
 		TEXT("Monster Character BeginPlay")
 	);
+	
+	// 서버에서 설정표가 빠진 몬스터를 발견하면 경고를 출력
+	if (HasAuthority() && !IsValid(MonsterDataAsset))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Warning,
+			TEXT("Monster DataAsset is not assigned.")
+		);
+	}
+	
+}
+
+//몬스터 블루프린트에서 지정한 DataAsset을 읽을 때 사용
+//설정표가 지정되지 않았다면 nullptr를 반환
+const UBaruMonsterDataAsset* ABaruMonsterCharacter::GetMonsterDataAsset() const
+{
+	// TObjectPtr에 보관된 설정표를 읽기 전용 포인터로 꺼내 반환
+	return MonsterDataAsset.Get();
 }
 
 
