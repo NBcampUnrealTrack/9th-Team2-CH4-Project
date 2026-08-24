@@ -16,6 +16,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSani
 
 /**
  * 플레이어 상태 및 ASC, AttributeSet 소유
+ * Todo : 캐릭터가 죽은 뒤에 아이디는 그대로 유지하고 스테이터스 및 장비를 초기화하는 로직이 필요
  */
 UCLASS()
 class BARUGAME_API ABaruPlayerState : public APlayerState, public IAbilitySystemInterface

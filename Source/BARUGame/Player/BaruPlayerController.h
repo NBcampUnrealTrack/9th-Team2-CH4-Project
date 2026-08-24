@@ -16,6 +16,7 @@ enum class EBaruPingType : uint8
 };
 
 // [Result] 정산용 데이터 수신 구조체
+// Todo : 별도의 DatabaseType으로 분리 예정
 USTRUCT(BlueprintType)
 struct FBaruSettlementReport
 {
