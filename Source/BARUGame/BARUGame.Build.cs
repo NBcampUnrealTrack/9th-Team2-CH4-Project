@@ -32,7 +32,8 @@ public class BARUGame : ModuleRules
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
 			"SQLiteCore",
-			"SQLiteSupport"
+			"SQLiteSupport",
+			"AIModule"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
