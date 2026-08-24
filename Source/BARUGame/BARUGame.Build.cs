@@ -22,6 +22,7 @@ public class BARUGame : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"GameplayAbilities",
+			"GameplayMessageRuntime",
 			"GameplayTags",
 			"GameplayTasks",
 			"NetCore",
