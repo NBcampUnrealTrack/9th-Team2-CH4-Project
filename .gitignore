@@ -311,3 +311,6 @@ FodyWeavers.xsd
 # 개인 로컬 테스트 및 실험용 폴더 무시
 /Content/Developers/
 /Content/_Developers/
+
+# Git LFS 용량 절약을 위한 외부 공유 에셋 격리
+/Content/External/
