@@ -1,16 +1,214 @@
 ﻿
 
 
-#include "BaruMonsterAIController.h"
+#include "Monster/AI/BaruMonsterAIController.h"
 
-
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Monster/Characters/BaruMonsterCharacter.h"
+#include "Monster/Data/BaruMonsterDataAsset.h"
+#include "BaruLog.h"
 
 
 ABaruMonsterAIController::ABaruMonsterAIController()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	
+	// 몬스터가 사용할 감각 기관을 생성
+	MonsterPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(
+			TEXT("MonsterPerceptionComponent"));
+	
+	// AAIController에게 이 컴포넌트가 자신의 감각 기관 설정
+	SetPerceptionComponent(*MonsterPerceptionComponent);
+	
+	// 시각 감지에 사용할 설정 객체를 생성
+	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(
+			TEXT("SightConfig"));
+	
+	// 아직 팀 구분 시스템이 없으므로 모든 관계의 대상을 감지
+	// 실제 플레이어 여부는 감지 이벤트에서 다시 검사할 예정
+	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
 }
 
 
+void ABaruMonsterAIController::OnPossess(APawn* InPawn)
+{
+	// 부모 AIController가 먼저 Pawn을 정상적으로 등록
+	Super::OnPossess(InPawn);
 
+	// AI 판단과 설정 적용은 서버에서만 실행
+	if (!HasAuthority())
+	{
+		return;
+	}
 
+	// 전달받은 Pawn이 우리가 만든 몬스터인지 확인
+	const ABaruMonsterCharacter* MonsterCharacter =
+		Cast<ABaruMonsterCharacter>(InPawn);
+
+	if (!IsValid(MonsterCharacter))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Error,
+			TEXT("Possessed Pawn is not a BaruMonsterCharacter.")
+		);
+
+		return;
+	}
+
+	// 몬스터 블루프린트에 지정된 설정표를 가져옴
+	const UBaruMonsterDataAsset* MonsterDataAsset =
+		MonsterCharacter->GetMonsterDataAsset();
+
+	if (!IsValid(MonsterDataAsset))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Error,
+			TEXT("Monster DataAsset is not assigned.")
+		);
+
+		return;
+	}
+
+	// 설정표의 값을 실제 시각 감지 설정에 적용
+	ApplySightSettings(*MonsterDataAsset);
+}
+
+//시각정보세팅
+void ABaruMonsterAIController::ApplySightSettings(
+	const UBaruMonsterDataAsset& MonsterDataAsset
+)
+{
+	// 플레이어를 처음 발견할 수 있는 거리를 적용
+	SightConfig->SightRadius =
+		MonsterDataAsset.SightRadius;
+
+	// 이미 발견한 플레이어를 놓치게 되는 거리를 적용
+	SightConfig->LoseSightRadius =
+		MonsterDataAsset.LoseSightRadius;
+
+	// 정면을 기준으로 한쪽 방향의 시야각을 적용
+	SightConfig->PeripheralVisionAngleDegrees =
+		MonsterDataAsset.PeripheralVisionAngle;
+
+	// 시야에서 사라진 대상을 기억하는 시간을 적용
+	SightConfig->SetMaxAge(
+		MonsterDataAsset.SightMemoryDuration
+	);
+
+	// 완성된 시각 설정을 감각 컴포넌트에 등록
+	MonsterPerceptionComponent->ConfigureSense(
+		*SightConfig
+	);
+
+	// 여러 감각 중 시각을 기본 감각으로 지정
+	MonsterPerceptionComponent->SetDominantSense(
+		SightConfig->GetSenseImplementation()
+	);
+
+	// 실행 중인 감각 시스템이 변경된 설정을 재설정
+	MonsterPerceptionComponent->RequestStimuliListenerUpdate();
+
+	BARU_NET_LOG(
+		this,
+		LogBaruAI,
+		Verbose,
+		TEXT(
+			"Sight settings applied. "
+			"Sight=%.1f, LoseSight=%.1f, HalfAngle=%.1f"
+		),
+		SightConfig->SightRadius,
+		SightConfig->LoseSightRadius,
+		SightConfig->PeripheralVisionAngleDegrees
+	);
+}
+
+void ABaruMonsterAIController::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// 몬스터 감지 판단은 서버만 처리
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (!IsValid(MonsterPerceptionComponent))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Error,
+			TEXT("Monster Perception Component is invalid.")
+		);
+
+		return;
+	}
+
+	// 감각 기관에서 대상의 감지 상태가 바뀌면
+	// HandleTargetPerceptionUpdated 함수를 호출하도록 연결
+	MonsterPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(
+		this,
+		&ABaruMonsterAIController::HandleTargetPerceptionUpdated
+	);
+}
+
+void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
+	AActor* Actor,
+	FAIStimulus Stimulus
+)
+{
+	// 몬스터의 감지 결과는 서버에서만 판단
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// 감지한 액터가 Pawn인지 확인
+	const APawn* SensedPawn = Cast<APawn>(Actor);
+
+	if (!IsValid(SensedPawn))
+	{
+		return;
+	}
+
+	// 플레이어가 조종하는 Pawn만 처리
+	// 다른 몬스터나 NPC는 무시
+	if (!SensedPawn->IsPlayerControlled())
+	{
+		return;
+	}
+
+	// 플레이어를 현재 정상적으로 보고 있는 경우
+	if (Stimulus.WasSuccessfullySensed())
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Log,
+			TEXT("Player detected: %s"),
+			*GetNameSafe(Actor)
+		);
+
+		return;
+	}
+
+	// 이전에 발견한 플레이어를 시야에서 놓친 경우
+	BARU_NET_LOG(
+		this,
+		LogBaruAI,
+		Log,
+		TEXT(
+			"Player lost: %s / "
+			"Last known location: %s"
+		),
+		*GetNameSafe(Actor),
+		*Stimulus.StimulusLocation.ToString()
+	);
+}
