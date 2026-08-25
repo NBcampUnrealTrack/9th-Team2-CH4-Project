@@ -13,6 +13,7 @@ DEFINE_LOG_CATEGORY(LogBaruItem);
 DEFINE_LOG_CATEGORY(LogBaruUI);
 DEFINE_LOG_CATEGORY(LogBaruSession);
 DEFINE_LOG_CATEGORY(LogBaruSanity);
+DEFINE_LOG_CATEGORY(LogBaruBackend);
 
 namespace BaruLog
 {
