@@ -21,6 +21,7 @@ public class BARUGame : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
+			"CommonUI",
 			"GameplayAbilities",
 			"GameplayMessageRuntime",
 			"GameplayTags",
