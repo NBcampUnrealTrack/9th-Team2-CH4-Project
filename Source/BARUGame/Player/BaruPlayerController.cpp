@@ -3,6 +3,8 @@
 #include "GameFramework/Pawn.h"
 #include "Player/BaruPlayerState.h"
 #include "BaruLog.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
 
 ABaruPlayerController::ABaruPlayerController()
 {
@@ -17,7 +19,14 @@ void ABaruPlayerController::BeginPlay()
 	{
 		BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
 	}
-	
+    if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+    {
+        // 블루프린트에서 DefaultMappingContext를 잘 넣어뒀는지 확인 후 적용 (우선순위 0)
+        if (DefaultMappingContext)
+        {
+            Subsystem->AddMappingContext(DefaultMappingContext, 0);
+        }
+    }
 	// TODO : 멀티플레이에서 패킷 전송시 UI 인식이 안되는 것을 예방하는 방지 코드
 }
 
@@ -118,3 +127,4 @@ void ABaruPlayerController::Client_PlayElevatorCinematic_Implementation()
     BARU_NET_LOG(this, LogBaruUI, Log, TEXT("Client_PlayElevatorCinematic Received."));
     OnPlayCinematic.Broadcast();
 }
+

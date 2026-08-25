@@ -4,6 +4,10 @@
 #include "GameFramework/PlayerController.h"
 #include "BaruPlayerController.generated.h"
 
+// 전방선언
+class UInputMappingContext;
+class UInputAction;
+
 // [Ping] 타입 정의
 UENUM(BlueprintType)
 enum class EBaruPingType : uint8
@@ -83,4 +87,24 @@ public:
 	
 protected:
 	virtual void BeginPlay() override;
+	
+	// 키보드/마우스 맵핑 전체를 담는 컨텍스트 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+	UInputMappingContext* DefaultMappingContext;
+
+	// WASD 이동 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+	UInputAction* MoveAction;
+
+	// 마우스 화면 회전 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+	UInputAction* LookAction;
+
+	// 스페이스바 점프 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+	UInputAction* JumpAction;
+
+	// F키 상호작용 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+	UInputAction* InteractAction;
 };
