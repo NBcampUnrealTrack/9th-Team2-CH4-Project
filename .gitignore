@@ -307,3 +307,7 @@ FodyWeavers.xsd
 .idea/**
 *.xml
 **/*.xml
+
+# 개인 로컬 테스트 및 실험용 폴더 무시
+/Content/Developers/
+/Content/_Developers/
