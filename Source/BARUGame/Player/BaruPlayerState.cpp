@@ -91,7 +91,7 @@ void ABaruPlayerState::SetSanityValue(float NewSanity)
 	OnRep_Sanity();
 }
 
-// [Client] OnRep
+// OnRep
 void ABaruPlayerState::OnRep_IsReady()
 {
 	BARU_NET_LOG(this, LogBaruSession, Verbose, TEXT("OnRep_IsReady: %d"), bIsReady);
