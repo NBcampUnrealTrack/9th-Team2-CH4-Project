@@ -22,6 +22,7 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void CreateSession(int32 NumPublicConnections = 4, bool bIsLANMatch = false);
+    // Todo : 방 인원 5 명으로 확대 필요
     
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void FindSessions(int32 MaxSearchResults = 20, bool bIsLANMatch = false);
@@ -36,6 +37,7 @@ public:
     int32 GetSearchResultsCount() const;
 
 public:
+    // UI 델리게이트
     UPROPERTY(BlueprintAssignable, Category = "BARU|Session|Delegates")
     FOnBaruCreateSessionComplete OnCreateSessionCompleteEvent;
 

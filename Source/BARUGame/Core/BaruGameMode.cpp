@@ -3,6 +3,7 @@
 #include "Player/BaruPlayerController.h"
 #include "Player/BaruPlayerState.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "BaruLog.h"
 
 ABaruGameMode::ABaruGameMode()
@@ -24,30 +25,63 @@ void ABaruGameMode::PostLogin(APlayerController* NewPlayer)
 {
     Super::PostLogin(NewPlayer);
 
-    BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Player Logged In: %s"), *NewPlayer->GetName());
+    if (IsValid(NewPlayer))
+    {
+        BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Player Logged In: %s"), *NewPlayer->GetName());
+    }
 
+    UpdateAlivePlayerCount();
+}
+
+void ABaruGameMode::Logout(AController* Exiting)
+{
+    if (IsValid(Exiting))
+    {
+        BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Player Logged Out: %s"), *Exiting->GetName());
+        
+        if (APawn* ControlledPawn = Exiting->GetPawn())
+        {
+            ControlledPawn->Destroy();
+        }
+    }
+
+    Super::Logout(Exiting);
+
+    UpdateAlivePlayerCount();
+    CheckTeamWipe();
+}
+
+void ABaruGameMode::UpdateAlivePlayerCount()
+{
     if (!CachedBaruGameState)
     {
         CachedBaruGameState = GetGameState<ABaruGameState>();
     }
 
-    if (CachedBaruGameState)
+    if (!CachedBaruGameState)
     {
-        CachedBaruGameState->SetAlivePlayerCount(GetNumPlayers());
+        return;
     }
-}
-
-void ABaruGameMode::Logout(AController* Exiting)
-{
-    BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Player Logged Out: %s"), *Exiting->GetName());
-
-    Super::Logout(Exiting);
-
-    if (CachedBaruGameState)
+    
+    int32 CurrentAlive = 0;
+    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
-        CachedBaruGameState->SetAlivePlayerCount(GetNumPlayers());
-        CheckTeamWipe();
+        APlayerController* PC = Iterator->Get();
+        if (IsValid(PC) && !PC->IsPendingKillPending())
+        {
+            if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
+            {
+                // TODO : 생존 관련 정의를 명확히 하고 생존자 카운트 조건 수정 필요
+                if (!PS->IsDBNO())
+                {
+                    CurrentAlive++;
+                }
+            }
+        }
     }
+    
+    CachedBaruGameState->SetAlivePlayerCount(CurrentAlive);
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Alive Player Count Updated: %d"), CurrentAlive);
 }
 
 // Level Transition
@@ -59,19 +93,48 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
         BARU_LOG(LogBaruSession, Warning, TEXT("RequestLevelTransition Rejected: Empty Map URL."));
         return;
     }
+    
+    if (GetWorldTimerManager().IsTimerActive(LevelTransitionTimerHandle))
+    {
+        BARU_LOG(LogBaruSession, Warning, TEXT("RequestLevelTransition Ignored: Transition already in progress."));
+        return;
+    }
 
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Executing ServerTravel to: %s"), *TargetMapURL);
+    PendingTargetMapURL = TargetMapURL;
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Transition Requested to: %s. Broadcasting Cinematic RPC..."), *TargetMapURL);
     
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         if (ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get()))
         {
-            BaruPC->Client_PlayElevatorCinematic();
+            if (IsValid(BaruPC) && !BaruPC->IsPendingKillPending())
+            {
+                BaruPC->Client_PlayElevatorCinematic();
+            }
         }
     }
 
-    // TODO: [레벨 기믹] 엘리베이터 액터의 카운트다운/도어 연출 완료 후 본 함수 호출
-    GetWorld()->ServerTravel(TargetMapURL + TEXT("?listen"));
+    GetWorldTimerManager().SetTimer(
+        LevelTransitionTimerHandle,
+        this,
+        &ABaruGameMode::ExecuteServerTravel,
+        TransitionDelayDuration,
+        false
+    );
+}
+
+void ABaruGameMode::ExecuteServerTravel()
+{
+    if (PendingTargetMapURL.IsEmpty())
+    {
+        BARU_LOG(LogBaruSession, Error, TEXT("ExecuteServerTravel Failed: Empty Target Map URL."));
+        return;
+    }
+
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Executing ServerTravel to: %s"), *PendingTargetMapURL);
+    
+    // Todo : 레벨 기믹 구현시 해당 ServerTravel() 함수 호출하여 실제 레벨 이동
+    GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"));
 }
 
 
@@ -94,22 +157,7 @@ void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerAc
         VictimController ? *VictimController->GetName() : TEXT("None"), 
         KillerActor ? *KillerActor->GetName() : TEXT("None"));
 
-    if (CachedBaruGameState)
-    {
-        int32 CurrentAlive = 0;
-        for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
-        {
-            if (const ABaruPlayerState* PS = Iterator->Get()->GetPlayerState<ABaruPlayerState>())
-            {
-                if (!PS->IsDBNO())
-                {
-                    CurrentAlive++;
-                }
-            }
-        }
-        CachedBaruGameState->SetAlivePlayerCount(CurrentAlive);
-    }
-
+    UpdateAlivePlayerCount();
     CheckTeamWipe();
 }
 
@@ -117,7 +165,10 @@ void ABaruGameMode::CheckTeamWipe()
 {
     if (CachedBaruGameState && CachedBaruGameState->GetAlivePlayerCount() <= 0)
     {
-        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("Team wiped. Processing Failure Settlement."));
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("Team wiped. Canceling ongoing transition and Processing Settlement."));
+        
+        GetWorldTimerManager().ClearTimer(LevelTransitionTimerHandle);
+
         ProcessSettlement(false);
     }
 }
