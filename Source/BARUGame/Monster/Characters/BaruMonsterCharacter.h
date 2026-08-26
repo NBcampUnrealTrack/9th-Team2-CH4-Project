@@ -11,6 +11,7 @@
 class UBaruMonsterDataAsset;
 class UAbilitySystemComponent;
 class UBaruAbilitySystemComponent;
+class UBaruMonsterAttributeSet;
 
 UCLASS()
 class BARUGAME_API ABaruMonsterCharacter : public ACharacter, public IAbilitySystemInterface
@@ -32,6 +33,14 @@ protected:
 	// 몬스터의 어빌리티, 효과, 상태 태그를 관리하는 ASC
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Monster|GAS")
 	TObjectPtr<UBaruAbilitySystemComponent> AbilitySystemComponent;
+	
+	// 몬스터의 체력, 제압 게이지, 방어도를 보관
+	UPROPERTY(
+		VisibleAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|GAS"
+	)
+	TObjectPtr<UBaruMonsterAttributeSet> MonsterAttributeSet;
 
 public:
 	

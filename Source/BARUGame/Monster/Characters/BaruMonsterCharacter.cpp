@@ -5,6 +5,7 @@
 #include "Monster/AI/BaruMonsterAIController.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
+#include "Monster/Attributes/BaruMonsterAttributeSet.h"
 #include "BaruLog.h"
 
 
@@ -29,6 +30,11 @@ ABaruMonsterCharacter::ABaruMonsterCharacter()
 	AbilitySystemComponent = CreateDefaultSubobject<UBaruAbilitySystemComponent>(
 			TEXT("AbilitySystemComponent"));
 	
+	// 체력, 제압, 방어도를 보관할 AttributeSet 생성
+	MonsterAttributeSet = CreateDefaultSubobject<UBaruMonsterAttributeSet>(
+			TEXT("MonsterAttributeSet")
+		);
+	
 }
 
 
@@ -40,7 +46,7 @@ void ABaruMonsterCharacter::BeginPlay()
 	BARU_NET_LOG(
 		this,
 		LogBaruAI,
-		Verbose,
+		Log,
 		TEXT("Monster Character BeginPlay")
 	);
 	
@@ -55,14 +61,61 @@ void ABaruMonsterCharacter::BeginPlay()
 		);
 	}
 	
-	if (IsValid(AbilitySystemComponent))
+	// ASC 또는 AttributeSet 생성에 실패했다면 초기화 중단
+	if (!IsValid(AbilitySystemComponent) ||
+		!IsValid(MonsterAttributeSet))
 	{
-		// 몬스터는 ASC의 소유자와 실제 몸이 모두 자기 자신
-		AbilitySystemComponent->InitAbilityActorInfo(
+		BARU_NET_LOG(
 			this,
-			this
+			LogBaruGAS,
+			Error,
+			TEXT(
+				"Monster ASC or AttributeSet is invalid."
+			)
 		);
+
+		return;
 	}
+	
+	// 위에서 유효성을 확인했으므로 바로 초기화
+	// 몬스터는 ASC의 소유자와 실제 몸이 모두 자기 자신
+	AbilitySystemComponent->InitAbilityActorInfo(
+		this,
+		this
+		);
+	
+	
+	// 생성한 AttributeSet이 ASC에 등록됐는지 확인
+	const UBaruMonsterAttributeSet* RegisteredAttributeSet =
+		AbilitySystemComponent
+			->GetSet<UBaruMonsterAttributeSet>();
+
+	if (!IsValid(RegisteredAttributeSet))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruGAS,
+			Error,
+			TEXT(
+				"Monster AttributeSet is not registered."
+			)
+		);
+
+		return;
+	}
+
+	// 초기화 확인용 로그
+	BARU_NET_LOG(
+		this,
+		LogBaruGAS,
+		Log,
+		TEXT(
+			"Monster GAS initialized. "
+			"Health=%.1f, Suppression=%.1f"
+		),
+		RegisteredAttributeSet->GetHealth(),
+		RegisteredAttributeSet->GetSuppression()
+	);
 	
 }
 
@@ -74,9 +127,13 @@ const UBaruMonsterDataAsset* ABaruMonsterCharacter::GetMonsterDataAsset() const
 	return MonsterDataAsset.Get();
 }
 
+// 이 몬스터가 사용하는 ASC를 공용 인터페이스로 반환
 UAbilitySystemComponent* ABaruMonsterCharacter::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent.Get();
+		
 }
+
+
 
 
