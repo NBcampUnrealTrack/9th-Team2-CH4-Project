@@ -7,7 +7,7 @@
 #include "BaruPlayerState.generated.h"
 
 class UAbilitySystemComponent;
-class UBaruAttributeSet;
+class UBaruCoreAttributeSet;
 
 // UI Binding Delegate
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruReadyStatusChanged, bool, bIsReady);
@@ -30,7 +30,7 @@ public:
 	
 	// IAbilitySystemInterface
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-	UBaruAttributeSet* GetAttributeSet() const { return AttributeSet; }
+	UBaruCoreAttributeSet* GetAttributeSet() const { return AttributeSet; }
 	
 	// Getter & Setter
 	// Todo : GAS 시스템 완전 구축시 상태를 델리게이트로 중계하는 역할만 수행하도록 제한해야 함
@@ -73,7 +73,7 @@ protected:
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|GAS")
-	TObjectPtr<UBaruAttributeSet> AttributeSet;
+	TObjectPtr<UBaruCoreAttributeSet> AttributeSet;
 	
 	// Replicated Properties & RepNotifies
 	UPROPERTY(ReplicatedUsing = OnRep_IsReady, VisibleInstanceOnly, Category = "BARU|State")
