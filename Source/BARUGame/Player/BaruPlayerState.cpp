@@ -3,7 +3,6 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystem/BaruAttributeSet.h"
 #include "BaruLog.h"
-#include "Components/BaruHealthComponent.h"
 
 ABaruPlayerState::ABaruPlayerState()
 {
@@ -19,7 +18,6 @@ ABaruPlayerState::ABaruPlayerState()
 
 	// AttributeSet
 	AttributeSet = CreateDefaultSubobject<UBaruAttributeSet>(TEXT("AttributeSet"));
-	HealthComponent = CreateDefaultSubobject<UBaruHealthComponent>(TEXT("HealthComponent"));
 }
 
 void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -29,9 +27,6 @@ void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(ABaruPlayerState, bIsReady);
 	DOREPLIFETIME(ABaruPlayerState, bIsDBNO);
 	DOREPLIFETIME(ABaruPlayerState, Sanity);
-	
-	DOREPLIFETIME(ABaruPlayerState, Health);
-	DOREPLIFETIME(ABaruPlayerState, MaxHealth);
 }
 
 UAbilitySystemComponent* ABaruPlayerState::GetAbilitySystemComponent() const
@@ -96,28 +91,6 @@ void ABaruPlayerState::SetSanityValue(float NewSanity)
 	OnRep_Sanity();
 }
 
-void ABaruPlayerState::SetHealthValue(float NewHealth)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	Health = FMath::Clamp(NewHealth, 0.0f, MaxHealth);
-	OnRep_Health(); // 서버/리슨서버 호스트의 UI 및 델리게이트 즉시 방송
-}
-
-void ABaruPlayerState::SetMaxHealthValue(float NewMaxHealth)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	MaxHealth = FMath::Max(NewMaxHealth, 1.0f);
-	OnRep_MaxHealth();
-}
-
 // OnRep
 void ABaruPlayerState::OnRep_IsReady()
 {
@@ -135,15 +108,4 @@ void ABaruPlayerState::OnRep_Sanity()
 {
 	BARU_NET_LOG(this, LogBaruSanity, Verbose, TEXT("OnRep_Sanity: %.1f"), Sanity);
 	OnSanityChanged.Broadcast(Sanity);
-}
-
-void ABaruPlayerState::OnRep_Health()
-{
-	BARU_NET_LOG(this, LogBaruCombat, Verbose, TEXT("OnRep_Health: %.1f / %.1f"), Health, MaxHealth);
-	OnHealthChanged.Broadcast(Health, MaxHealth);
-}
-
-void ABaruPlayerState::OnRep_MaxHealth()
-{
-	OnHealthChanged.Broadcast(Health, MaxHealth);
 }

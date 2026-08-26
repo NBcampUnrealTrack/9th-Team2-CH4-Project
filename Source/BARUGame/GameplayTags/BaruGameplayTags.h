@@ -19,6 +19,7 @@ public:
 	FGameplayTag InputTag_Ping;
 	FGameplayTag InputTag_Ability_Primary;
 	FGameplayTag InputTag_Ability_Secondary;
+	FGameplayTag InputTag_Reload;
 
 	// State & Status Tags
 	FGameplayTag State_Dead;
@@ -30,8 +31,10 @@ public:
 	FGameplayTag State_Extracting;
 	FGameplayTag State_Extracted;
 	FGameplayTag State_Immune;
+	FGameplayTag State_Combat_Reloading;
 
 	// Combat & Damage Tags
+	FGameplayTag Data_Damage;
 	FGameplayTag Damage_Type_Physical;
 	FGameplayTag Damage_Type_Sanity;
 	FGameplayTag Damage_HitReaction_Light;
@@ -49,6 +52,9 @@ public:
 	FGameplayTag Event_Montage_End;
 	FGameplayTag Event_Noise_Footstep;
 	FGameplayTag Event_Noise_Loud;
+	
+	// Ability Tags
+	FGameplayTag Ability_Action_Reload;
 
 private:
 	static FBaruGameplayTags GameplayTags;
