@@ -42,6 +42,9 @@ ABaruMonsterAIController::ABaruMonsterAIController()
 		SightConfig->GetSenseImplementation()
 	);
 	
+	// 현재 게임 기준 인원인 5명만큼 목록 공간을 미리 준비
+	// 5명을 넘는다고 막히는 것은 아니며 필요하면 자동으로 늘어남
+	VisiblePlayerCandidates.Reserve(5);
 }
 
 
@@ -172,6 +175,53 @@ void ABaruMonsterAIController::BeginPlay()
 	);
 }
 
+void ABaruMonsterAIController::AddVisiblePlayerCandidate(
+	APawn* PlayerPawn
+)
+{
+	if (!IsValid(PlayerPawn))
+	{
+		return;
+	}
+
+	// 기존 목록에 남아 있는 무효한 플레이어부터 정리
+	RemoveInvalidPlayerCandidates();
+
+	// 이미 들어 있는 플레이어라면 중복으로 추가하지 않음
+	VisiblePlayerCandidates.AddUnique(
+		TWeakObjectPtr<APawn>(PlayerPawn)
+	);
+}
+
+void ABaruMonsterAIController::RemoveVisiblePlayerCandidate(
+	APawn* PlayerPawn
+)
+{
+	// 시야에서 놓친 플레이어와 이미 사라진 플레이어를 함께 제거
+	VisiblePlayerCandidates.RemoveAll(
+		[PlayerPawn](
+			const TWeakObjectPtr<APawn>& Candidate
+		)
+		{
+			return
+				!Candidate.IsValid() ||
+				Candidate.Get() == PlayerPawn;
+		}
+	);
+}
+
+void ABaruMonsterAIController::RemoveInvalidPlayerCandidates()
+{
+	VisiblePlayerCandidates.RemoveAll(
+		[](
+			const TWeakObjectPtr<APawn>& Candidate
+		)
+		{
+			return !Candidate.IsValid();
+		}
+	);
+}
+
 void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 	AActor* Actor,
 	FAIStimulus Stimulus
@@ -184,7 +234,7 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 	}
 
 	// 감지한 액터가 Pawn인지 확인
-	const APawn* SensedPawn = Cast<APawn>(Actor);
+	APawn* SensedPawn = Cast<APawn>(Actor);
 
 	if (!IsValid(SensedPawn))
 	{
@@ -195,22 +245,33 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 	// 다른 몬스터나 NPC는 무시
 	if (!SensedPawn->IsPlayerControlled())
 	{
+		// 이전에는 플레이어였지만 현재 조종되지 않는 Pawn이
+		// 목록에 남아 있을 가능성도 함께 정리
+		RemoveVisiblePlayerCandidate(SensedPawn);
 		return;
 	}
 
 	// 플레이어를 현재 정상적으로 보고 있는 경우
 	if (Stimulus.WasSuccessfullySensed())
 	{
+		// 발견한 플레이어를 추적 후보 목록에 추가
+		AddVisiblePlayerCandidate(SensedPawn);
+		
 		BARU_NET_LOG(
 			this,
 			LogBaruAI,
 			Log,
-			TEXT("Player detected: %s"),
-			*GetNameSafe(Actor)
+			TEXT("Player detected: %s / "
+			"Visible candidates: %d"),
+			*GetNameSafe(Actor),
+			VisiblePlayerCandidates.Num()
 		);
 
 		return;
 	}
+	
+	// 시야에서 놓친 플레이어를 후보 목록에서 제거
+	RemoveVisiblePlayerCandidate(SensedPawn);
 
 	// 이전에 발견한 플레이어를 시야에서 놓친 경우
 	BARU_NET_LOG(
@@ -219,9 +280,11 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		Log,
 		TEXT(
 			"Player lost: %s / "
+			"Visible candidates: %d / "
 			"Last known location: %s"
 		),
 		*GetNameSafe(Actor),
+		VisiblePlayerCandidates.Num(),
 		*Stimulus.StimulusLocation.ToString()
 	);
 }
