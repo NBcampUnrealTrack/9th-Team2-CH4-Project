@@ -18,7 +18,8 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
     GameplayTags.InputTag_Ping = Manager.AddNativeGameplayTag(TEXT("InputTag.Ping"), TEXT("Send Ping Action"));
     GameplayTags.InputTag_Ability_Primary = Manager.AddNativeGameplayTag(TEXT("InputTag.Ability.Primary"), TEXT("Primary Attack/Skill"));
     GameplayTags.InputTag_Ability_Secondary = Manager.AddNativeGameplayTag(TEXT("InputTag.Ability.Secondary"), TEXT("Secondary Attack/Skill"));
-
+    GameplayTags.InputTag_Reload = Manager.AddNativeGameplayTag(TEXT("InputTag.Reload"), TEXT("Reload Weapon Action"));
+    
     // State & Status Tags
     GameplayTags.State_Dead = Manager.AddNativeGameplayTag(TEXT("State.Dead"), TEXT("Actor is Dead"));
     GameplayTags.State_DBNO = Manager.AddNativeGameplayTag(TEXT("State.DBNO"), TEXT("Down But Not Out"));
@@ -29,13 +30,15 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
     GameplayTags.State_Extracting = Manager.AddNativeGameplayTag(TEXT("State.Extracting"), TEXT("Extracting in Progress"));
     GameplayTags.State_Extracted = Manager.AddNativeGameplayTag(TEXT("State.Extracted"), TEXT("Extraction Successful"));
     GameplayTags.State_Immune = Manager.AddNativeGameplayTag(TEXT("State.Immune"), TEXT("Invulnerable State"));
-
+    GameplayTags.State_Combat_Reloading = Manager.AddNativeGameplayTag(TEXT("State.Combat.Reloading"), TEXT("Actor is Reloading Weapon"));
+    
     // Combat & Damage Tags
+    GameplayTags.Data_Damage = Manager.AddNativeGameplayTag(TEXT("Data.Damage"), TEXT("SetByCaller Damage Magnitude Key"));
     GameplayTags.Damage_Type_Physical = Manager.AddNativeGameplayTag(TEXT("Damage.Type.Physical"), TEXT("Physical Damage"));
     GameplayTags.Damage_Type_Sanity = Manager.AddNativeGameplayTag(TEXT("Damage.Type.Sanity"), TEXT("Sanity Damage"));
     GameplayTags.Damage_HitReaction_Light = Manager.AddNativeGameplayTag(TEXT("Damage.HitReaction.Light"), TEXT("Light Hit Reaction"));
     GameplayTags.Damage_HitReaction_Heavy = Manager.AddNativeGameplayTag(TEXT("Damage.HitReaction.Heavy"), TEXT("Heavy Hit Reaction"));
-
+    
     // Interaction Tags
     GameplayTags.Interaction_Type_Pickup = Manager.AddNativeGameplayTag(TEXT("Interaction.Type.Pickup"), TEXT("Pickup Item"));
     GameplayTags.Interaction_Type_Door = Manager.AddNativeGameplayTag(TEXT("Interaction.Type.Door"), TEXT("Open/Close Door"));
@@ -49,5 +52,8 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
     GameplayTags.Event_Noise_Footstep = Manager.AddNativeGameplayTag(TEXT("Event.Noise.Footstep"), TEXT("Footstep Noise"));
     GameplayTags.Event_Noise_Loud = Manager.AddNativeGameplayTag(TEXT("Event.Noise.Loud"), TEXT("Gunfire or Loud Noise"));
 
+    // Ability Tags
+    GameplayTags.Ability_Action_Reload = Manager.AddNativeGameplayTag(TEXT("Ability.Action.Reload"), TEXT("Reload Ability Action"));
+    
     BARU_LOG(LogBaruGAS, Log, TEXT("FBaruGameplayTags initialized."));
 }
