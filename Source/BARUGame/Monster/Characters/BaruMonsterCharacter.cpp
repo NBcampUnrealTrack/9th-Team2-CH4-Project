@@ -4,8 +4,11 @@
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Monster/AI/BaruMonsterAIController.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
+
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
-#include "Monster/Attributes/BaruMonsterAttributeSet.h"
+#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
+#include "AbilitySystem/Attributes/BaruMonsterAttributeSet.h"
+
 #include "BaruLog.h"
 
 
@@ -30,10 +33,13 @@ ABaruMonsterCharacter::ABaruMonsterCharacter()
 	AbilitySystemComponent = CreateDefaultSubobject<UBaruAbilitySystemComponent>(
 			TEXT("AbilitySystemComponent"));
 	
-	// 체력, 제압, 방어도를 보관할 AttributeSet 생성
+	// 체력, 방어력, 이동속도를 보관하는 공용 AttributeSet 생성
+	CoreAttributeSet = CreateDefaultSubobject<UBaruCoreAttributeSet>(
+			TEXT("CoreAttributeSet"));
+	
+	// 제압 게이지와 제압 피해를 보관하는 몬스터 전용 AttributeSet 생성
 	MonsterAttributeSet = CreateDefaultSubobject<UBaruMonsterAttributeSet>(
-			TEXT("MonsterAttributeSet")
-		);
+			TEXT("MonsterAttributeSet"));
 	
 }
 
@@ -61,8 +67,9 @@ void ABaruMonsterCharacter::BeginPlay()
 		);
 	}
 	
-	// ASC 또는 AttributeSet 생성에 실패했다면 초기화 중단
+	// ASC와 두 AttributeSet 중 하나라도 생성되지 않았다면 초기화 중단
 	if (!IsValid(AbilitySystemComponent) ||
+		!IsValid(CoreAttributeSet) ||
 		!IsValid(MonsterAttributeSet))
 	{
 		BARU_NET_LOG(
@@ -70,7 +77,7 @@ void ABaruMonsterCharacter::BeginPlay()
 			LogBaruGAS,
 			Error,
 			TEXT(
-				"Monster ASC or AttributeSet is invalid."
+				"Monster ASC or AttributeSets are invalid."
 			)
 		);
 
@@ -86,18 +93,22 @@ void ABaruMonsterCharacter::BeginPlay()
 	
 	
 	// 생성한 AttributeSet이 ASC에 등록됐는지 확인
-	const UBaruMonsterAttributeSet* RegisteredAttributeSet =
-		AbilitySystemComponent
-			->GetSet<UBaruMonsterAttributeSet>();
+	const UBaruCoreAttributeSet* RegisteredCoreAttributeSet =
+		AbilitySystemComponent->GetSet<UBaruCoreAttributeSet>();
+	
+	// 몬스터 전용 AttributeSet이 ASC에 등록됐는지 확인
+	const UBaruMonsterAttributeSet* RegisteredMonsterAttributeSet =
+		AbilitySystemComponent->GetSet<UBaruMonsterAttributeSet>();
 
-	if (!IsValid(RegisteredAttributeSet))
+	if (!IsValid(RegisteredCoreAttributeSet) ||
+		!IsValid(RegisteredMonsterAttributeSet))
 	{
 		BARU_NET_LOG(
 			this,
 			LogBaruGAS,
 			Error,
 			TEXT(
-				"Monster AttributeSet is not registered."
+				"Monster AttributeSets are not registered."
 			)
 		);
 
@@ -113,8 +124,8 @@ void ABaruMonsterCharacter::BeginPlay()
 			"Monster GAS initialized. "
 			"Health=%.1f, Suppression=%.1f"
 		),
-		RegisteredAttributeSet->GetHealth(),
-		RegisteredAttributeSet->GetSuppression()
+		RegisteredCoreAttributeSet->GetHealth(),
+		RegisteredMonsterAttributeSet->GetSuppression()
 	);
 	
 }

@@ -11,7 +11,9 @@
 class UBaruMonsterDataAsset;
 class UAbilitySystemComponent;
 class UBaruAbilitySystemComponent;
+class UBaruCoreAttributeSet;
 class UBaruMonsterAttributeSet;
+
 
 UCLASS()
 class BARUGAME_API ABaruMonsterCharacter : public ACharacter, public IAbilitySystemInterface
@@ -34,12 +36,21 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Monster|GAS")
 	TObjectPtr<UBaruAbilitySystemComponent> AbilitySystemComponent;
 	
-	// 몬스터의 체력, 제압 게이지, 방어도를 보관
+	// 체력, 방어력, 이동속도처럼 모두가 사용하는 공용 수치
 	UPROPERTY(
 		VisibleAnywhere,
 		BlueprintReadOnly,
 		Category = "Monster|GAS"
 	)
+	TObjectPtr<UBaruCoreAttributeSet> CoreAttributeSet;
+
+	// 제압 게이지처럼 몬스터만 사용하는 수치
+	UPROPERTY(
+		VisibleAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|GAS"
+	)
+	
 	TObjectPtr<UBaruMonsterAttributeSet> MonsterAttributeSet;
 
 public:
