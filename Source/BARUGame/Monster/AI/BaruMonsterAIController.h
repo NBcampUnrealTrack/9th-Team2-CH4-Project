@@ -45,5 +45,7 @@ private:
 	
 	//DataAsset에 저장된 시각 설정값을 AIPerception의 SightConfig에 적용
 	void ApplySightSettings(const UBaruMonsterDataAsset& MonsterDataAsset);
+	// AI 감각 기관이 준비된 다음 몬스터의 시야 설정을 적용
+	void InitializeSightFromControlledMonster();
 	
 };

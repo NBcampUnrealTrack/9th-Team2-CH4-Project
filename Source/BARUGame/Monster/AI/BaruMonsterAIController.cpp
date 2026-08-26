@@ -7,6 +7,7 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
+#include "TimerManager.h"
 #include "BaruLog.h"
 
 
@@ -30,6 +31,17 @@ ABaruMonsterAIController::ABaruMonsterAIController()
 	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
 	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
 	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+	
+	// 게임이 시작되기 전에 시각 감각을 감각 기관에 미리 등록
+	MonsterPerceptionComponent->ConfigureSense(
+		*SightConfig
+	);
+
+	// 여러 감각 중 시각을 기본 감각으로 지정
+	MonsterPerceptionComponent->SetDominantSense(
+		SightConfig->GetSenseImplementation()
+	);
+	
 }
 
 
@@ -44,9 +56,20 @@ void ABaruMonsterAIController::OnPossess(APawn* InPawn)
 		return;
 	}
 
-	// 전달받은 Pawn이 우리가 만든 몬스터인지 확인
+	// 지금은 감각 기관의 등록이 끝나지 않았을 수 있으므로
+	// 다음 프레임에 시야 설정을 한 번 적용
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ABaruMonsterAIController::InitializeSightFromControlledMonster
+	);
+}
+
+void ABaruMonsterAIController::InitializeSightFromControlledMonster()
+{
+	// 다음 프레임 사이에 조종 대상이 바뀌었을 수도 있으므로
+	// 현재 조종 중인 Pawn을 다시 가져옴
 	const ABaruMonsterCharacter* MonsterCharacter =
-		Cast<ABaruMonsterCharacter>(InPawn);
+		Cast<ABaruMonsterCharacter>(GetPawn());
 
 	if (!IsValid(MonsterCharacter))
 	{
@@ -54,7 +77,7 @@ void ABaruMonsterAIController::OnPossess(APawn* InPawn)
 			this,
 			LogBaruAI,
 			Error,
-			TEXT("Possessed Pawn is not a BaruMonsterCharacter.")
+			TEXT("Controlled Pawn is not a BaruMonsterCharacter.")
 		);
 
 		return;
@@ -76,7 +99,7 @@ void ABaruMonsterAIController::OnPossess(APawn* InPawn)
 		return;
 	}
 
-	// 설정표의 값을 실제 시각 감지 설정에 적용
+	// 감각 기관이 준비된 뒤 시야 거리와 시야각을 적용
 	ApplySightSettings(*MonsterDataAsset);
 }
 
@@ -102,23 +125,13 @@ void ABaruMonsterAIController::ApplySightSettings(
 		MonsterDataAsset.SightMemoryDuration
 	);
 
-	// 완성된 시각 설정을 감각 컴포넌트에 등록
-	MonsterPerceptionComponent->ConfigureSense(
-		*SightConfig
-	);
-
-	// 여러 감각 중 시각을 기본 감각으로 지정
-	MonsterPerceptionComponent->SetDominantSense(
-		SightConfig->GetSenseImplementation()
-	);
-
 	// 실행 중인 감각 시스템이 변경된 설정을 재설정
 	MonsterPerceptionComponent->RequestStimuliListenerUpdate();
 
 	BARU_NET_LOG(
 		this,
 		LogBaruAI,
-		Verbose,
+		Log,
 		TEXT(
 			"Sight settings applied. "
 			"Sight=%.1f, LoseSight=%.1f, HalfAngle=%.1f"
