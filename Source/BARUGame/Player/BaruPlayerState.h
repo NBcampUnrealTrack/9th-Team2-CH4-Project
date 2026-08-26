@@ -4,15 +4,19 @@
 #include "GameFramework/PlayerState.h"
 #include "AbilitySystemInterface.h"
 #include "GameplayTagContainer.h"
+
+// UI Binding Delegate (generated.h 위에 선언)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruReadyStatusChanged, bool, bIsReady);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDBNOStatusChanged, bool, bIsDBNO);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSanity);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruHealthChanged, float, CurrentHealth, float, MaxHealth);
+
+// generated.h는 항상 include 구문 및 델리게이트 선언 최하단에 위치해야 합니다.
 #include "BaruPlayerState.generated.h"
 
 class UAbilitySystemComponent;
 class UBaruAttributeSet;
-
-// UI Binding Delegate
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruReadyStatusChanged, bool, bIsReady);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDBNOStatusChanged, bool, bIsDBNO);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSanity);
+class UBaruHealthComponent;
 
 /**
  * 플레이어 상태 및 ASC, AttributeSet 소유
@@ -20,76 +24,109 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSani
 UCLASS()
 class BARUGAME_API ABaruPlayerState : public APlayerState, public IAbilitySystemInterface
 {
-	GENERATED_BODY()
-	
+    GENERATED_BODY()
+    
 public:
-	ABaruPlayerState();
+    ABaruPlayerState();
 
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-	
-	// IAbilitySystemInterface
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-	UBaruAttributeSet* GetAttributeSet() const { return AttributeSet; }
-	
-	// Getter & Setter
-	// Todo : GAS 시스템 완전 구축시 상태를 델리게이트로 중계하는 역할만 수행하도록 제한해야 함
-	UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
-	bool IsReady() const { return bIsReady; }
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    
+    // IAbilitySystemInterface
+    virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+    UBaruAttributeSet* GetAttributeSet() const { return AttributeSet; }
+    
+    // HealthComponent Getter
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    UBaruHealthComponent* GetHealthComponent() const { return HealthComponent; }
 
-	UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
-	bool IsDBNO() const { return bIsDBNO; }
+    // Getter & Setter
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    bool IsReady() const { return bIsReady; }
 
-	UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
-	float GetSanity() const { return Sanity; }
-	
-	// Server RPCs
-	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|PlayerState")
-	void Server_SetReadyStatus(bool bNewReady);
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    bool IsDBNO() const { return bIsDBNO; }
 
-	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|PlayerState")
-	void Server_UpdateNickname(const FString& NewNickname);
-	
-	UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
-	void SetDBNOState(bool bNewDBNO);
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    float GetSanity() const { return Sanity; }
 
-	UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
-	void SetSanityValue(float NewSanity);
-	
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    float GetHealth() const { return Health; }
+
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    float GetMaxHealth() const { return MaxHealth; }
+
+    // Server RPCs
+    UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|PlayerState")
+    void Server_SetReadyStatus(bool bNewReady);
+
+    UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|PlayerState")
+    void Server_UpdateNickname(const FString& NewNickname);
+    
+    UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
+    void SetDBNOState(bool bNewDBNO);
+
+    UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
+    void SetSanityValue(float NewSanity);
+
+    UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
+    void SetHealthValue(float NewHealth);
+
+    UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
+    void SetMaxHealthValue(float NewMaxHealth);
+    
 public:
-	// UI 델리게이트
-	UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
-	FOnBaruReadyStatusChanged OnReadyStatusChanged;
+    // UI 델리게이트
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
+    FOnBaruReadyStatusChanged OnReadyStatusChanged;
 
-	UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
-	FOnBaruDBNOStatusChanged OnDBNOStatusChanged;
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
+    FOnBaruDBNOStatusChanged OnDBNOStatusChanged;
 
-	UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
-	FOnBaruSanityChanged OnSanityChanged;
-	
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
+    FOnBaruSanityChanged OnSanityChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
+    FOnBaruHealthChanged OnHealthChanged;
+    
 protected:
-	// GAS Components 부착
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|GAS")
-	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
+    // GAS Components 부착
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|GAS")
+    TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|GAS")
-	TObjectPtr<UBaruAttributeSet> AttributeSet;
-	
-	// Replicated Properties & RepNotifies
-	UPROPERTY(ReplicatedUsing = OnRep_IsReady, VisibleInstanceOnly, Category = "BARU|State")
-	bool bIsReady = false;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|GAS")
+    TObjectPtr<UBaruAttributeSet> AttributeSet;
 
-	UPROPERTY(ReplicatedUsing = OnRep_IsDBNO, VisibleInstanceOnly, Category = "BARU|State")
-	bool bIsDBNO = false;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+    TObjectPtr<UBaruHealthComponent> HealthComponent;
+    
+    // Replicated Properties & RepNotifies
+    UPROPERTY(ReplicatedUsing = OnRep_IsReady, VisibleInstanceOnly, Category = "BARU|State")
+    bool bIsReady = false;
 
-	UPROPERTY(ReplicatedUsing = OnRep_Sanity, VisibleInstanceOnly, Category = "BARU|State")
-	float Sanity = 100.0f;
+    UPROPERTY(ReplicatedUsing = OnRep_IsDBNO, VisibleInstanceOnly, Category = "BARU|State")
+    bool bIsDBNO = false;
 
-	UFUNCTION()
-	virtual void OnRep_IsReady();
+    UPROPERTY(ReplicatedUsing = OnRep_Sanity, VisibleInstanceOnly, Category = "BARU|State")
+    float Sanity = 100.0f;
 
-	UFUNCTION()
-	virtual void OnRep_IsDBNO();
+    UPROPERTY(ReplicatedUsing = OnRep_Health, VisibleInstanceOnly, Category = "BARU|State")
+    float Health = 100.0f;
 
-	UFUNCTION()
-	virtual void OnRep_Sanity();
+    UPROPERTY(ReplicatedUsing = OnRep_MaxHealth, VisibleInstanceOnly, Category = "BARU|State")
+    float MaxHealth = 100.0f;
+
+    UFUNCTION()
+    virtual void OnRep_IsReady();
+
+    UFUNCTION()
+    virtual void OnRep_IsDBNO();
+
+    UFUNCTION()
+    virtual void OnRep_Sanity();
+
+    UFUNCTION()
+    virtual void OnRep_Health();
+
+    UFUNCTION()
+    virtual void OnRep_MaxHealth();
 };
