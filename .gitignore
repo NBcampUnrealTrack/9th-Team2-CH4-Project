@@ -314,3 +314,5 @@ FodyWeavers.xsd
 
 # Git LFS 용량 절약을 위한 외부 공유 에셋 격리
 /Content/External/
+BARUGame.slnx
+Automation_BARUGame.slnx
