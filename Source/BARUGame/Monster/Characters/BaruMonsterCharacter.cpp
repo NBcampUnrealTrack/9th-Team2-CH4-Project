@@ -4,6 +4,7 @@
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Monster/AI/BaruMonsterAIController.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
+#include "AbilitySystem/BaruAbilitySystemComponent.h"
 #include "BaruLog.h"
 
 
@@ -24,6 +25,10 @@ ABaruMonsterCharacter::ABaruMonsterCharacter()
 	// 맵에 직접 배치되거나 게임 중 생성된 몬스터 모두 자동으로 AIController의 조종을 받도록 설정
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	
+	// 모든 몬스터가 자신의 ASC 인스턴스를 가지도록 생성
+	AbilitySystemComponent = CreateDefaultSubobject<UBaruAbilitySystemComponent>(
+			TEXT("AbilitySystemComponent"));
+	
 }
 
 
@@ -35,7 +40,7 @@ void ABaruMonsterCharacter::BeginPlay()
 	BARU_NET_LOG(
 		this,
 		LogBaruAI,
-		Log,
+		Verbose,
 		TEXT("Monster Character BeginPlay")
 	);
 	
@@ -50,6 +55,15 @@ void ABaruMonsterCharacter::BeginPlay()
 		);
 	}
 	
+	if (IsValid(AbilitySystemComponent))
+	{
+		// 몬스터는 ASC의 소유자와 실제 몸이 모두 자기 자신
+		AbilitySystemComponent->InitAbilityActorInfo(
+			this,
+			this
+		);
+	}
+	
 }
 
 //몬스터 블루프린트에서 지정한 DataAsset을 읽을 때 사용
@@ -60,5 +74,9 @@ const UBaruMonsterDataAsset* ABaruMonsterCharacter::GetMonsterDataAsset() const
 	return MonsterDataAsset.Get();
 }
 
+UAbilitySystemComponent* ABaruMonsterCharacter::GetAbilitySystemComponent() const
+{
+	return AbilitySystemComponent.Get();
+}
 
 
