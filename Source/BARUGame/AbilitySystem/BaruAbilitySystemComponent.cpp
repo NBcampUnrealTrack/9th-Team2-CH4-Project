@@ -115,16 +115,29 @@ bool UBaruAbilitySystemComponent::TryActivateAbilityByTag(FGameplayTag AbilityTa
 {
     if (!AbilityTag.IsValid())
     {
+        BARU_NET_LOG(GetAvatarActor(), LogBaruGAS, Warning, TEXT("TryActivateAbilityByTag Failed: Invalid Tag."));
         return false;
     }
 
     bool bSuccess = false;
     for (const FGameplayAbilitySpec& Spec : ActivatableAbilities.Items)
     {
-        if (Spec.Ability && Spec.Ability->GetAssetTags().HasTagExact(AbilityTag))
+        if (!Spec.Ability)
+        {
+            continue;
+        }
+        
+        // 고유 태그 검사
+        const bool bHasAssetTag = Spec.Ability->GetAssetTags().HasTagExact(AbilityTag);
+        
+        // 런타임 동적 Spec 부여 태그 검사
+        const bool bHasDynamicTag = Spec.GetDynamicSpecSourceTags().HasTagExact(AbilityTag);
+
+        if (bHasAssetTag || bHasDynamicTag)
         {
             bSuccess |= TryActivateAbility(Spec.Handle);
         }
     }
+    
     return bSuccess;
 }
