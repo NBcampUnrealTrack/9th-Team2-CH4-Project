@@ -1,7 +1,7 @@
 #include "Player/BaruPlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "AbilitySystemComponent.h"
-#include "AbilitySystem/BaruAttributeSet.h"
+#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 #include "BaruLog.h"
 
 ABaruPlayerState::ABaruPlayerState()
@@ -17,7 +17,7 @@ ABaruPlayerState::ABaruPlayerState()
 	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 
 	// AttributeSet
-	AttributeSet = CreateDefaultSubobject<UBaruAttributeSet>(TEXT("AttributeSet"));
+	AttributeSet = CreateDefaultSubobject<UBaruCoreAttributeSet>(TEXT("AttributeSet"));
 }
 
 void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -91,7 +91,7 @@ void ABaruPlayerState::SetSanityValue(float NewSanity)
 	OnRep_Sanity();
 }
 
-// [Client] OnRep
+// OnRep
 void ABaruPlayerState::OnRep_IsReady()
 {
 	BARU_NET_LOG(this, LogBaruSession, Verbose, TEXT("OnRep_IsReady: %d"), bIsReady);
