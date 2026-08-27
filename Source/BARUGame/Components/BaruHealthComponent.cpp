@@ -1,122 +1,103 @@
 #include "BaruHealthComponent.h"
-#include "Net/UnrealNetwork.h"
-#include "GameFramework/Actor.h"
-#include "NativeGameplayTags.h"
-
-// 로그 매크로 포함 
-// #include "BaruLog.h" 
-
-// UI 및 외부 시스템 전달용 글로벌 태그 선언 
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Message_Combat_HealthChanged, "Message.Combat.HealthChanged");
+#include "AbilitySystemComponent.h"
+#include "Player/BaruPlayerState.h"
+#include "GameplayEffectExtension.h"
+#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 
 UBaruHealthComponent::UBaruHealthComponent()
 {
-	// Tick 최소화 원칙: 체력 관리는 이벤트 기반이므로 Tick 완전 비활성화
-	PrimaryComponentTick.bCanEverTick = false;
-
-	MaxHealth = 100.0f;
-	Health = 0.0f;
-	bIsDead = false;
-
-	// 생성자 내부에서 GetWorld(), Subsystem 호출 금지 (CDO 침범 방지)
+    PrimaryComponentTick.bCanEverTick = false;
+    bIsDead = false;
 }
 
-void UBaruHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+void UBaruHealthComponent::OnUnregister()
 {
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	// 상태 복제 등록
-	DOREPLIFETIME(UBaruHealthComponent, MaxHealth);
-	DOREPLIFETIME(UBaruHealthComponent, Health);
-	DOREPLIFETIME(UBaruHealthComponent, bIsDead);
+    UninitializeFromAbilitySystem();
+    Super::OnUnregister();
 }
 
-void UBaruHealthComponent::BeginPlay()
+void UBaruHealthComponent::InitializeWithAbilitySystem(UAbilitySystemComponent* InASC)
 {
-	Super::BeginPlay();
+    if (!InASC || AbilitySystemComponent == InASC)
+    {
+        return;
+    }
 
-	// 서버에서만 초기 체력 설정 (데이터 주권)
-	if (GetOwner() && GetOwner()->HasAuthority())
-	{
-		Health = MaxHealth;
-	}
+    if (AbilitySystemComponent)
+    {
+        UninitializeFromAbilitySystem();
+    }
+
+    AbilitySystemComponent = InASC;
+
+    // Attribute 변경 이벤트 바인딩
+    AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetHealthAttribute())
+        .AddUObject(this, &UBaruHealthComponent::HandleHealthChanged);
+
+    AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetMaxHealthAttribute())
+        .AddUObject(this, &UBaruHealthComponent::HandleMaxHealthChanged);
+
+    // 초기값 강제 갱신 (UI 세팅용)
+    const float CurrentHealth = GetHealth();
+    OnHealthChanged.Broadcast(this, CurrentHealth, CurrentHealth, nullptr);
 }
 
-void UBaruHealthComponent::ApplyDamage(float DamageAmount, AActor* Instigator)
+void UBaruHealthComponent::UninitializeFromAbilitySystem()
 {
-	//  데이터 주권자: 체력 및 피격 판정은 오직 서버에서만 확정
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		// BARU_NET_LOG(GetWorld(), LogBaruCombat, Warning, TEXT("ApplyDamage called on Client. Ignoring request for %s"), *GetNameSafe(GetOwner()));
-		return;
-	}
-
-	if (bIsDead || DamageAmount <= 0.0f)
-	{
-		return;
-	}
-
-	const float OldHealth = Health;
-	Health = FMath::Clamp(Health - DamageAmount, 0.0f, MaxHealth);
-
-	// 서버 측 자체 브로드캐스트 (서버 로컬 연출 및 AI 판단용)
-	BroadcastHealthChanged(OldHealth, Health, Instigator);
-
-	// 사망 판정
-	if (Health <= 0.0f && !bIsDead)
-	{
-		bIsDead = true;
-		OnDeath.Broadcast(Instigator);
-		
-		// BARU_NET_LOG(GetWorld(), LogBaruCombat, Log, TEXT("%s is Dead. Instigator: %s"), *GetNameSafe(GetOwner()), *GetNameSafe(Instigator));
-	}
+    if (AbilitySystemComponent)
+    {
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetHealthAttribute()).RemoveAll(this);
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetMaxHealthAttribute()).RemoveAll(this);
+        AbilitySystemComponent = nullptr;
+    }
 }
 
-void UBaruHealthComponent::ApplyHeal(float HealAmount, AActor* Instigator)
+float UBaruHealthComponent::GetHealth() const
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		return;
-	}
-
-	if (bIsDead || HealAmount <= 0.0f)
-	{
-		return;
-	}
-
-	const float OldHealth = Health;
-	Health = FMath::Clamp(Health + HealAmount, 0.0f, MaxHealth);
-
-	BroadcastHealthChanged(OldHealth, Health, Instigator);
+    if (AbilitySystemComponent)
+    {
+        return AbilitySystemComponent->GetNumericAttribute(UBaruCoreAttributeSet::GetHealthAttribute());
+    }
+    return 0.0f;
 }
 
-void UBaruHealthComponent::OnRep_Health(float OldHealth)
+float UBaruHealthComponent::GetMaxHealth() const
 {
-	// 클라이언트는 OnRep에서 로컬 연출 및 UI 갱신만 수행
-	BroadcastHealthChanged(OldHealth, Health, nullptr);
+    if (AbilitySystemComponent)
+    {
+        return AbilitySystemComponent->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
+    }
+    return 0.0f;
 }
 
-void UBaruHealthComponent::OnRep_IsDead()
+void UBaruHealthComponent::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)
 {
-	// 클라이언트 측 사망 연출 실행
-	if (bIsDead)
-	{
-		OnDeath.Broadcast(nullptr);
-	}
+    AActor* Instigator = nullptr;
+
+    if (ChangeData.GEModData)
+    {
+        const FGameplayEffectContextHandle& EffectContext = ChangeData.GEModData->EffectSpec.GetEffectContext();
+        Instigator = EffectContext.GetInstigator();
+    }
+
+    OnHealthChanged.Broadcast(this, ChangeData.OldValue, ChangeData.NewValue, Instigator);
+
+    // 데미지를 입고 처음 체력이 0 이하가 되었을 때 한 번만 사망 판정
+    if (ChangeData.NewValue <= 0.0f && !bIsDead)
+    {
+        bIsDead = true;
+        OnDeath.Broadcast(Instigator);
+    }
+    // 부활/회복 시 사망 상태 해제
+    else if (ChangeData.NewValue > 0.0f && bIsDead)
+    {
+        bIsDead = false;
+    }
 }
 
-void UBaruHealthComponent::BroadcastHealthChanged(float OldHealth, float NewHealth, AActor* Instigator)
+void UBaruHealthComponent::HandleMaxHealthChanged(const FOnAttributeChangeData& ChangeData)
 {
-	// 1. 해당 액터(Owner) 로컬 델리게이트 발송 (애니메이션, 이펙트 재생용)
-	OnHealthChanged.Broadcast(this, OldHealth, NewHealth, Instigator);
-
-	// 2. UI 및 타 시스템 디커플링용 Gameplay Message 발송 
-	if (UWorld* World = GetWorld())
-	{
-		FBaruHealthChangedMessage Message;
-		Message.OwnerActor = GetOwner();
-		Message.CurrentHealth = NewHealth;
-		Message.MaxHealth = MaxHealth;
-		
-	}
+    // 최대 체력 변경 시에도 UI 갱신을 위해 현재 체력 기준으로 브로드캐스트
+    const float CurrentHealth = GetHealth();
+    OnHealthChanged.Broadcast(this, CurrentHealth, CurrentHealth, nullptr);
 }
