@@ -14,17 +14,17 @@ UBaruActivatableWidget::GetDesiredInputConfig() const
 		return FUIInputConfig(
 			ECommonInputMode::All,
 			GameMouseCaptureMode);
-		
+
 	case EBaruWidgetInputMode::Game:
 		return FUIInputConfig(
 			ECommonInputMode::Game,
 			GameMouseCaptureMode);
-		
+
 	case EBaruWidgetInputMode::Menu:
 		return FUIInputConfig(
 			ECommonInputMode::Menu,
 			EMouseCaptureMode::NoCapture);
-		
+
 	case EBaruWidgetInputMode::Default:
 	default:
 		// 값이 없으면 Common UI가 현재 입력 설정을

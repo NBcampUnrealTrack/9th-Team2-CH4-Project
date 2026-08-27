@@ -19,7 +19,7 @@ UBaruMainHUDWidget::UBaruMainHUDWidget(
 void UBaruMainHUDWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
-	
+
 	BARU_LOG(
 		LogBaruUI,
 		Log,
@@ -34,6 +34,6 @@ void UBaruMainHUDWidget::NativeOnDeactivated()
 		Log,
 		TEXT("Main HUD가 비활성화되었습니다. Widget=%s"),
 		*GetName());
-	
+
 	Super::NativeOnDeactivated();
 }
