@@ -2,7 +2,7 @@
 #include "AbilitySystemComponent.h"
 #include "Player/BaruPlayerState.h"
 #include "GameplayEffectExtension.h"
-#include "AbilitySystem/BaruAttributeSet.h"
+#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 
 UBaruHealthComponent::UBaruHealthComponent()
 {
@@ -31,10 +31,10 @@ void UBaruHealthComponent::InitializeWithAbilitySystem(UAbilitySystemComponent* 
     AbilitySystemComponent = InASC;
 
     // Attribute 변경 이벤트 바인딩
-    AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruAttributeSet::GetHealthAttribute())
+    AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetHealthAttribute())
         .AddUObject(this, &UBaruHealthComponent::HandleHealthChanged);
 
-    AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruAttributeSet::GetMaxHealthAttribute())
+    AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetMaxHealthAttribute())
         .AddUObject(this, &UBaruHealthComponent::HandleMaxHealthChanged);
 
     // 초기값 강제 갱신 (UI 세팅용)
@@ -46,8 +46,8 @@ void UBaruHealthComponent::UninitializeFromAbilitySystem()
 {
     if (AbilitySystemComponent)
     {
-        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruAttributeSet::GetHealthAttribute()).RemoveAll(this);
-        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruAttributeSet::GetMaxHealthAttribute()).RemoveAll(this);
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetHealthAttribute()).RemoveAll(this);
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetMaxHealthAttribute()).RemoveAll(this);
         AbilitySystemComponent = nullptr;
     }
 }
@@ -56,7 +56,7 @@ float UBaruHealthComponent::GetHealth() const
 {
     if (AbilitySystemComponent)
     {
-        return AbilitySystemComponent->GetNumericAttribute(UBaruAttributeSet::GetHealthAttribute());
+        return AbilitySystemComponent->GetNumericAttribute(UBaruCoreAttributeSet::GetHealthAttribute());
     }
     return 0.0f;
 }
@@ -65,7 +65,7 @@ float UBaruHealthComponent::GetMaxHealth() const
 {
     if (AbilitySystemComponent)
     {
-        return AbilitySystemComponent->GetNumericAttribute(UBaruAttributeSet::GetMaxHealthAttribute());
+        return AbilitySystemComponent->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
     }
     return 0.0f;
 }

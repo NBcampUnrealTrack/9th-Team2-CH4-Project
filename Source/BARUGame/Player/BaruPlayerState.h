@@ -15,7 +15,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruHealthChanged, float, Curren
 #include "BaruPlayerState.generated.h"
 
 class UAbilitySystemComponent;
-class UBaruAttributeSet;
+class UBaruCoreAttributeSet;
+class UBaruPlayerAttributeSet;
 class UBaruHealthComponent;
 
 /**
@@ -34,7 +35,9 @@ public:
     
     // IAbilitySystemInterface
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-    UBaruAttributeSet* GetAttributeSet() const { return AttributeSet; }
+    
+    UBaruCoreAttributeSet* GetCoreAttributeSet() const { return CoreAttributeSet; }
+    UBaruPlayerAttributeSet* GetPlayerAttributeSet() const { return PlayerAttributeSet; }
     
     // HealthComponent Getter
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
@@ -95,7 +98,10 @@ protected:
     TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|GAS")
-    TObjectPtr<UBaruAttributeSet> AttributeSet;
+    TObjectPtr<UBaruCoreAttributeSet> CoreAttributeSet;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|GAS")
+    TObjectPtr<UBaruPlayerAttributeSet> PlayerAttributeSet;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
     TObjectPtr<UBaruHealthComponent> HealthComponent;
