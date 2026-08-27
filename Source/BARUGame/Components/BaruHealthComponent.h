@@ -6,7 +6,6 @@
 #include "BaruHealthComponent.generated.h"
 
 class UAbilitySystemComponent;
-class UBaruAttributeSet;
 struct FOnAttributeChangeData;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FBaruOnHealthChangedSignature, class UBaruHealthComponent*, HealthComp, float, OldHealth, float, NewHealth, AActor*, Instigator);

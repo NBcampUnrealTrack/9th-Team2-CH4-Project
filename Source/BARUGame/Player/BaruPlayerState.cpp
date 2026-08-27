@@ -2,6 +2,7 @@
 #include "Net/UnrealNetwork.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
+#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "BaruLog.h"
 
 ABaruPlayerState::ABaruPlayerState()
@@ -17,7 +18,8 @@ ABaruPlayerState::ABaruPlayerState()
 	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 
 	// AttributeSet
-	AttributeSet = CreateDefaultSubobject<UBaruCoreAttributeSet>(TEXT("AttributeSet"));
+	CoreAttributeSet = CreateDefaultSubobject<UBaruCoreAttributeSet>(TEXT("CoreAttributeSet"));
+	PlayerAttributeSet = CreateDefaultSubobject<UBaruPlayerAttributeSet>(TEXT("PlayerAttributeSet"));
 }
 
 void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -91,6 +93,29 @@ void ABaruPlayerState::SetSanityValue(float NewSanity)
 	OnRep_Sanity();
 }
 
+void ABaruPlayerState::SetHealthValue(float NewHealth)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	Health = FMath::Clamp(NewHealth, 0.0f, MaxHealth);
+	OnRep_Health();
+}
+
+void ABaruPlayerState::SetMaxHealthValue(float NewMaxHealth)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	MaxHealth = FMath::Max(NewMaxHealth, 1.0f);
+	Health = FMath::Clamp(Health, 0.0f, MaxHealth);
+	OnRep_MaxHealth();
+}
+
 // OnRep
 void ABaruPlayerState::OnRep_IsReady()
 {
@@ -108,4 +133,16 @@ void ABaruPlayerState::OnRep_Sanity()
 {
 	BARU_NET_LOG(this, LogBaruSanity, Verbose, TEXT("OnRep_Sanity: %.1f"), Sanity);
 	OnSanityChanged.Broadcast(Sanity);
+}
+
+void ABaruPlayerState::OnRep_Health()
+{
+	BARU_NET_LOG(this, LogBaruCombat, Verbose, TEXT("OnRep_Health: %.1f/%.1f"), Health, MaxHealth);
+	OnHealthChanged.Broadcast(Health, MaxHealth);
+}
+
+void ABaruPlayerState::OnRep_MaxHealth()
+{
+	BARU_NET_LOG(this, LogBaruCombat, Verbose, TEXT("OnRep_MaxHealth: %.1f"), MaxHealth);
+	OnHealthChanged.Broadcast(Health, MaxHealth);
 }
