@@ -142,7 +142,6 @@ const UBaruMonsterDataAsset* ABaruMonsterCharacter::GetMonsterDataAsset() const
 UAbilitySystemComponent* ABaruMonsterCharacter::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent.Get();
-		
 }
 
 
