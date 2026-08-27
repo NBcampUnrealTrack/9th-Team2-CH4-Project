@@ -18,7 +18,11 @@ class BARUGAME_API UBaruMainHUDWidget
 	: public UBaruActivatableWidget
 {
 	GENERATED_BODY()
-	
+
+public:
+	UBaruMainHUDWidget(
+		const FObjectInitializer& ObjectInitializer);
+
 protected:
 	/**
 	 * Main HUD가 활성화 될 때 호출된다.

@@ -38,6 +38,7 @@ public class BARUGame : ModuleRules
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
+			"CommonInput",
 			"Slate",
 			"SlateCore",
 			"UMG"
