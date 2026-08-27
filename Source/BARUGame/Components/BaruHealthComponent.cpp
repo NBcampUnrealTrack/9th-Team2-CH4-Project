@@ -3,11 +3,13 @@
 #include "Player/BaruPlayerState.h"
 #include "GameplayEffectExtension.h"
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
+#include "Interfaces/CombatInterface.h" 
+
 
 UBaruHealthComponent::UBaruHealthComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    bIsDead = false;
+    // [삭제] bIsDead = false; 초기화 삭제
 }
 
 void UBaruHealthComponent::OnUnregister()
@@ -70,6 +72,19 @@ float UBaruHealthComponent::GetMaxHealth() const
     return 0.0f;
 }
 
+// [수정] IsDead() 함수 구현: CombatInterface를 통해 사망 여부를 정확히 쿼리합니다.
+bool UBaruHealthComponent::IsDead() const
+{
+    if (AActor* Owner = GetOwner())
+    {
+        if (Owner->Implements<UCombatInterface>())
+        {
+            return ICombatInterface::Execute_IsDead(Owner);
+        }
+    }
+    return false;
+}
+
 void UBaruHealthComponent::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)
 {
     AActor* Instigator = nullptr;
@@ -80,19 +95,10 @@ void UBaruHealthComponent::HandleHealthChanged(const FOnAttributeChangeData& Cha
         Instigator = EffectContext.GetInstigator();
     }
 
+    // [수정] UI 및 이펙트 갱신용 브로드캐스트만 수행합니다.
     OnHealthChanged.Broadcast(this, ChangeData.OldValue, ChangeData.NewValue, Instigator);
 
-    // 데미지를 입고 처음 체력이 0 이하가 되었을 때 한 번만 사망 판정
-    if (ChangeData.NewValue <= 0.0f && !bIsDead)
-    {
-        bIsDead = true;
-        OnDeath.Broadcast(Instigator);
-    }
-    // 부활/회복 시 사망 상태 해제
-    else if (ChangeData.NewValue > 0.0f && bIsDead)
-    {
-        bIsDead = false;
-    }
+    // [삭제] 사망 판정 로직 삭제 (BaruCoreAttributeSet의 PostGameplayEffectExecute에서 전담하여 Die 인터페이스 호출함)
 }
 
 void UBaruHealthComponent::HandleMaxHealthChanged(const FOnAttributeChangeData& ChangeData)
@@ -101,3 +107,4 @@ void UBaruHealthComponent::HandleMaxHealthChanged(const FOnAttributeChangeData& 
     const float CurrentHealth = GetHealth();
     OnHealthChanged.Broadcast(this, CurrentHealth, CurrentHealth, nullptr);
 }
+

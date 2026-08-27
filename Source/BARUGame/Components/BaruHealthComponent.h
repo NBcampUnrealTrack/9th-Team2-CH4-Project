@@ -33,8 +33,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "BARU|Health")
 	float GetMaxHealth() const;
 
+	// [수정] bIsDead 변수를 리턴하지 않고 인터페이스를 사용하도록 변경
 	UFUNCTION(BlueprintPure, Category = "BARU|Health")
-	bool IsDead() const { return bIsDead; }
+	bool IsDead() const; 
 
 	// UI 및 이펙트 재생용 델리게이트
 	UPROPERTY(BlueprintAssignable, Category = "BARU|Health")
@@ -54,5 +55,5 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
 
-	bool bIsDead;
+	// [삭제] bool bIsDead 변수 삭제 (중복 상태 관리 방지)
 };
