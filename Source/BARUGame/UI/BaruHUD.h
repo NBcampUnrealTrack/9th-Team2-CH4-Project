@@ -7,6 +7,7 @@
 
 #include "BaruHUD.generated.h"
 
+class UBaruMainHUDWidget;
 class UBaruPrimaryGameLayout;
 
 /**
@@ -23,14 +24,18 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	// 화면에 생성할 Primary Game Layout Blueprint 클래스
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
 	TSubclassOf<UBaruPrimaryGameLayout> PrimaryGameLayoutClass;
 
+	// GameLayer에 추가할 Main HUD Blueprint 클래스
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
+	TSubclassOf<UBaruMainHUDWidget> MainHUDWidgetClass;
+	
 	// 실행 중 생성된 로컬 플레이어의 Primary Game Layout
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI")
 	TObjectPtr<UBaruPrimaryGameLayout> PrimaryGameLayout;
-
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 };
