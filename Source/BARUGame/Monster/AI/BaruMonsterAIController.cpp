@@ -44,7 +44,7 @@ ABaruMonsterAIController::ABaruMonsterAIController()
 	
 	// 현재 게임 기준 인원인 5명만큼 목록 공간을 미리 준비
 	// 5명을 넘는다고 막히는 것은 아니며 필요하면 자동으로 늘어남
-	VisiblePlayerCandidates.Reserve(5);
+	VisiblePlayerCandidates.Reserve(10);
 }
 
 
