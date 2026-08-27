@@ -48,4 +48,19 @@ private:
 	// AI 감각 기관이 준비된 다음 몬스터의 시야 설정을 적용
 	void InitializeSightFromControlledMonster();
 	
+	// 현재 몬스터의 시야 안에 있는 플레이어 목록
+	// 몬스터는 플레이어를 소유하지 않으므로 약한 참조를 사용
+	UPROPERTY(Transient)
+	TArray<TWeakObjectPtr<APawn>> VisiblePlayerCandidates;
+
+	// 플레이어를 시야 후보 목록에 추가
+	void AddVisiblePlayerCandidate(APawn* PlayerPawn);
+
+	// 플레이어를 시야 후보 목록에서 제거
+	void RemoveVisiblePlayerCandidate(APawn* PlayerPawn);
+
+	// 파괴되었거나 월드에서 사라져 무효가 된 플레이어를 정리
+	void RemoveInvalidPlayerCandidates();
+	
+	
 };
