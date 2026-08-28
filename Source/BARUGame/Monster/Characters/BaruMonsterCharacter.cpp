@@ -9,6 +9,7 @@
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 #include "AbilitySystem/Attributes/BaruMonsterAttributeSet.h"
 
+#include "GameFramework/CharacterMovementComponent.h"
 #include "BaruLog.h"
 
 
@@ -99,7 +100,8 @@ void ABaruMonsterCharacter::BeginPlay()
 	// 몬스터 전용 AttributeSet이 ASC에 등록됐는지 확인
 	const UBaruMonsterAttributeSet* RegisteredMonsterAttributeSet =
 		AbilitySystemComponent->GetSet<UBaruMonsterAttributeSet>();
-
+	
+	// 등록 여부를 먼저 검사한 뒤 사용
 	if (!IsValid(RegisteredCoreAttributeSet) ||
 		!IsValid(RegisteredMonsterAttributeSet))
 	{
@@ -114,6 +116,34 @@ void ABaruMonsterCharacter::BeginPlay()
 
 		return;
 	}
+	
+	// Core MoveSpeed가 변경될 때마다 실제 캐릭터 이동속도를 갱신
+	AbilitySystemComponent
+		->GetGameplayAttributeValueChangeDelegate(UBaruCoreAttributeSet::GetMoveSpeedAttribute())
+		.AddUObject(this, &ABaruMonsterCharacter::HandleMoveSpeedAttributeChanged);
+
+	// 델리게이트 연결 전에 이미 설정돼 있던 초기 이동속도도 한 번 반영
+	UCharacterMovementComponent* MovementComponent =
+		GetCharacterMovement();
+
+	if (!IsValid(MovementComponent))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Error,
+			TEXT(
+				"Monster CharacterMovementComponent "
+				"is invalid."
+			)
+		);
+
+		return;
+	}
+
+	MovementComponent->MaxWalkSpeed =
+		FMath::Max(0.0f, RegisteredCoreAttributeSet->GetMoveSpeed());
+	
 
 	// 초기화 확인용 로그
 	BARU_NET_LOG(
@@ -144,6 +174,38 @@ UAbilitySystemComponent* ABaruMonsterCharacter::GetAbilitySystemComponent() cons
 	return AbilitySystemComponent.Get();
 }
 
+void ABaruMonsterCharacter::
+	HandleMoveSpeedAttributeChanged(
+		const FOnAttributeChangeData& AttributeChangeData
+	)
+{
+	UCharacterMovementComponent* MovementComponent =
+		GetCharacterMovement();
 
+	if (!IsValid(MovementComponent))
+	{
+		return;
+	}
+
+	// GAS가 계산한 최종 MoveSpeed를 실제 이동 컴포넌트에 반영
+	const float NewMoveSpeed = FMath::Max(
+		0.0f,
+		AttributeChangeData.NewValue
+	);
+
+	MovementComponent->MaxWalkSpeed = NewMoveSpeed;
+
+	BARU_NET_LOG(
+		this,
+		LogBaruAI,
+		Log,
+		TEXT(
+			"Monster MoveSpeed changed. "
+			"Old=%.1f, New=%.1f"
+		),
+		AttributeChangeData.OldValue,
+		NewMoveSpeed
+	);
+}
 
 
