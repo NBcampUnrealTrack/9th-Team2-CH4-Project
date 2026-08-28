@@ -34,10 +34,12 @@ public class BARUGame : ModuleRules
 			"OnlineSubsystemUtils",
 			"SQLiteCore",
 			"SQLiteSupport",
-			"AIModule"
+			"AIModule",
+			"Niagara"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
+			"CommonInput",
 			"Slate",
 			"SlateCore",
 			"UMG"
