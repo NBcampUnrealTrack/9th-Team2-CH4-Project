@@ -14,6 +14,7 @@ class UBaruAbilitySystemComponent;
 class UBaruCoreAttributeSet;
 class UBaruMonsterAttributeSet;
 
+struct FOnAttributeChangeData;
 
 UCLASS()
 class BARUGAME_API ABaruMonsterCharacter : public ACharacter, public IAbilitySystemInterface
@@ -52,6 +53,12 @@ protected:
 	)
 	
 	TObjectPtr<UBaruMonsterAttributeSet> MonsterAttributeSet;
+	
+	// CoreAttributeSet의 이동속도가 변경되면
+	// CharacterMovement의 실제 최대속도에 반영
+	void HandleMoveSpeedAttributeChanged(
+		const FOnAttributeChangeData& AttributeChangeData
+	);
 
 public:
 	
