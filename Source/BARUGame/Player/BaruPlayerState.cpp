@@ -1,8 +1,11 @@
 #include "Player/BaruPlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "AbilitySystemComponent.h"
+#include "GameplayEffectTypes.h"                                  // [추가] FOnAttributeChangeData
+#include "AbilitySystem/BaruAbilitySystemComponent.h"             // [추가]
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
+#include "Components/BaruHealthComponent.h"                       // [추가]
 #include "BaruLog.h"
 
 ABaruPlayerState::ABaruPlayerState()
@@ -13,13 +16,55 @@ ABaruPlayerState::ABaruPlayerState()
     SetNetUpdateFrequency(10.0f);
 
     // GAS Components
-    AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+    // [수정] UAbilitySystemComponent → UBaruAbilitySystemComponent
+    AbilitySystemComponent = CreateDefaultSubobject<UBaruAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
     AbilitySystemComponent->SetIsReplicated(true);
     AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 
     // AttributeSet
     CoreAttributeSet = CreateDefaultSubobject<UBaruCoreAttributeSet>(TEXT("CoreAttributeSet"));
     PlayerAttributeSet = CreateDefaultSubobject<UBaruPlayerAttributeSet>(TEXT("PlayerAttributeSet"));
+
+    // [추가] 반드시 필요한 한 줄 
+    //   헤더에는 HealthComponent 멤버와 GetHealthComponent() 가 있는데 생성자에서 만들지 않아
+    //   항상 nullptr 이었습니다. 그 결과 BaruCharacter::InitAbilityActorInfo() 안의
+    //   PSHealthComp->InitializeWithAbilitySystem(ASC) 가 한 번도 실행되지 않았고,
+    //   UBaruHealthComponent::OnHealthChanged 가 절대 브로드캐스트되지 않아
+    //   HUD 체력바가 영원히 갱신되지 않는 상태였습니다.
+    HealthComponent = CreateDefaultSubobject<UBaruHealthComponent>(TEXT("HealthComponent"));
+}
+
+// [추가] HealthComponent 는 이 PlayerState 소유이므로, 폰의 빙의를 기다리지 말고
+//   여기서 직접 초기화합니다. (컴포넌트 등록이 끝난 시점이라 ASC 에 AttributeSet 이 이미 붙어 있음)
+//   Sanity 어트리뷰트 구독도 여기서 겁니다 — 서버/클라 각자 로컬 바인딩이라 RPC 불필요.
+void ABaruPlayerState::PostInitializeComponents()
+{
+    Super::PostInitializeComponents();
+
+    if (!AbilitySystemComponent)
+    {
+        return;
+    }
+
+    if (HealthComponent)
+    {
+        HealthComponent->InitializeWithAbilitySystem(AbilitySystemComponent);
+    }
+
+    SanityChangedHandle = AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
+        UBaruPlayerAttributeSet::GetSanityAttribute()).AddUObject(this, &ABaruPlayerState::HandleSanityChanged);
+}
+
+// [추가] 델리게이트 해제
+void ABaruPlayerState::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (AbilitySystemComponent)
+    {
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
+            UBaruPlayerAttributeSet::GetSanityAttribute()).Remove(SanityChangedHandle);
+    }
+
+    Super::EndPlay(EndPlayReason);
 }
 
 void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -28,12 +73,42 @@ void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
     DOREPLIFETIME(ABaruPlayerState, bIsReady);
     DOREPLIFETIME(ABaruPlayerState, bIsDBNO);
-    DOREPLIFETIME(ABaruPlayerState, Sanity);
+    DOREPLIFETIME(ABaruPlayerState, bIsDead);   // [추가]
+    // [삭제] DOREPLIFETIME(ABaruPlayerState, Sanity);  → AttributeSet 이 대신 복제
+}
+
+// [추가] 레벨 이동 시 값 인수인계
+void ABaruPlayerState::CopyProperties(APlayerState* PlayerState)
+{
+    Super::CopyProperties(PlayerState);
+
+    if (ABaruPlayerState* NewPS = Cast<ABaruPlayerState>(PlayerState))
+    {
+        NewPS->bIsReady = bIsReady;
+        // 사망/DBNO 는 새 레벨에서 초기화되는 게 맞으므로 일부러 복사하지 않기
+    }
 }
 
 UAbilitySystemComponent* ABaruPlayerState::GetAbilitySystemComponent() const
 {
     return AbilitySystemComponent;
+}
+
+// [수정] 헤더 인라인에서 .cpp 로 이동. 동작은 기존과 동일합니다.
+float ABaruPlayerState::GetHealth() const
+{
+    return CoreAttributeSet ? CoreAttributeSet->GetHealth() : 0.0f;
+}
+
+float ABaruPlayerState::GetMaxHealth() const
+{
+    return CoreAttributeSet ? CoreAttributeSet->GetMaxHealth() : 0.0f;
+}
+
+// [수정] 삭제한 복제 변수 대신 AttributeSet 값을 반환 (단일 소스 원칙)
+float ABaruPlayerState::GetSanity() const
+{
+    return PlayerAttributeSet ? PlayerAttributeSet->GetSanity() : 0.0f;
 }
 
 // Server RPC
@@ -82,19 +157,49 @@ void ABaruPlayerState::SetDBNOState(bool bNewDBNO)
     }
 }
 
+// [추가] 사망 상태 확정/해제 (서버 전용)
+void ABaruPlayerState::SetDeadState(bool bNewDead, AActor* Killer)
+{
+    if (!HasAuthority() || bIsDead == bNewDead)
+    {
+        return;
+    }
+
+    bIsDead = bNewDead;
+    OnRep_IsDead();   // 서버에서는 OnRep 이 자동 호출되지 않으므로 직접 호출
+
+    //  HealthComponent 의 OnDeath 델리게이트는 지금까지 선언만 되고
+    //  어디서도 브로드캐스트되지 않는 죽은 델리게이트였습니다. 여기서 연결합니다.
+    if (bNewDead && HealthComponent)
+    {
+        HealthComponent->NotifyDeath(Killer);
+    }
+}
+
+// [수정] 복제 변수 직접 대입 → GAS 어트리뷰트에 반영.
+//   함수 시그니처는 그대로 유지했습니다. ABaruTestGameMode::RespawnPlayer 가 이 함수를
+//   호출하고 있어서 지우거나 바꾸면 제 권한 밖 파일이 컴파일되지 않습니다.
 void ABaruPlayerState::SetSanityValue(float NewSanity)
 {
-    if (!HasAuthority())
+    if (!HasAuthority() || !AbilitySystemComponent)
     {
        return;
     }
 
-    Sanity = FMath::Clamp(NewSanity, 0.0f, 100.0f);
-    OnRep_Sanity();
+    const float MaxValue = PlayerAttributeSet ? PlayerAttributeSet->GetMaxSanity() : 100.0f;
+    const float Clamped = FMath::Clamp(NewSanity, 0.0f, MaxValue);
+
+    // 주의: 이건 리셋/디버그용 직접 대입
+    //  인게임 정신력 증감은 반드시 GameplayEffect 로 처리해야 함
+    AbilitySystemComponent->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetSanityAttribute(), Clamped);
 }
 
-//  SetHealthValue 구현부 삭제
-//  SetMaxHealthValue 구현부 삭제
+// [추가] 어트리뷰트 변경 → UI 델리게이트
+void ABaruPlayerState::HandleSanityChanged(const FOnAttributeChangeData& ChangeData)
+{
+    BARU_NET_LOG(this, LogBaruSanity, Verbose, TEXT("Sanity Changed: %.1f"), ChangeData.NewValue);
+    OnSanityChanged.Broadcast(ChangeData.NewValue);
+}
 
 // OnRep
 void ABaruPlayerState::OnRep_IsReady()
@@ -109,11 +214,11 @@ void ABaruPlayerState::OnRep_IsDBNO()
     OnDBNOStatusChanged.Broadcast(bIsDBNO);
 }
 
-void ABaruPlayerState::OnRep_Sanity()
+// [추가]
+void ABaruPlayerState::OnRep_IsDead()
 {
-    BARU_NET_LOG(this, LogBaruSanity, Verbose, TEXT("OnRep_Sanity: %.1f"), Sanity);
-    OnSanityChanged.Broadcast(Sanity);
+    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("OnRep_IsDead: %d"), bIsDead);
+    OnDeadStatusChanged.Broadcast(bIsDead);
 }
 
-//  OnRep_Health 구현부 삭제
-//  OnRep_MaxHealth 구현부 삭제
+// [삭제] OnRep_Sanity() 구현부 삭제
