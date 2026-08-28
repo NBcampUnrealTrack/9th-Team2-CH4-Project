@@ -6,9 +6,8 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Monster/Characters/BaruMonsterCharacter.h"
-#include "AbilitySystemComponent.h"
-#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
+#include "Monster/Components/BaruMonsterNavigationComponent.h"
 #include "TimerManager.h"
 #include "BaruLog.h"
 
@@ -20,6 +19,10 @@ ABaruMonsterAIController::ABaruMonsterAIController()
 	// 몬스터가 사용할 감각 기관을 생성
 	MonsterPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(
 			TEXT("MonsterPerceptionComponent"));
+	
+	// 몬스터의 이동 요청과 설정을 관리하는 컴포넌트 생성
+	MonsterNavigationComponent = CreateDefaultSubobject<UBaruMonsterNavigationComponent>(
+			TEXT("MonsterNavigationComponent"));
 	
 	// AAIController에게 이 컴포넌트가 자신의 감각 기관 설정
 	SetPerceptionComponent(*MonsterPerceptionComponent);
@@ -108,8 +111,24 @@ void ABaruMonsterAIController::InitializeFromControlledMonster()
 	ApplySightSettings(*MonsterDataAsset);
 	
 	// 몬스터의 이동속도와 도착 허용 범위를 적용
-	ApplyMovementSettings(*MonsterDataAsset);
-	
+	if (!IsValid(MonsterNavigationComponent))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Error,
+			TEXT(
+				"Monster Navigation Component is invalid."
+			)
+		);
+
+		return;
+	}
+
+	MonsterNavigationComponent->ApplyMovementSettings(
+		*MonsterDataAsset
+	);
+		
 }
 
 //시각정보세팅
@@ -475,82 +494,43 @@ void ABaruMonsterAIController::ClearLastKnownTargetLocation()
 	);
 }
 
-void ABaruMonsterAIController::ApplyMovementSettings(
-	const UBaruMonsterDataAsset& MonsterDataAsset
-)
+void ABaruMonsterAIController::UpdateMovementFromPerceptionState()
 {
-	// DataAsset의 상태별 기본속도를 실행 중 보관
-	PatrolSpeed = FMath::Max(
-		0.0f,
-		MonsterDataAsset.PatrolSpeed
-	);
-
-	ChaseSpeed = FMath::Max(
-		0.0f,
-		MonsterDataAsset.ChaseSpeed
-	);
-
-	MoveAcceptanceRadius = FMath::Max(
-		0.0f,
-		MonsterDataAsset.MoveAcceptanceRadius
-	);
-
-	// 초기 상태에서는 배회 속도를 Core MoveSpeed에 적용
-	SetControlledMonsterMoveSpeed(PatrolSpeed);
-
-	BARU_NET_LOG(
-		this,
-		LogBaruAI,
-		Log,
-		TEXT(
-			"Movement settings applied. "
-			"PatrolSpeed=%.1f, ChaseSpeed=%.1f, "
-			"AcceptanceRadius=%.1f"
-		),
-		PatrolSpeed,
-		ChaseSpeed,
-		MoveAcceptanceRadius
-	);
-}
-
-void ABaruMonsterAIController::SetControlledMonsterMoveSpeed(float NewBaseMoveSpeed)
-{
-	// 이동속도 결정은 서버에서만 수행
+	// 몬스터의 이동 판단은 서버에서만 수행
 	if (!HasAuthority())
 	{
 		return;
 	}
 
-	ABaruMonsterCharacter* MonsterCharacter =
-		Cast<ABaruMonsterCharacter>(GetPawn());
-
-	if (!IsValid(MonsterCharacter))
+	if (!IsValid(MonsterNavigationComponent))
 	{
 		return;
 	}
 
-	UAbilitySystemComponent* ASC =
-		MonsterCharacter->GetAbilitySystemComponent();
-
-	if (!IsValid(ASC))
+	// 현재 보이는 타깃이 있다면 계속 추적
+	if (APawn* TargetPawn = GetCurrentTarget();
+		IsValid(TargetPawn))
 	{
-		BARU_NET_LOG(
-			this,
-			LogBaruGAS,
-			Error,
-			TEXT("Monster ASC is invalid.")
+		MonsterNavigationComponent->ChaseTarget(
+			TargetPawn
 		);
 
 		return;
 	}
 
-	const float SafeMoveSpeed =
-		FMath::Max(0.0f, NewBaseMoveSpeed);
+	// 보이는 타깃은 없지만 마지막 목격 위치가 있다면
+	// 해당 위치까지 이동해 플레이어를 수색
+	if (bHasLastKnownTargetLocation)
+	{
+		MonsterNavigationComponent->MoveToLocation(
+			LastKnownTargetLocation
+		);
 
-	// Core MoveSpeed의 기본값을 변경
-	// 활성화된 감속·가속 GameplayEffect는 유지됨
-	ASC->SetNumericAttributeBase(
-		UBaruCoreAttributeSet::GetMoveSpeedAttribute(),
-		SafeMoveSpeed
-	);
+		return;
+	}
+
+	// 추적 대상과 마지막 목격 위치가 모두 없다면 이동 중단
+	MonsterNavigationComponent->StopMovement();
 }
+
+

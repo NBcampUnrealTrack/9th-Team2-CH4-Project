@@ -12,7 +12,7 @@
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 class UBaruMonsterDataAsset;
-
+class UBaruMonsterNavigationComponent;
 
 
 UCLASS()
@@ -45,6 +45,10 @@ protected:
 	//시야 거리와 시야각처럼 시각 감지에 필요한 규칙을 보관
 	UPROPERTY()
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
+	
+	// 몬스터의 이동 요청과 이동 설정을 관리
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Monster|AI")
+	TObjectPtr<UBaruMonsterNavigationComponent> MonsterNavigationComponent;
 	
 	//AIController가 몬스터의 몸을 조종하기 시작할 때 호출
 	//조종할 몬스터가 가진 DataAsset을 읽고 시야 거리와 시야각을 설정
@@ -108,26 +112,7 @@ private:
 	//=============
 	//이동관련
 	//=============
-	
-	// DataAsset의 이동속도와 도착 허용 범위를 적용
-	void ApplyMovementSettings(
-		const UBaruMonsterDataAsset& MonsterDataAsset
-	);
-
-	// 실행 중 사용할 배회 이동속도
-	float PatrolSpeed = 0.0f;
-
-	// 실행 중 사용할 추적 이동속도
-	float ChaseSpeed = 0.0f;
-
-	// 목적지 도착을 판정할 허용 거리
-	float MoveAcceptanceRadius = 0.0f;
-	
-	// CoreAttributeSet의 기본 이동속도를 변경
-	void SetControlledMonsterMoveSpeed(
-		float NewBaseMoveSpeed
-	);
-	
+		
 	// 현재 타깃과 마지막 목격 위치를 기준으로 이동 행동을 갱신
 	void UpdateMovementFromPerceptionState();
 	
