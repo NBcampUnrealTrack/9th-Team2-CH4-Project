@@ -13,21 +13,22 @@ ABaruPlayerController::ABaruPlayerController()
 
 void ABaruPlayerController::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	if (IsLocalController())
-	{
-		BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
-	}
-    if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+    // 수정 컨트롤러가 로컬일 때만 서브시스템과 UI/Input을 초기화합니다.
+    if (IsLocalController())
     {
-        // 블루프린트에서 DefaultMappingContext를 잘 넣어뒀는지 확인 후 적용 (우선순위 0)
-        if (DefaultMappingContext)
+        BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
+
+        if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
         {
-            Subsystem->AddMappingContext(DefaultMappingContext, 0);
+            if (DefaultMappingContext)
+            {
+                Subsystem->AddMappingContext(DefaultMappingContext, 0);
+            }
         }
     }
-	// TODO : 멀티플레이에서 패킷 전송시 UI 인식이 안되는 것을 예방하는 방지 코드
+    // TODO : 멀티플레이에서 패킷 전송시 UI 인식이 안되는 것을 예방하는 방지 코드
 }
 
 // Server RPC
