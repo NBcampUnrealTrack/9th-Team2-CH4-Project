@@ -1,8 +1,10 @@
 #include "Player/BaruPlayerController.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "GameFramework/Pawn.h"
 #include "Player/BaruPlayerState.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"   // ★[추가] ProcessAbilityInput 호출용
+#include "Subsystems/BaruSaveGameSubsystem.h"
 #include "BaruLog.h"
 // ★[삭제] #include "EnhancedInputSubsystems.h"
 // ★[삭제] #include "Engine/LocalPlayer.h"
@@ -10,7 +12,8 @@
 
 ABaruPlayerController::ABaruPlayerController()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
+    PlayerCameraManagerClass = APlayerCameraManager::StaticClass();
 }
 
 void ABaruPlayerController::BeginPlay()
@@ -22,6 +25,11 @@ void ABaruPlayerController::BeginPlay()
         return;
     }
 
+    FInputModeGameOnly InputModeData;
+    InputModeData.SetConsumeCaptureMouseDown(true);
+    SetInputMode(InputModeData);
+    SetShowMouseCursor(false);
+    
     BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
 
     // ★[삭제] AddMappingContext 블록 삭제.
@@ -140,6 +148,17 @@ void ABaruPlayerController::Server_SendPing_Implementation(FVector PingLocation,
 void ABaruPlayerController::Client_ShowSettlementUI_Implementation(const FBaruSettlementReport& Report)
 {
     BARU_NET_LOG(this, LogBaruUI, Log, TEXT("Client_ShowSettlementUI Received. (Survived: %d, Currency: %d)"), Report.bSurvived, Report.AcquiredCurrency);
+
+    // 로컬 PC의 .sav 에 기록
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UBaruSaveGameSubsystem* SaveSubsystem = GI->GetSubsystem<UBaruSaveGameSubsystem>())
+        {
+            const FString CurrentPlayerName = PlayerState ? PlayerState->GetPlayerName() : TEXT("Operative");
+            SaveSubsystem->RecordRaidResult(CurrentPlayerName, Report.AcquiredCurrency, Report.bSurvived);
+        }
+    }
+
     OnSettlementReceived.Broadcast(Report);
 }
 

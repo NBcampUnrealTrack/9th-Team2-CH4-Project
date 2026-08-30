@@ -23,7 +23,9 @@
 ABaruCharacter::ABaruCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
-
+   bReplicates = true;
+   SetReplicateMovement(true);
+   
     // 1인칭 카메라 설정 
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(RootComponent);
@@ -122,8 +124,19 @@ void ABaruCharacter::InitAbilityActorInfo()
    MoveSpeedChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
        UBaruCoreAttributeSet::GetMoveSpeedAttribute()).AddUObject(this, &ABaruCharacter::HandleMoveSpeedChanged);
 
-   GetCharacterMovement()->MaxWalkSpeed =
-       ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
+   // [08.30] 속도가 0.0f로 덮어써져 멈추는 현상을 방어하기 위한 코드.
+   const float InitialMoveSpeed = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
+   if (InitialMoveSpeed > 0.0f)
+   {
+      GetCharacterMovement()->MaxWalkSpeed = InitialMoveSpeed;
+   }
+   else
+   {
+      GetCharacterMovement()->MaxWalkSpeed = 450.0f;
+   } 
+   
+   // GetCharacterMovement()->MaxWalkSpeed =
+   //     ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
 }
 
 // [추가] 어트리뷰트가 서버에서 바뀌면 각 클라에도 복제되어 동일하게 호출됨(RPC 불필요)
@@ -131,7 +144,10 @@ void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& Change
 {
    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
    {
-      MoveComp->MaxWalkSpeed = ChangeData.NewValue;
+      if (ChangeData.NewValue > 0.0f)
+      {
+         MoveComp->MaxWalkSpeed = ChangeData.NewValue;
+      }
    }
 }
 
@@ -161,59 +177,69 @@ void ABaruCharacter::BeginPlay()
    }
 }
 
+void ABaruCharacter::PawnClientRestart()
+{
+   Super::PawnClientRestart();
+
+   // 로컬 클라이언트 컨트롤러 방어 코드
+   APlayerController* PC = Cast<APlayerController>(GetController());
+   if (!PC && GetWorld())
+   {
+      PC = GetWorld()->GetFirstPlayerController();
+   }
+
+   if (PC && PC->IsLocalController())
+   {
+      // 1. 카메라 시점을 내 캐릭터로 확실하게 전환
+      PC->SetViewTarget(this);
+
+      // 2. 1인칭 게임 입력 모드 설정 (마우스 커서 숨김)
+      FInputModeGameOnly InputModeData;
+      InputModeData.SetConsumeCaptureMouseDown(false);
+      PC->SetInputMode(InputModeData);
+      PC->SetShowMouseCursor(false);
+
+      // 3. IMC 등록
+      if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+      {
+         if (DefaultMappingContext)
+         {
+            Subsystem->ClearAllMappings();
+            Subsystem->AddMappingContext(DefaultMappingContext, 0);
+            BARU_LOG(LogBaru, Log, TEXT("PawnClientRestart: [SUCCESS] ViewTarget & IMC applied for %s"), *GetName());
+         }
+      }
+   }
+}
 
 void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
-    Super::SetupPlayerInputComponent(PlayerInputComponent);
+   Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-    // [멀티플레이 필수] 로컬 컨트롤러일 때만 LocalPlayerSubsystem에 접근 (서버 크래시 방지)
-    // ※ABaruPlayerController 쪽 중복 등록 코드를 제거했으므로 이제 여기가 유일한 등록 지점
-    if (APlayerController* PC = Cast<APlayerController>(GetController()))
-    {
-       if (PC->IsLocalController())
-       {
-          if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-          {
-             if (DefaultMappingContext)
-             {
-                Subsystem->AddMappingContext(DefaultMappingContext, 0);
-             }
-             else
-             {
-                // [추가] 조용히 실패하지 않도록 경고
-                BARU_LOG(LogBaru, Error, TEXT("DefaultMappingContext is NOT set on %s. BP_BaruCharacter 에 IMC_Default 를 할당하세요."), *GetName());
-             }
-          }
-       }
-    }
+   BARU_LOG(LogBaru, Log, TEXT("SetupPlayerInputComponent on %s (MoveAction=%s, LookAction=%s)"),
+       *GetName(), *GetNameSafe(MoveAction), *GetNameSafe(LookAction));
 
-    // Enhanced Input Component 바인딩
-    if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
-    {
-       if (MoveAction)
-       {
-          EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ABaruCharacter::Move);
-       }
-
-       if (LookAction)
-       {
-          EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ABaruCharacter::Look);
-       }
-
-       if (JumpAction)
-       {
-          // [수정] ACharacter::Jump 직결 → Input_Jump 경유 (사망 상태에서도 점프가 먹었음)
-          EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_Jump);
-          EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_StopJumping);
-       }
-
-       // [추가] F키 상호작용 바인딩
-       //  지금까지 PerformLineTrace / Server_ProcessInteraction 을 만들어놓고 호출하는 곳이 없었음
-       if (InteractAction)
-       {
-          EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Interact);
-       }
-    }
+   // Enhanced Input Component 바인딩
+   if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+   {
+      if (MoveAction)
+      {
+         EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ABaruCharacter::Move);
+      }
+      if (LookAction)
+      {
+         EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ABaruCharacter::Look);
+      }
+      if (JumpAction)
+      {
+         EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_Jump);
+         EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_StopJumping);
+      }
+      if (InteractAction)
+      {
+         EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Interact);
+      }
+   }
 }
 
 void ABaruCharacter::Move(const FInputActionValue& Value)
@@ -222,9 +248,8 @@ void ABaruCharacter::Move(const FInputActionValue& Value)
    {
       return;
    }
-
    FVector2D MovementVector = Value.Get<FVector2D>();
-
+   
    if (Controller != nullptr)
    {
       // 컨트롤러 시점(Yaw) 기준으로 방향 계산
@@ -242,7 +267,7 @@ void ABaruCharacter::Move(const FInputActionValue& Value)
 void ABaruCharacter::Look(const FInputActionValue& Value)
 {
     FVector2D LookAxisVector = Value.Get<FVector2D>();
-
+   
     if (Controller != nullptr)
     {
        AddControllerYawInput(LookAxisVector.X);

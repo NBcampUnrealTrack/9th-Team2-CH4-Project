@@ -8,6 +8,12 @@ UBaruMainHUDWidget::UBaruMainHUDWidget(
 	const FObjectInitializer& ObjectInitializer)
 		: Super(ObjectInitializer)
 {
+	// [08.30] CommonUI 포커스로 인한 자동 비활성화 차단
+	bSupportsActivationFocus = false;
+	bIsBackHandler = false;
+	bAutoActivate = true;
+	SetIsFocusable(false);
+	
 	// Main HUD는 플레이 중 항상 표시되지만
 	// 캐릭터와 카메라 입력을 막으면 안 된다.
 	InputConfig = EBaruWidgetInputMode::Game;

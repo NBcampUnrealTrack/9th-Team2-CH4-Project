@@ -14,8 +14,13 @@ void UBaruSaveGameSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UBaruSaveGameSubsystem::Deinitialize()
 {
-    SaveCurrentGame();
+    if (CachedSaveGame && !CurrentSlotName.IsEmpty())
+    {
+        SaveCurrentGame();
+    }
     CachedSaveGame = nullptr;
+
+    BARU_LOG(LogBaruSession, Log, TEXT("BaruSaveGameSubsystem Deinitialized."));
     Super::Deinitialize();
 }
 

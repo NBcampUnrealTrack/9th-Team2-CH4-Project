@@ -2,7 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Interfaces/OnlineSessionInterface.h"
+#include "UObject/SoftObjectPtr.h"
 #include "BaruSessionSubsystem.generated.h"
+
+class UWorld;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruCreateSessionComplete, bool, bWasSuccessful);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruFindSessionsComplete, bool, bWasSuccessful);
@@ -21,8 +25,7 @@ public:
     virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
-    void CreateSession(int32 NumPublicConnections = 4, bool bIsLANMatch = false);
-    // Todo : 방 인원 5 명으로 확대 필요
+    void CreateSession(int32 NumPublicConnections = 5, bool bIsLANMatch = false, TSoftObjectPtr<UWorld> OverrideLobbyLevel = nullptr);
     
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void FindSessions(int32 MaxSearchResults = 20, bool bIsLANMatch = false);
@@ -49,4 +52,14 @@ public:
 
     UPROPERTY(BlueprintAssignable, Category = "BARU|Session|Delegates")
     FOnBaruDestroySessionComplete OnDestroySessionCompleteEvent;
+    
+protected:
+    /** 기본 트럭 UI 및 방 만들기용 로비 레벨 에셋 레퍼런스 */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "BARU|Session|Maps")
+    TSoftObjectPtr<UWorld> DefaultMainLobbyLevel;
+
+private:
+    void OpenLobbyLevelAsListenServer(const TSoftObjectPtr<UWorld>& LevelToOpen);
+
+    FDelegateHandle CreateSessionCompleteDelegateHandle;
 };

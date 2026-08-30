@@ -14,6 +14,8 @@ ABaruGameMode::ABaruGameMode()
 {
     PrimaryActorTick.bCanEverTick = false;
 
+    bUseSeamlessTravel = true;
+    
     GameStateClass = ABaruGameState::StaticClass();
     PlayerControllerClass = ABaruPlayerController::StaticClass();
     PlayerStateClass = ABaruPlayerState::StaticClass();
@@ -254,23 +256,30 @@ void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerAc
 
 void ABaruGameMode::StartSpectating(APlayerController* DeadController)
 {
-    if (!IsValid(DeadController)) return;
+    if (!IsValid(DeadController) || DeadController->IsPendingKillPending()) return;
 
-    // 1. 기존 폰 빙의 해제 및 관전 전용 모드 전환
+    // 기존 폰 빙의 해제 및 관전 전용 모드 전환
     DeadController->UnPossess();
     DeadController->StartSpectatingOnly();
 
-    // 2. 살아있는 다른 팀원 폰을 찾아 뷰 타깃 설정
+    // 다른 팀원 폰을 찾아 뷰 타깃 설정
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         APlayerController* OtherPC = Iterator->Get();
-        if (IsValid(OtherPC) && OtherPC != DeadController)
+        if (IsValid(OtherPC) && OtherPC != DeadController && !OtherPC->IsPendingKillPending())
         {
             if (const ABaruPlayerState* PS = OtherPC->GetPlayerState<ABaruPlayerState>())
             {
                 if (!PS->IsDBNO() && OtherPC->GetPawn())
                 {
+                    // 서버 내부 뷰 타깃 설정
                     DeadController->SetViewTargetWithBlend(OtherPC->GetPawn(), 1.0f);
+
+                    // 원격 클라이언트인 경우 화면 카메라 전환 패킷 전송
+                    if (!DeadController->IsLocalController())
+                    {
+                        DeadController->ClientSetViewTarget(OtherPC->GetPawn(), FViewTargetTransitionParams());
+                    }
                     BARU_NET_LOG(DeadController, LogBaruSession, Log, TEXT("Spectating Target Set to: %s"), *OtherPC->GetName());
                     return;
                 }
@@ -310,10 +319,7 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
 
     const int32 TotalValue = CachedBaruGameState ? CachedBaruGameState->GetTeamScrapValue() : 0;
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Processing Settlement (Survived: %d, Total Team Value: %d)"), bAllExtracted, TotalValue);
-
-    // SaveGameSubsystem 인스턴스 획득
-    UBaruSaveGameSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
-
+    
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         if (ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get()))
@@ -323,14 +329,8 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
             const bool bPlayerSurvived = bAllExtracted && (PS && !PS->IsDBNO());
             const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
-            const FString PlayerName = PS ? PS->GetPlayerName() : TEXT("Operative");
-            
-            if (SaveSubsystem)
-            {
-                SaveSubsystem->RecordRaidResult(PlayerName, EarnedGold, bPlayerSurvived);
-            }
 
-            // 클라이언트 UI 1회성 피드백
+            // 각 클라이언트 PC 로컬 SaveGame에 개별 기록
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
