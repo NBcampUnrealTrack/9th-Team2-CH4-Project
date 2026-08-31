@@ -15,6 +15,12 @@ namespace BaruUITags
 		"UI.Layer.GameMenu",
 		"Inventory and game menu layer"
 		);
+	
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_Menu,
+		"UI.Layer.Menu",
+		"Title, lobby and frontend menu layer"
+		);
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		UI_Layer_Modal,

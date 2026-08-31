@@ -11,6 +11,9 @@ namespace BaruUITags
 
 	// 인벤토리, ESC 메뉴 같은 일반 메뉴 레이어
 	BARUGAME_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_GameMenu);
+	
+	// 타이틀, 로비, 맵 선택, 옵션 같은 프론트앤트 메뉴 레이어
+	BARUGAME_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_Menu);
 
 	// 확인창, 경고창처럼 가장 위에 표시되는 레이어
 	BARUGAME_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_Modal);

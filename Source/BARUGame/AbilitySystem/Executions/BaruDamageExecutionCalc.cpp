@@ -8,6 +8,7 @@
 struct FBaruDamageStatics
 {
     DECLARE_ATTRIBUTE_CAPTUREDEF(PhysicalDefense);
+    DECLARE_ATTRIBUTE_CAPTUREDEF(SpecialResistance);
     DECLARE_ATTRIBUTE_CAPTUREDEF(IncomingDamage);
     
     // 몬스터 전용 SuppressionDamage Capture
@@ -18,6 +19,9 @@ struct FBaruDamageStatics
         // PhysicalDefense
         DEFINE_ATTRIBUTE_CAPTUREDEF(UBaruCoreAttributeSet, PhysicalDefense, Target, false);
 
+        // SpecialResistance
+        DEFINE_ATTRIBUTE_CAPTUREDEF(UBaruCoreAttributeSet, SpecialResistance, Target, false);
+        
         // IncomingDamage
         DEFINE_ATTRIBUTE_CAPTUREDEF(UBaruCoreAttributeSet, IncomingDamage, Target, false);
         
@@ -51,8 +55,10 @@ void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCusto
     EvaluationParameters.SourceTags = SourceTags;
     EvaluationParameters.TargetTags = TargetTags;
 
+    float TotalDamageToApply = 0.0f;
+    
     // ==============================================================================
-    // 물리 데미지 계산 (Physical Defense 기반 감쇄)
+    // 물리 데미지 계산 (감소율 = 0.95 * log10(1 + 방어) / log10(100001))
     // ==============================================================================
     
     // PhysicalDefense
@@ -64,34 +70,70 @@ void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCusto
     const float BasePhysicalDamage = FMath::Max(Spec.GetSetByCallerMagnitude(FBaruGameplayTags::Get().Data_Damage, false, 0.0f), 0.0f);
     
     // Calculation
+    float FinalPhysicalDamage = 0.0f;
     if (BasePhysicalDamage > 0.0f)
     {
-        const float DefenseMitigation = TargetDefense / (TargetDefense + 100.0f);
-        const float FinalPhysicalDamage = FMath::Max(BasePhysicalDamage * (1.0f - DefenseMitigation), 0.0f);
+        // log10(100001) 상수 (약 5.00000434)
+        constexpr float Log10_100001 = 5.00000434f;
+        
+        // 감소율 계산 (0.0 ~ 0.95 클램핑)
+        const float DefenseMitigation = FMath::Clamp(
+            0.95f * (FMath::LogX(10.0f, 1.0f + TargetDefense) / Log10_100001),
+            0.0f,
+            0.95f
+        );
 
-        if (FinalPhysicalDamage > 0.0f)
-        {
-            OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(DamageStatics().IncomingDamageProperty, EGameplayModOp::Additive, FinalPhysicalDamage));
-        }
+        FinalPhysicalDamage = FMath::Max(BasePhysicalDamage * (1.0f - DefenseMitigation), 0.0f);
+        TotalDamageToApply += FinalPhysicalDamage;
     }
     
     // ==============================================================================
-    // 2. 제압(Suppression / 그로기) 데미지 계산
+    // 특수형 방어 계산: 특수 최종 피해 = 기본 특수 피해 * (1 - 저항률)
     // ==============================================================================
-    
-    // Todo : 명확한 제압 그로기 로직 합의 필요
-    // 현재 기본값은 별도의 제압치가 없는 경우 물리 데미지의 50% 부여 + 제압치가 있는 경우 100% 부여
-    const FGameplayTag SuppressionDamageTag = FGameplayTag::RequestGameplayTag(TEXT("Data.Damage.Suppression"));
-    float BaseSuppressionDamage = Spec.GetSetByCallerMagnitude(SuppressionDamageTag, false, -1.0f);
+    float TargetResistance = 0.0f;
+    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(DamageStatics().SpecialResistanceDef, EvaluationParameters, TargetResistance);
+    TargetResistance = FMath::Clamp(TargetResistance, 0.0f, 1.0f);
 
+    // 특수 피해 태그 조회
+    const FGameplayTag SpecialDamageTag = FGameplayTag::RequestGameplayTag(TEXT("Data.Damage.Special"), false);
+    const float BaseSpecialDamage = SpecialDamageTag.IsValid() 
+        ? FMath::Max(Spec.GetSetByCallerMagnitude(SpecialDamageTag, false, 0.0f), 0.0f) 
+        : 0.0f;
+
+    if (BaseSpecialDamage > 0.0f)
+    {
+        const float FinalSpecialDamage = FMath::Max(BaseSpecialDamage * (1.0f - TargetResistance), 0.0f);
+        TotalDamageToApply += FinalSpecialDamage;
+    }
+    
+    // ==============================================================================
+    // 최종 체력 데미지 전달 (물리 + 특수 합산)
+    // ==============================================================================
+    if (TotalDamageToApply > 0.0f)
+    {
+        OutExecutionOutput.AddOutputModifier(
+            FGameplayModifierEvaluatedData(DamageStatics().IncomingDamageProperty, EGameplayModOp::Additive, TotalDamageToApply)
+        );
+    }
+    
+    // ==============================================================================
+    // 제압도(Suppression) 연계
+    // ==============================================================================
+    const FGameplayTag SuppressionDamageTag = FGameplayTag::RequestGameplayTag(TEXT("Data.Damage.Suppression"), false);
+    float BaseSuppressionDamage = SuppressionDamageTag.IsValid() 
+        ? Spec.GetSetByCallerMagnitude(SuppressionDamageTag, false, -1.0f) 
+        : -1.0f;
+
+    // 명시적 제압 피해가 없으면 실질 물리 피해의 50%를 적용
     if (BaseSuppressionDamage < 0.0f)
     {
-        // 제압 수치가 명시되지 않은 일반 사격/타격 시 물리 데미지의 절반을 제압치로 환산
-        BaseSuppressionDamage = BasePhysicalDamage * 0.5f;
+        BaseSuppressionDamage = FinalPhysicalDamage * 0.5f;
     }
 
     if (BaseSuppressionDamage > 0.0f)
     {
-        OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(DamageStatics().IncomingSuppressionDamageProperty, EGameplayModOp::Additive, BaseSuppressionDamage));
+        OutExecutionOutput.AddOutputModifier(
+            FGameplayModifierEvaluatedData(DamageStatics().IncomingSuppressionDamageProperty, EGameplayModOp::Additive, BaseSuppressionDamage)
+        );
     }
 }

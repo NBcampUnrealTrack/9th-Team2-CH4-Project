@@ -34,6 +34,7 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
     
     // Combat & Damage Tags
     GameplayTags.Data_Damage = Manager.AddNativeGameplayTag(TEXT("Data.Damage"), TEXT("SetByCaller Damage Magnitude Key"));
+    GameplayTags.Data_Damage_Special = Manager.AddNativeGameplayTag(TEXT("Data.Damage.Special"), TEXT("Special Damage SetByCaller Key"));
     GameplayTags.Damage_Type_Physical = Manager.AddNativeGameplayTag(TEXT("Damage.Type.Physical"), TEXT("Physical Damage"));
     GameplayTags.Damage_Type_Sanity = Manager.AddNativeGameplayTag(TEXT("Damage.Type.Sanity"), TEXT("Sanity Damage"));
     GameplayTags.Damage_HitReaction_Light = Manager.AddNativeGameplayTag(TEXT("Damage.HitReaction.Light"), TEXT("Light Hit Reaction"));

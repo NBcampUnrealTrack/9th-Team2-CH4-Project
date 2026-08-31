@@ -1,5 +1,7 @@
 ﻿//BaruItemData.h
 // 아이템/인벤 생성순위 1. 모든 아이템의 틀.
+// 정적 스펙.
+// 바닥에 떨어져 있을 때만 존재. -> 주운 뒤에는 ItemInstence에서.
 
 #pragma once
 
@@ -138,11 +140,19 @@ struct FInventorySlotArray : public FFastArraySerializer
 	TArray<FInventorySlot> Slots; // 이건 FFastArray로 관리되고 있기 때문에 바뀐 슬롯만 델타 전송됨.
 		//강의자료와 차이 - 강의에선 Slot을 FName ItemID만 넣고 끝내지만, 여기선 수량, 위치 등까지 고려.
 	
+	
 	// 역참조 - 복제 대상 아님(NotReplicated)
 	UPROPERTY(NotReplicated)
 	TObjectPtr<UBaruInventoryComponent> OwnerComponent = nullptr;
 	
+	
+#pragma region 서버 권한 인벤토리 처리 함수들 Inventory server operations
+
 	// 클라에서만 호출되는 복제의 콜백. 클라로 복제 후 새로 더해지거나 변하거나, 복제 전에 삭제.
+	// 선언은 ItemData에서 하고, 구현은 InventoryComponent.cpp에서 한 이유
+		// 1. 이 함수들이 Inven~Comp~의 내부 상태(Cells, 델리게이트)를 조작하는 부분이라서.
+		// 2. ItemData.cpp 생성 시 : ItemData가 Inven~Compo~.h를 Include해야하는 역전 형상 발생.
+			//-> ItemData는 가장 기초적인 데이터 정의라서 아무도 못건들게 하기 위해서.
 		// 복제 후 새로 더해지는 아이템들(슬롯이 추가).
 	void PostReplicatedAdd(const TArrayView<int32>& AddedIndices, int32 FinalSize);
 		// 복제 후 값이 변하는 템들.(수량 등)
@@ -156,6 +166,8 @@ struct FInventorySlotArray : public FFastArraySerializer
 	{		// 원소 타입은 FInventorySlot, 담는 배열 타입은 FInventorySlotArray 라고 엔진에 전달.
 		return FastArrayDeltaSerialize<FInventorySlot, FInventorySlotArray>(Slots, DeltaParms, *this);
 	}
+	
+#pragma endregion
 	
 	
 };

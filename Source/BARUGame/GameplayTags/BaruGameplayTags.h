@@ -35,6 +35,7 @@ public:
 
 	// Combat & Damage Tags
 	FGameplayTag Data_Damage;
+	FGameplayTag Data_Damage_Special;
 	FGameplayTag Damage_Type_Physical;
 	FGameplayTag Damage_Type_Sanity;
 	FGameplayTag Damage_HitReaction_Light;
