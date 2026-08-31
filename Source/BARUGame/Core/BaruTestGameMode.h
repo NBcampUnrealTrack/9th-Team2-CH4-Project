@@ -24,6 +24,8 @@ public:
 	virtual void BeginPlay() override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
+	
+	virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
 
 	// 테스트 편의 기능: 사망 시 즉시 또는 딜레이 후 리스폰
 	UFUNCTION(BlueprintCallable, Category = "BARU|Test")

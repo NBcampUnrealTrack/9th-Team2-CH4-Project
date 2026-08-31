@@ -36,6 +36,24 @@ void ABaruTestGameMode::BeginPlay()
     }
 }
 
+APawn* ABaruTestGameMode::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
+{
+    FActorSpawnParameters SpawnInfo;
+    SpawnInfo.Instigator = GetInstigator();
+    SpawnInfo.ObjectFlags |= RF_Transient;
+    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
+    APawn* SpawnedPawn = GetWorld()->SpawnActor<APawn>(PawnClass, SpawnTransform, SpawnInfo);
+
+    if (!SpawnedPawn)
+    {
+        BARU_LOG(LogBaruSession, Error, TEXT("Failed to spawn DefaultPawn for %s at %s"), *GetNameSafe(NewPlayer), *SpawnTransform.ToString());
+    }
+
+    return SpawnedPawn;
+}
+
 void ABaruTestGameMode::PostLogin(APlayerController* NewPlayer)
 {
     // Super::PostLogin에서 PlayerStart 검색 -> Pawn 스폰 -> Possess 자동 수행

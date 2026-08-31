@@ -54,6 +54,9 @@ public:
     virtual float GetSuppressionRatio_Implementation() const override;
     virtual void  ApplyCombatDamage_Implementation(float DamageAmount, const FHitResult& HitResult, AActor* DamageCauser, AController* InstigatedBy) override;
     virtual void  BreakBodyPart_Implementation(FName BoneName, float Damage) override;
+    
+    // 클라이언트 IMC 활성화 보장
+    virtual void PawnClientRestart() override;
 
     // [추가] 래그돌/사망 몽타주 같은 연출은 C++이 아니라 BP에서 붙이도록 훅만 열어둠
     //   서버/클라 각자 로컬 호출이라 RPC 낭비가 없기때문에 추가

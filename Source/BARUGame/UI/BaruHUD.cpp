@@ -20,27 +20,15 @@ void ABaruHUD::BeginPlay()
 {
 	Super::BeginPlay();
 
-	APlayerController* OwningPlayerController =
-		GetOwningPlayerController();
-
-	/**
-	 * Dedicated Server 또는 로컬 플레이어가 아닌 경우
-	 * UI를 만들지 않는다
-	 */
-	if (!IsValid(OwningPlayerController) ||
-		!OwningPlayerController->IsLocalController())
+	APlayerController* OwningPlayerController = GetOwningPlayerController();
+	if (!IsValid(OwningPlayerController) || !OwningPlayerController->IsLocalController())
 	{
 		return;
 	}
 
 	if (!PrimaryGameLayoutClass)
 	{
-		BARU_NET_LOG(
-			this,
-			LogBaruUI,
-			Warning,
-			TEXT("PrimaryGameLayoutClass가 설정되지 않았습니다."));
-
+		BARU_NET_LOG(this, LogBaruUI, Warning, TEXT("PrimaryGameLayoutClass가 설정되지 않았습니다."));
 		return;
 	}
 
@@ -49,105 +37,41 @@ void ABaruHUD::BeginPlay()
 		return;
 	}
 
-	PrimaryGameLayout =
-		CreateWidget<UBaruPrimaryGameLayout>(
-			OwningPlayerController,
-			PrimaryGameLayoutClass);
-
+	PrimaryGameLayout = CreateWidget<UBaruPrimaryGameLayout>(OwningPlayerController, PrimaryGameLayoutClass);
 	if (!IsValid(PrimaryGameLayout))
 	{
-		BARU_NET_LOG(
-			this,
-			LogBaruUI,
-			Error,
-			TEXT("Primary Game Layout 생성에 실패했습니다."));
-
+		BARU_NET_LOG(this, LogBaruUI, Error, TEXT("Primary Game Layout 생성에 실패했습니다."));
 		return;
 	}
 
-	/**
-	 * PrimaryLayout을 먼저 플레이어 화면에 추가한다.
-	 * 이 과정에서 BindWidget으로 연결된 Layer Stack들이 준비된다.
-	 */
+	PrimaryGameLayout->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	PrimaryGameLayout->AddToPlayerScreen(0);
 
-	ULocalPlayer* LocalPlayer =
-		OwningPlayerController->GetLocalPlayer();
-
+	ULocalPlayer* LocalPlayer = OwningPlayerController->GetLocalPlayer();
 	if (!IsValid(LocalPlayer))
 	{
-		BARU_NET_LOG(
-			this,
-			LogBaruUI,
-			Error,
-			TEXT("LocalPlayer를 찾지 못했습니다."));
-
-		PrimaryGameLayout->RemoveFromParent();
-		PrimaryGameLayout = nullptr;
-
 		return;
 	}
 
-	UBaruUIManagerSubsystem* UIManager =
-		LocalPlayer->GetSubsystem<UBaruUIManagerSubsystem>();
-
+	UBaruUIManagerSubsystem* UIManager = LocalPlayer->GetSubsystem<UBaruUIManagerSubsystem>();
 	if (!IsValid(UIManager))
 	{
-		BARU_NET_LOG(
-			this,
-			LogBaruUI,
-			Error,
-			TEXT("UIManagerSubsystem을 찾지 못했습니다."));
-
-		PrimaryGameLayout->RemoveFromParent();
-		PrimaryGameLayout = nullptr;
-
 		return;
 	}
 
-	/**
-	 * UI Manager가 앞으로 사용할 PrimaryLayout을 등록한다.
-	 */
 	UIManager->RegisterPrimaryLayout(PrimaryGameLayout);
 
-	if (!MainHUDWidgetClass)
+	// 단 1회만 Main HUD 생성 및 등록
+	if (MainHUDWidgetClass)
 	{
-		BARU_NET_LOG(
-			this,
-			LogBaruUI,
-			Warning,
-			TEXT("MainHUDWidgetClass가 설정되지 않았습니다."));
-
-		return;
+		UCommonActivatableWidget* MainHUDWidget = UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_Game.GetTag(), MainHUDWidgetClass);
+		if (IsValid(MainHUDWidget))
+		{
+			MainHUDWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			BARU_NET_LOG(this, LogBaruUI, Log, TEXT("PrimaryGameLayout 등록 및 Main HUD 생성 완료. Layout=%s, MainHUD=%s"),
+				*PrimaryGameLayout->GetName(), *MainHUDWidget->GetName());
+		}
 	}
-
-	/**
-	 * UI.Layer.Game에 Main HUD를 추가한다.
-	 */
-	UCommonActivatableWidget* MainHUDWidget =
-		UIManager->PushWidgetToLayer(
-			BaruUITags::UI_Layer_Game.GetTag(),
-			MainHUDWidgetClass);
-
-	if (!IsValid(MainHUDWidget))
-	{
-		BARU_NET_LOG(
-			this,
-			LogBaruUI,
-			Error,
-			TEXT("Main HUD를 GameLayer에 추가하지 못했습니다."));
-
-		return;
-	}
-
-	BARU_NET_LOG(
-		this,
-		LogBaruUI,
-		Log,
-		TEXT("PrimaryGameLayout 등록 및 Main HUD 생성 완료. "
-			"Layout=%s, MainHUD=%s"),
-			*PrimaryGameLayout->GetName(),
-			*MainHUDWidget->GetName());
 }
 
 void ABaruHUD::EndPlay(
