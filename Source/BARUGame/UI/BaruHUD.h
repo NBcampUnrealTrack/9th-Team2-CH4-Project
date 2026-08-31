@@ -4,14 +4,15 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
+#include "GameplayTagContainer.h"
 
 #include "BaruHUD.generated.h"
 
-class UBaruMainHUDWidget;
 class UBaruPrimaryGameLayout;
+class UCommonActivatableWidget;
 
 /**
- * 로컬 플레이어의 Primary Game Layout 생성과 보관을 담당한다
+ * 로컬 플레이어의 Primary Game Layout 생성과 초기 위젯 표시를 담당한다.
  * Dedicated Server에서는 UI를 생성하지 않는다.
  */
 UCLASS(Blueprintable)
@@ -31,9 +32,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
 	TSubclassOf<UBaruPrimaryGameLayout> PrimaryGameLayoutClass;
 
-	// GameLayer에 추가할 Main HUD Blueprint 클래스
+	/**
+	 * PrimaryGameLayout이 준비된 후 처음 열 위젯 클래스
+	 *
+	 * 게임 플레이에서는 WBP_MainHUD,
+	 * 메인 메뉴에서는 WBP_Title을 설정한다.
+	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
-	TSubclassOf<UBaruMainHUDWidget> MainHUDWidgetClass;
+	TSubclassOf<UCommonActivatableWidget> InitialWidgetClass;
+
+	/**
+	 * InitialWidgetClass를 추가할 UI 레이어
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI", meta = (Categories = "UI.Layer"))
+	FGameplayTag InitialWidgetLayerTag;
 
 	// 실행 중 생성된 로컬 플레이어의 Primary Game Layout
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI")
