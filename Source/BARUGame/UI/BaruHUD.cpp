@@ -6,9 +6,7 @@
 #include "CommonActivatableWidget.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
-#include "UI/BaruUITags.h"
 #include "UI/Foundation/BaruPrimaryGameLayout.h"
-#include "UI/HUD/BaruMainHUDWidget.h"
 #include "UI/Subsystem/BaruUIManagerSubsystem.h"
 
 ABaruHUD::ABaruHUD()
@@ -61,17 +59,68 @@ void ABaruHUD::BeginPlay()
 
 	UIManager->RegisterPrimaryLayout(PrimaryGameLayout);
 
-	// 단 1회만 Main HUD 생성 및 등록
-	if (MainHUDWidgetClass)
+	if (!InitialWidgetClass)
 	{
-		UCommonActivatableWidget* MainHUDWidget = UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_Game.GetTag(), MainHUDWidgetClass);
-		if (IsValid(MainHUDWidget))
-		{
-			MainHUDWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-			BARU_NET_LOG(this, LogBaruUI, Log, TEXT("PrimaryGameLayout 등록 및 Main HUD 생성 완료. Layout=%s, MainHUD=%s"),
-				*PrimaryGameLayout->GetName(), *MainHUDWidget->GetName());
-		}
+		BARU_NET_LOG(
+			this,
+			LogBaruUI,
+			Warning,
+			TEXT("InitialWidgetClass가 설정되지 않았습니다."));
+
+		return;
 	}
+	
+	if (!InitialWidgetLayerTag.IsValid())
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruUI,
+			Warning,
+			TEXT("InitialWidgetLayerTag가 설정되지 않았습니다.")
+			);
+		
+		return;
+	}
+
+	/**
+	 * 설정된 초기 레이어에 초기 위젯을 추가한다.
+	 *
+	 * 예:
+	 * - 게임 맵: UI.Layer.Game + WBP_MainHUD
+	 * - 메뉴 맵: UI.Layer.Menu + WBP_Title
+	 */
+	UCommonActivatableWidget* InitialWidget =
+		UIManager->PushWidgetToLayer(
+			InitialWidgetLayerTag,
+			InitialWidgetClass);
+
+	if (!IsValid(InitialWidget))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruUI,
+			Error,
+			TEXT("초기 Widget을 Layer에 추가하지 못했습니다. "
+				"LayerTag=%s"
+			),
+			*InitialWidgetLayerTag.ToString()
+			);
+
+		return;
+	}
+
+	InitialWidget->SetVisibility(
+		ESlateVisibility::SelfHitTestInvisible);
+
+	BARU_NET_LOG(
+		this,
+		LogBaruUI,
+		Log,
+		TEXT("PrimaryGameLayout 등록 및 초기 Widget 생성 완료. "
+			"Layout=%s, LayerTag=%s, Widget=%s"),
+			*PrimaryGameLayout->GetName(),
+			*InitialWidgetLayerTag.ToString(),
+			*InitialWidget->GetName());
 }
 
 void ABaruHUD::EndPlay(

@@ -16,6 +16,7 @@ class UCommonActivatableWidget;
  *
  * GameLayer	 : Main HUD
  * GameMenuLayer : 인벤토리, ESC 메뉴, 설정
+ * MenuLayer	 : 타이틀, 로비, 맵 선택, 옵션
  * ModalLayer	 : 확인창처럼 가장 위에 표시되는 화면
  */
 UCLASS(Abstract, Blueprintable)
@@ -56,6 +57,10 @@ protected:
 	// ESC 메뉴, 인벤토리 등이 들어가는 중간 레이어
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI")
 	TObjectPtr<UCommonActivatableWidgetStack> GameMenuLayer;
+	
+	// 타이틀, 로비, 옵션 같은 프론트앤드 화면이 들어가는 레이어
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI")
+	TObjectPtr<UCommonActivatableWidgetStack> MenuLayer;
 
 	// 확인창과 중요한 팝업이 들어가는 최상위 레이어
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI")

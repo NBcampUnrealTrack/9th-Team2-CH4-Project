@@ -117,6 +117,12 @@ UCommonActivatableWidgetStack*
 	{
 		return GameMenuLayer;
 	}
+	
+	if (LayerTag.MatchesTagExact(
+		BaruUITags::UI_Layer_Menu.GetTag()))
+	{
+		return MenuLayer;
+	}
 
 	if (LayerTag.MatchesTagExact(
 		BaruUITags::UI_Layer_Modal.GetTag()))
