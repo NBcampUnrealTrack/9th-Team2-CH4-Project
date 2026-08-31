@@ -14,8 +14,6 @@
 
 ABaruMonsterAIController::ABaruMonsterAIController()
 {
-	PrimaryActorTick.bCanEverTick = false;
-	
 	// 몬스터가 사용할 감각 기관을 생성
 	MonsterPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(
 			TEXT("MonsterPerceptionComponent"));
@@ -283,6 +281,10 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		// 이전에는 플레이어였지만 현재 조종되지 않는 Pawn이
 		// 목록에 남아 있을 가능성도 함께 정리
 		RemoveVisiblePlayerCandidate(SensedPawn);
+		
+		// 남은 후보를 기준으로 이동 갱신
+		UpdateMovementFromPerceptionState();
+
 		return;
 	}
 
@@ -296,6 +298,9 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		// 발견한 플레이어를 추적 후보 목록에 추가
 		// 가장 가까운 플레이어를 현재 대상으로 선택
 		AddVisiblePlayerCandidate(SensedPawn);
+		
+		// 새로 선택된 타깃을 향해 이동
+		UpdateMovementFromPerceptionState();
 		
 		BARU_NET_LOG(
 			this,
@@ -333,6 +338,9 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 			LostTargetLocation
 		);
 	}
+	
+	// 남은 타깃 또는 마지막 목격 위치를 기준으로 이동 갱신
+	UpdateMovementFromPerceptionState();
 	
 	BARU_NET_LOG(
 		this,
@@ -492,6 +500,7 @@ void ABaruMonsterAIController::ClearLastKnownTargetLocation()
 		Log,
 		TEXT("Last known target location forgotten.")
 	);
+			
 }
 
 void ABaruMonsterAIController::UpdateMovementFromPerceptionState()
