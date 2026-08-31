@@ -34,4 +34,13 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category= "Item")
 	UStaticMeshComponent* MeshComponent;	// Static Mesh는 다른데서 쓰일 수도 있으니까 이걸로 이름.
 	
+		//Item의 Pickup(습득)
+		// 습득하는 아이템의 수량(총알 10발 등.)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category= "Item", meta=(ClampMin = "1"))
+	int32 PickupCount = 1;
+	
+		//습득 시도. 서버 전용 코드. 습득하는 아이템 전량을 수납 성공하면 자신을 파괴한 뒤, true 반환.
+	UFUNCTION(BlueprintCallable, Category= "Item")
+	bool TryPickup(AActor* Picker);
+	
 };
