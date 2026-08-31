@@ -35,12 +35,15 @@ public:
     FGameplayAttributeData MaxHealth;
     ATTRIBUTE_ACCESSORS(UBaruCoreAttributeSet, MaxHealth)
 
-    // 물리 방어력
+    // 물리 방어력 (수치형: 0 ~ 100,000+)
     UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_PhysicalDefense, Category = "BARU|Core|Combat")
     FGameplayAttributeData PhysicalDefense;
     ATTRIBUTE_ACCESSORS(UBaruCoreAttributeSet, PhysicalDefense)
 
-    // Todo : 특수 방어력 정의 후 속성 값 알맞은 곳에 추가
+    // 특수 저항률 (비율형: 0.0 ~ 1.0)
+    UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_SpecialResistance, Category = "BARU|Core|Combat")
+    FGameplayAttributeData SpecialResistance;
+    ATTRIBUTE_ACCESSORS(UBaruCoreAttributeSet, SpecialResistance)
     
     // 이동 속도
     UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_MoveSpeed, Category = "BARU|Core|Movement")
@@ -56,6 +59,7 @@ protected:
     UFUNCTION() virtual void OnRep_Health(const FGameplayAttributeData& OldHealth);
     UFUNCTION() virtual void OnRep_MaxHealth(const FGameplayAttributeData& OldMaxHealth);
     UFUNCTION() virtual void OnRep_PhysicalDefense(const FGameplayAttributeData& OldPhysicalDefense);
+    UFUNCTION() virtual void OnRep_SpecialResistance(const FGameplayAttributeData& OldSpecialResistance); // [추가]
     UFUNCTION() virtual void OnRep_MoveSpeed(const FGameplayAttributeData& OldMoveSpeed);
 
 private:

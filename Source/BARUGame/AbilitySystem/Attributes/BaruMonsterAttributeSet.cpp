@@ -40,6 +40,7 @@ void UBaruMonsterAttributeSet::PostGameplayEffectExecute(const FGameplayEffectMo
     AActor* TargetActor = Data.Target.GetAvatarActor();
     UAbilitySystemComponent* TargetASC = Data.Target.AbilityActorInfo->AbilitySystemComponent.Get();
 
+    // [분기 1] 피격 계산식(meta attribute)을 통해 제압 피해가 들어온 경우
     if (Data.EvaluatedData.Attribute == GetIncomingSuppressionDamageAttribute())
     {
         const float LocalDamage = GetIncomingSuppressionDamage();
@@ -49,16 +50,33 @@ void UBaruMonsterAttributeSet::PostGameplayEffectExecute(const FGameplayEffectMo
         {
             const float NewSuppression = FMath::Clamp(GetSuppression() - LocalDamage, 0.0f, GetMaxSuppression());
             SetSuppression(NewSuppression);
-
-            // 제압도 0 도달 시 그로기 태그 부여
+            
+            // State.Debuff.Groggy 태그
             if (NewSuppression <= 0.0f && TargetASC)
             {
                 const FGameplayTag GroggyTag = FGameplayTag::RequestGameplayTag(TEXT("State.Debuff.Groggy"));
                 if (!TargetASC->HasMatchingGameplayTag(GroggyTag))
                 {
                     TargetASC->AddLooseGameplayTag(GroggyTag);
-                    BARU_NET_LOG(TargetActor, LogBaruCombat, Log, TEXT("Monster Entered Groggy State!"));
+                    BARU_NET_LOG(TargetActor, LogBaruCombat, Log, TEXT("Monster Entered Groggy State."));
                 }
+            }
+        }
+    }
+    
+    // [분기 2] 제압 속성이 직접 수정된 경우
+    else if (Data.EvaluatedData.Attribute == GetSuppressionAttribute())
+    {
+        SetSuppression(FMath::Clamp(GetSuppression(), 0.0f, GetMaxSuppression()));
+        
+        // State.Debuff.Groggy 태그
+        if (GetSuppression() <= 0.0f && TargetASC)
+        {
+            const FGameplayTag GroggyTag = FGameplayTag::RequestGameplayTag(TEXT("State.Debuff.Groggy"));
+            if (!TargetASC->HasMatchingGameplayTag(GroggyTag))
+            {
+                TargetASC->AddLooseGameplayTag(GroggyTag);
+                BARU_NET_LOG(TargetActor, LogBaruCombat, Log, TEXT("Monster Entered Groggy State via Direct Suppression Change."));
             }
         }
     }

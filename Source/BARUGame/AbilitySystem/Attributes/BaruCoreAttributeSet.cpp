@@ -9,6 +9,7 @@ UBaruCoreAttributeSet::UBaruCoreAttributeSet()
     InitHealth(100.0f);
     InitMaxHealth(100.0f);
     InitPhysicalDefense(0.0f);
+    InitSpecialResistance(0.0f);
     InitMoveSpeed(450.0f);
     InitIncomingDamage(0.0f);
 }
@@ -20,6 +21,7 @@ void UBaruCoreAttributeSet::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, Health, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, MaxHealth, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, PhysicalDefense, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, SpecialResistance, COND_None, REPNOTIFY_Always); // [추가]
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, MoveSpeed, COND_None, REPNOTIFY_Always);
 }
 
@@ -30,6 +32,14 @@ void UBaruCoreAttributeSet::PreAttributeChange(const FGameplayAttribute& Attribu
     if (Attribute == GetHealthAttribute())
     {
         NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxHealth());
+    }
+    else if (Attribute == GetPhysicalDefenseAttribute())
+    {
+        NewValue = FMath::Max(NewValue, 0.0f);
+    }
+    else if (Attribute == GetSpecialResistanceAttribute())
+    {
+        NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
     else if (Attribute == GetMaxHealthAttribute())
     {
@@ -100,4 +110,5 @@ void UBaruCoreAttributeSet::AdjustAttributeForMaxChange(FGameplayAttributeData& 
 void UBaruCoreAttributeSet::OnRep_Health(const FGameplayAttributeData& OldHealth) { GAMEPLAYATTRIBUTE_REPNOTIFY(UBaruCoreAttributeSet, Health, OldHealth); }
 void UBaruCoreAttributeSet::OnRep_MaxHealth(const FGameplayAttributeData& OldMaxHealth) { GAMEPLAYATTRIBUTE_REPNOTIFY(UBaruCoreAttributeSet, MaxHealth, OldMaxHealth); }
 void UBaruCoreAttributeSet::OnRep_PhysicalDefense(const FGameplayAttributeData& OldPhysicalDefense) { GAMEPLAYATTRIBUTE_REPNOTIFY(UBaruCoreAttributeSet, PhysicalDefense, OldPhysicalDefense); }
+void UBaruCoreAttributeSet::OnRep_SpecialResistance(const FGameplayAttributeData& OldSpecialResistance) { GAMEPLAYATTRIBUTE_REPNOTIFY(UBaruCoreAttributeSet, SpecialResistance, OldSpecialResistance); }
 void UBaruCoreAttributeSet::OnRep_MoveSpeed(const FGameplayAttributeData& OldMoveSpeed) { GAMEPLAYATTRIBUTE_REPNOTIFY(UBaruCoreAttributeSet, MoveSpeed, OldMoveSpeed); }
