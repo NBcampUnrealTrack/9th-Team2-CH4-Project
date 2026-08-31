@@ -225,7 +225,7 @@ void ABaruGameMode::UpdateAlivePlayerCount()
         {
             if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
             {
-                if (!PS->IsDBNO())
+                if (PS->IsAlive())
                 {
                     CurrentAlive++;
                 }
@@ -270,12 +270,10 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
         {
             if (const ABaruPlayerState* PS = OtherPC->GetPlayerState<ABaruPlayerState>())
             {
-                if (!PS->IsDBNO() && OtherPC->GetPawn())
+                if (PS->IsAlive() && OtherPC->GetPawn())
                 {
-                    // 서버 내부 뷰 타깃 설정
                     DeadController->SetViewTargetWithBlend(OtherPC->GetPawn(), 1.0f);
-
-                    // 원격 클라이언트인 경우 화면 카메라 전환 패킷 전송
+                    
                     if (!DeadController->IsLocalController())
                     {
                         DeadController->ClientSetViewTarget(OtherPC->GetPawn(), FViewTargetTransitionParams());
@@ -327,13 +325,14 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             if (!IsValid(BaruPC) || BaruPC->IsPendingKillPending()) continue;
 
             const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
-            const bool bPlayerSurvived = bAllExtracted && (PS && !PS->IsDBNO());
+            const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
             const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
 
             // 각 클라이언트 PC 로컬 SaveGame에 개별 기록
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
+            // Todo : 수집 아이템이 추가되면 조건문을 변경해서 ExtractedItemCount를 Item 데이터에서 읽어오도록 변경하기
             Report.ExtractedItemCount = bPlayerSurvived ? 5 : 0;
 
             BaruPC->Client_ShowSettlementUI(Report);
