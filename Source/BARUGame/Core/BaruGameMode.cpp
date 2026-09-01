@@ -58,9 +58,22 @@ void ABaruGameMode::Logout(AController* Exiting)
     {
         BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Ingame Player Logged Out: %s"), *Exiting->GetName());
 
-        if (APawn* ControlledPawn = Exiting->GetPawn())
+        APawn* ExitingPawn = Exiting->GetPawn();
+        
+        // (클라이언트 중도 이탈 시) 관전자의 카메라를 다른 생존자로 즉시 전환
+        for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
         {
-            ControlledPawn->Destroy();
+            APlayerController* PC = Iterator->Get();
+            if (IsValid(PC) && PC != Exiting && PC->GetViewTarget() == ExitingPawn)
+            {
+                StartSpectating(PC);
+            }
+        }
+
+        // 폰 안전 파괴
+        if (ExitingPawn)
+        {
+            ExitingPawn->Destroy();
         }
     }
 
@@ -330,5 +343,18 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
 
             BaruPC->Client_ShowSettlementUI(Report);
         }
+    }
+    
+    // 정산 완료 후 일정 시간 뒤 전원 로비로 복귀시키는 타이머 가동
+    if (!bAllExtracted)
+    {
+        PendingTargetMapURL = DefaultReturnMapURL;
+        GetWorldTimerManager().SetTimer(
+            PostSettlementTimerHandle,
+            this,
+            &ABaruGameMode::ExecuteServerTravel,
+            PostSettlementReturnDelay,
+            false
+        );
     }
 }

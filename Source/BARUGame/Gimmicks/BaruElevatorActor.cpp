@@ -44,6 +44,25 @@ void ABaruElevatorActor::BeginPlay()
 
     BoardingTriggerBox->OnComponentBeginOverlap.AddDynamic(this, &ABaruElevatorActor::HandleTriggerBeginOverlap);
     BoardingTriggerBox->OnComponentEndOverlap.AddDynamic(this, &ABaruElevatorActor::HandleTriggerEndOverlap);
+    
+    // [레벨 시작 즉시는 엘리베이터 비활성화 상태
+    bIsElevatorArmed = false;
+
+    // 지정된 락아웃 시간 이후에만 엘리베이터 감지 활성화
+    FTimerHandle LockoutTimerHandle;
+    GetWorldTimerManager().SetTimer(
+        LockoutTimerHandle,
+        this,
+        &ABaruElevatorActor::EnableElevatorActivation,
+        ArrivalLockoutDuration,
+        false
+    );
+}
+
+void ABaruElevatorActor::EnableElevatorActivation()
+{
+    bIsElevatorArmed = true;
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Elevator System Armed & Ready for Boarding."));
 }
 
 void ABaruElevatorActor::HandleTriggerBeginOverlap(
@@ -68,8 +87,8 @@ void ABaruElevatorActor::HandleTriggerBeginOverlap(
     BoardedPlayers.Add(PlayerPawn);
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Player Entered Elevator: %s (Current: %d)"), *PlayerPawn->GetName(), BoardedPlayers.Num());
 
-    // 전원 탑승 검사
-    if (!bIsCountingDown && CheckAllPlayersBoarded())
+    // 전원 탑승 검사 & bIsElevatorArmed == true 일 경우에만 카운트다운 시작
+    if (bIsElevatorArmed && !bIsCountingDown && CheckAllPlayersBoarded())
     {
         StartCountdown();
     }

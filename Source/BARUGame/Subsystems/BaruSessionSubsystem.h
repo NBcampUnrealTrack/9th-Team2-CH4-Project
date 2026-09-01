@@ -4,9 +4,11 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "UObject/SoftObjectPtr.h"
+#include "Engine/EngineBaseTypes.h"
 #include "BaruSessionSubsystem.generated.h"
 
 class UWorld;
+class UNetDriver;
 
 // BARU 게임만 선별하기 위한 식별 키
 namespace BaruMatchmakingConstants
@@ -137,4 +139,14 @@ private:
 
     bool bCreateSessionAfterDestroy = false;
     bool bPendingReturnToMainMenu = false;
+    
+    // 네트워크 끊김 발생 시 호출하는 Handler
+    void HandleNetworkFailure(
+        UWorld* World, 
+        UNetDriver* NetDriver, 
+        ENetworkFailure::Type FailureType, 
+        const FString& ErrorString
+    );
+    
+    FDelegateHandle NetworkFailureDelegateHandle;
 };

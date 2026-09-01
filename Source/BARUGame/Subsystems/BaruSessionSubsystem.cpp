@@ -1,5 +1,6 @@
 #include "Subsystems/BaruSessionSubsystem.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -24,11 +25,43 @@ void UBaruSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 	BARU_LOG(LogBaruSession, Log, TEXT("BaruSessionSubsystem Initialized. Default Lobby Map: %s"), *DefaultMainLobbyLevel.ToString());
+	
+	if (GEngine)
+	{
+		NetworkFailureDelegateHandle = GEngine->OnNetworkFailure().AddUObject(
+			this, 
+			&UBaruSessionSubsystem::HandleNetworkFailure
+		);
+	}
+}
+
+void UBaruSessionSubsystem::HandleNetworkFailure(
+	UWorld* World, 
+	UNetDriver* NetDriver, 
+	ENetworkFailure::Type FailureType, 
+	const FString& ErrorString)
+{
+	BARU_LOG(LogBaruSession, Warning, TEXT("Network Failure (%d): %s. Returning to MainMenuLevel."), 
+		static_cast<int32>(FailureType), *ErrorString);
+	
+	DestroySession(false);
+
+	if (UWorld* CurrentWorld = GetWorld())
+	{
+		UGameplayStatics::OpenLevel(CurrentWorld, TEXT("MainMenuLevel"));
+	}
 }
 
 void UBaruSessionSubsystem::Deinitialize()
 {
 	BARU_LOG(LogBaruSession, Log, TEXT("BaruSessionSubsystem Deinitialized."));
+
+	// Deinitialize -> 델리게이트 해제
+	if (GEngine && NetworkFailureDelegateHandle.IsValid())
+	{
+		GEngine->OnNetworkFailure().Remove(NetworkFailureDelegateHandle);
+		NetworkFailureDelegateHandle.Reset();
+	}
 
 	if (IOnlineSessionPtr SessionInterface = GetSessionInterface())
 	{

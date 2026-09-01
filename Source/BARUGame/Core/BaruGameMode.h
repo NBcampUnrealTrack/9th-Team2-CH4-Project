@@ -82,4 +82,14 @@ protected:
 	// 시네마틱 재생 후 실제 이동까지의 대기 시간
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
 	float TransitionDelayDuration = 3.5f;
+	
+	// 탐사 실패/시간 초과 정산 후 복귀할 기본 로비 맵 (에디터 디폴트 설정)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Rules")
+	FString DefaultReturnMapURL = TEXT("/Game/BARUGame/Maps/Company01_Lobby");
+
+	// 정산 UI 확인 후 로비로 강제 이동하기까지의 대기 시간 (초)
+	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
+	float PostSettlementReturnDelay = 10.0f;
+
+	FTimerHandle PostSettlementTimerHandle;
 };

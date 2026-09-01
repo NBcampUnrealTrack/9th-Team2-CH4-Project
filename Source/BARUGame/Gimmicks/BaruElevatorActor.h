@@ -91,4 +91,14 @@ protected:
     FTimerHandle CountdownTimerHandle;
     float RemainingCountdown = 0.0f;
     bool bIsCountingDown = false;
+    
+    // 레벨 진입 후 엘리베이터가 재작동하기까지 필요한 대기 시간 (초)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings")
+    float ArrivalLockoutDuration = 10.0f;
+
+    // 엘리베이터 작동 가능 플래그 (레벨 시작하자마자 다음 레벨로 전환하는 것을 방지)
+    bool bIsElevatorArmed = false;
+
+    //락아웃 해제 함수
+    void EnableElevatorActivation();
 };
