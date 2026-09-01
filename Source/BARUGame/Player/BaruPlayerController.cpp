@@ -2,13 +2,13 @@
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Pawn.h"
+#include "EnhancedInputComponent.h"       // [추가] 관전 입력 바인딩
+#include "GameFramework/GameStateBase.h" 
 #include "Player/BaruPlayerState.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"   // ★[추가] ProcessAbilityInput 호출용
 #include "Subsystems/BaruSaveGameSubsystem.h"
 #include "BaruLog.h"
-// ★[삭제] #include "EnhancedInputSubsystems.h"
-// ★[삭제] #include "Engine/LocalPlayer.h"
-//   IMC 등록을 Character 로 일원화했으므로 여기서는 더 이상 필요 없습니다.
+
 
 ABaruPlayerController::ABaruPlayerController()
 {
@@ -31,19 +31,38 @@ void ABaruPlayerController::BeginPlay()
     SetShowMouseCursor(false);
     
     BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
-
-    // ★[삭제] AddMappingContext 블록 삭제.
-    //   ABaruCharacter::SetupPlayerInputComponent 가 동일한 IMC 를 우선순위 0으로 등록하고 있어
-    //   이중 등록 상태였습니다. 두 컨텍스트가 나중에 달라지면 같은 키가 두 번 발화합니다.
-    //   ※ Character 쪽에는 IMC 미할당 시 에러 로그를 추가해두었습니다.
-
-    // ★[삭제] "TODO : 멀티플레이에서 패킷 전송시 UI 인식이 안되는 것을 예방하는 방지 코드" 주석 삭제
-    //   (내용이 없는 미완성 메모라 혼동만 줍니다. 필요하면 이슈로 관리)
+    
 }
 
-// ★[추가] GAS 입력 펌프.
-//   이 함수는 입력이 존재하는 쪽(소유 클라이언트 / 리슨서버 호스트)에서만 호출되며,
-//   TryActivateAbility 가 내부적으로 서버에 활성화 RPC 를 보내므로 이게 정상 GAS 구조입니다.
+//관전 전환 입력 바인딩 사망시 
+void ABaruPlayerController::SetupInputComponent()
+{
+    Super::SetupInputComponent();
+
+    if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent))
+    {
+        if (SpectateNextAction)
+        {
+            EIC->BindAction(SpectateNextAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_SpectateNext);
+        }
+        if (SpectatePrevAction)
+        {
+            EIC->BindAction(SpectatePrevAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_SpectatePrev);
+        }
+    }
+}
+
+// [추가] 입력 핸들러. 클라에서 실행되며 서버에 요청만 보냄
+void ABaruPlayerController::Input_SpectateNext()
+{
+    Server_CycleSpectatorTarget(true);
+}
+
+void ABaruPlayerController::Input_SpectatePrev()
+{
+    Server_CycleSpectatorTarget(false);
+}
+
 void ABaruPlayerController::PostProcessInput(const float DeltaTime, const bool bGamePaused)
 {
     if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
@@ -111,38 +130,6 @@ void ABaruPlayerController::Server_RequestDropItem_Implementation(int32 SlotInde
     // TODO: 인벤토리 아이템 제거 및 필드 월드 액터 드롭 스폰 처리
 }
 
-bool ABaruPlayerController::Server_SendPing_Validate(FVector PingLocation, EBaruPingType PingType)
-{
-    return !PingLocation.ContainsNaN();
-}
-
-void ABaruPlayerController::Server_SendPing_Implementation(FVector PingLocation, EBaruPingType PingType)
-{
-    APawn* ControlledPawn = GetPawn();
-    if (!IsValid(ControlledPawn))
-    {
-        return;
-    }
-    
-    const float MaxPingDistSq = FMath::Square(MaxPingDistance);   // ★[수정] 하드코딩 10000.0f 제거
-    if (FVector::DistSquared(ControlledPawn->GetActorLocation(), PingLocation) > MaxPingDistSq)
-    {
-        BARU_NET_LOG(this, LogBaruNet, Warning, TEXT("Ping Location exceeds maximum allowed range."));
-        return;
-    }
-
-    BARU_NET_LOG(this, LogBaruNet, Log, TEXT("Relaying Ping: Type %d at %s"), static_cast<int32>(PingType), *PingLocation.ToString());
-    
-    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
-    {
-        if (ABaruPlayerController* TargetPC = Cast<ABaruPlayerController>(Iterator->Get()))
-        {
-            // ★[수정] 기존: TargetPC->OnPingReceived.Broadcast(PingLocation, PingType);
-            //   델리게이트는 복제되지 않아 서버 안에서만 터지고 클라 UI 에는 도달하지 않았습니다.
-            TargetPC->Client_ReceivePing(PingLocation, PingType);
-        }
-    }
-}
 
 // Client RPC
 void ABaruPlayerController::Client_ShowSettlementUI_Implementation(const FBaruSettlementReport& Report)
@@ -168,9 +155,90 @@ void ABaruPlayerController::Client_PlayElevatorCinematic_Implementation()
     OnPlayCinematic.Broadcast();
 }
 
-// ★[추가] 각 클라이언트 로컬에서 UI 델리게이트를 실제로 터뜨리는 지점
-void ABaruPlayerController::Client_ReceivePing_Implementation(FVector_NetQuantize PingLocation, EBaruPingType PingType)
+bool ABaruPlayerController::Server_CycleSpectatorTarget_Validate(bool bNext)
 {
-    BARU_NET_LOG(this, LogBaruNet, Verbose, TEXT("Client_ReceivePing: Type %d"), static_cast<int32>(PingType));
-    OnPingReceived.Broadcast(PingLocation, PingType);
+    // _Validate 에서 false 를 반환하면 해당 클라이언트의 연결이 끊깁니다.
+    // 파라미터가 bool 하나뿐이라 조작 가능한 값이 없으므로 항상 통과시키고,
+    // "관전 자격이 있는가" 같은 게임 규칙은 아래 _Implementation 에서 거릅니다.
+    return true;
+}
+
+void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNext)
+{
+    // [1] 자격 검사 — 살아있는 플레이어가 팀원 시점을 훔쳐보는 것을 차단합니다.
+    //     추출 호러에서 벽 너머 몬스터 위치를 아는 건 치명적인 이득이라 반드시 막아야 합니다.
+    const ABaruPlayerState* MyPS = GetPlayerState<ABaruPlayerState>();
+    if (!MyPS || MyPS->IsAlive())
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("CycleSpectatorTarget rejected: requester is still alive."));
+        return;
+    }
+
+    // [2] 관전 가능한 대상 수집
+    TArray<APawn*> Candidates;
+    GatherSpectatablePawns(Candidates);
+
+    if (Candidates.Num() == 0)
+    {
+        BARU_NET_LOG(this, LogBaruSession, Log, TEXT("CycleSpectatorTarget: no living teammates to spectate."));
+        return;
+    }
+
+    // [3] 현재 대상의 위치를 찾고 다음/이전으로 이동 (순환)
+    int32 CurrentIndex = Candidates.IndexOfByKey(CurrentSpectatingPawn.Get());
+    if (CurrentIndex == INDEX_NONE)
+    {
+        // 보고 있던 대상이 죽었거나 나갔으면 첫 번째부터 시작
+        CurrentIndex = 0;
+    }
+    else
+    {
+        const int32 Delta = bNext ? 1 : -1;
+        CurrentIndex = (CurrentIndex + Delta + Candidates.Num()) % Candidates.Num();
+        //                             Num() 을 더하는 이유: bNext=false 일 때 음수 인덱스 방지
+    }
+
+    APawn* NewTarget = Candidates[CurrentIndex];
+    CurrentSpectatingPawn = NewTarget;
+
+    
+    SetViewTargetWithBlend(NewTarget, 0.5f);
+
+    if (!IsLocalController())
+    {
+        ClientSetViewTarget(NewTarget, FViewTargetTransitionParams());
+    }
+
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Spectating Target Changed to: %s"), *GetNameSafe(NewTarget));
+}
+
+// [추가] 살아있는 팀원의 폰만 모읍니다. 서버에서만 호출됩니다.
+void ABaruPlayerController::GatherSpectatablePawns(TArray<APawn*>& OutPawns) const
+{
+    OutPawns.Reset();
+
+    AGameStateBase* GS = GetWorld() ? GetWorld()->GetGameState() : nullptr;
+    if (!GS)
+    {
+        return;
+    }
+
+    for (APlayerState* PS : GS->PlayerArray)
+    {
+        const ABaruPlayerState* BaruPS = Cast<ABaruPlayerState>(PS);
+        if (!BaruPS || BaruPS == GetPlayerState<ABaruPlayerState>())
+        {
+            continue;   // 자기 자신은 제외
+        }
+
+        if (!BaruPS->IsAlive())
+        {
+            continue;   // 죽은 팀원은 관전 대상이 아님
+        }
+
+        if (APawn* SpectatablePawn = BaruPS->GetPawn())
+        {
+            OutPawns.Add(SpectatablePawn);
+        }
+    }
 }

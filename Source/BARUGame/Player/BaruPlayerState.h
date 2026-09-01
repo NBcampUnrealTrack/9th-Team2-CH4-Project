@@ -16,6 +16,7 @@ class UBaruAbilitySystemComponent;      // [추가]
 class UBaruCoreAttributeSet;
 class UBaruPlayerAttributeSet;
 class UBaruHealthComponent;
+class UBaruInventoryComponent;      // item-iven 연동
 struct FOnAttributeChangeData;          // [추가] Sanity 어트리뷰트 콜백용
 
 //플레이어 상태 및 ASC, AttributeSet 소유
@@ -48,7 +49,10 @@ public:
     // HealthComponent Getter
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
     UBaruHealthComponent* GetHealthComponent() const { return HealthComponent; }
-
+    
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    UBaruInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }  //다른사람이 인벤토리에 접근할 수 있게 해주는 getter추가
+    
     // Getter & Setter
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
     bool IsReady() const { return bIsReady; }
@@ -58,13 +62,8 @@ public:
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
     bool IsAlive() const { return !bIsDead && !bIsDBNO; }
     
-    // Todo: GameMode 담당자가 IsAlive()로 교체시 이 함수는 return bIsDBNO; 로 되돌려야함
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
-    bool IsDBNO() const { return bIsDBNO || bIsDead; }
-    
-    // [추가] 진짜 DBNO 상태만 필요한 곳(부활 UI 등)은 이걸 쓰면됨
-    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
-    bool IsDBNOOnly() const { return bIsDBNO; }
+    bool IsDBNO() const { return bIsDBNO; }
     
     // [추가] 사망 여부 / 생존 여부
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
@@ -129,6 +128,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
     TObjectPtr<UBaruHealthComponent> HealthComponent;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Inventory")
+    TObjectPtr<UBaruInventoryComponent> InventoryComponent;             //인벤토리 컴포넌트를 소유하도록 보관하는 변수
     
     // Replicated Properties & RepNotifies
     UPROPERTY(ReplicatedUsing = OnRep_IsReady, VisibleInstanceOnly, Category = "BARU|State")
