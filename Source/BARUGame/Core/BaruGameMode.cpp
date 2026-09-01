@@ -189,6 +189,8 @@ void ABaruGameMode::ExecuteServerTravel()
         BARU_LOG(LogBaruSession, Error, TEXT("ExecuteServerTravel Failed: Empty Target Map URL."));
         return;
     }
+    
+    ProcessSettlement(true);
 
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Executing ServerTravel to: %s"), *PendingTargetMapURL);
     GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"));
@@ -203,7 +205,9 @@ void ABaruGameMode::UpdateAlivePlayerCount()
 
     if (!CachedBaruGameState) return;
 
-    int32 CurrentAlive = 0;
+    int32 CurrentActive = 0;
+    int32 CurrentDBNO = 0;
+    
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         APlayerController* PC = Iterator->Get();
@@ -211,16 +215,18 @@ void ABaruGameMode::UpdateAlivePlayerCount()
         {
             if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
             {
-                if (PS->IsAlive())
-                {
-                    CurrentAlive++;
-                }
+                if (PS->IsAlive()) CurrentActive++;
+                else if (PS->IsDBNOOnly()) CurrentDBNO++;
             }
         }
     }
 
-    CachedBaruGameState->SetAlivePlayerCount(CurrentAlive);
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Ingame Alive Player Count: %d"), CurrentAlive);
+    CachedBaruGameState->SetAlivePlayerCount(CurrentActive);
+
+    if (CurrentActive <= 0 && CurrentDBNO <= 0)
+    {
+        CheckTeamWipe();
+    }
 }
 
 void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerActor)

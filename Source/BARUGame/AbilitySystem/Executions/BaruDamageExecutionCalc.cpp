@@ -94,7 +94,7 @@ void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCusto
     TargetResistance = FMath::Clamp(TargetResistance, 0.0f, 1.0f);
 
     // 특수 피해 태그 조회
-    const FGameplayTag SpecialDamageTag = FGameplayTag::RequestGameplayTag(TEXT("Data.Damage.Special"), false);
+    const FGameplayTag SpecialDamageTag = FBaruGameplayTags::Get().Data_Damage_Special;
     const float BaseSpecialDamage = SpecialDamageTag.IsValid() 
         ? FMath::Max(Spec.GetSetByCallerMagnitude(SpecialDamageTag, false, 0.0f), 0.0f) 
         : 0.0f;

@@ -87,6 +87,7 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 	if (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
 	{
 		bCreateSessionAfterDestroy = true;
+		DestroySessionCompleteDelegateHandle = SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteDelegate);
 		SessionInterface->DestroySession(NAME_GameSession);
 		return;
 	}
