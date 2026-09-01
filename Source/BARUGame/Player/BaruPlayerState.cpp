@@ -6,6 +6,7 @@
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "Components/BaruHealthComponent.h"                       // [추가]
+#include "Gameplay/Inventory/BaruInventoryComponent.h"            // 민석님 요청 인벤 헤더 인클루드
 #include "BaruLog.h"
 
 ABaruPlayerState::ABaruPlayerState()
@@ -24,14 +25,8 @@ ABaruPlayerState::ABaruPlayerState()
     // AttributeSet
     CoreAttributeSet = CreateDefaultSubobject<UBaruCoreAttributeSet>(TEXT("CoreAttributeSet"));
     PlayerAttributeSet = CreateDefaultSubobject<UBaruPlayerAttributeSet>(TEXT("PlayerAttributeSet"));
-
-    // [추가] 반드시 필요한 한 줄 
-    //   헤더에는 HealthComponent 멤버와 GetHealthComponent() 가 있는데 생성자에서 만들지 않아
-    //   항상 nullptr 이었습니다. 그 결과 BaruCharacter::InitAbilityActorInfo() 안의
-    //   PSHealthComp->InitializeWithAbilitySystem(ASC) 가 한 번도 실행되지 않았고,
-    //   UBaruHealthComponent::OnHealthChanged 가 절대 브로드캐스트되지 않아
-    //   HUD 체력바가 영원히 갱신되지 않는 상태였습니다.
     HealthComponent = CreateDefaultSubobject<UBaruHealthComponent>(TEXT("HealthComponent"));
+    InventoryComponent = CreateDefaultSubobject<UBaruInventoryComponent>(TEXT("InventoryComponent"));       // 아이템 inven 요청
 }
 
 // [추가] HealthComponent 는 이 PlayerState 소유이므로, 폰의 빙의를 기다리지 말고
