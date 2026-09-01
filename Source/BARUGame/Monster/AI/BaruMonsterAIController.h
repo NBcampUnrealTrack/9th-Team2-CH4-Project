@@ -116,4 +116,11 @@ private:
 	// 현재 타깃과 마지막 목격 위치를 기준으로 이동 행동을 갱신
 	void UpdateMovementFromPerceptionState();
 	
+	//=============
+	//BT관련
+	//=============
+	
+	// 현재 감지 상태를 Behavior Tree가 사용할 블랙보드에 반영
+	void UpdateBlackboardFromPerceptionState();
+	
 };
