@@ -14,8 +14,9 @@ ABaruGameMode::ABaruGameMode()
 {
     PrimaryActorTick.bCanEverTick = false;
 
+    // 인게임에서도 다음 탐사 또는 로비 복귀를 위해 Seamless Travel 활성화
     bUseSeamlessTravel = true;
-    
+
     GameStateClass = ABaruGameState::StaticClass();
     PlayerControllerClass = ABaruPlayerController::StaticClass();
     PlayerStateClass = ABaruPlayerState::StaticClass();
@@ -25,7 +26,7 @@ ABaruGameMode::ABaruGameMode()
 void ABaruGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
     Super::InitGame(MapName, Options, ErrorMessage);
-    BARU_LOG(LogBaruSession, Log, TEXT("ABaruGameMode::InitGame on Map: %s"), *MapName);
+    BARU_LOG(LogBaruSession, Log, TEXT("ABaruGameMode::InitGame on Ingame Map: %s"), *MapName);
 }
 
 void ABaruGameMode::BeginPlay()
@@ -33,19 +34,19 @@ void ABaruGameMode::BeginPlay()
     Super::BeginPlay();
 
     CachedBaruGameState = GetGameState<ABaruGameState>();
-    
+
+    // 인게임 진입 즉시 탐사 상태로 전환 및 레이드 타이머 시작
     SetMatchPhase(EBaruMatchState::InProgress);
     StartRaidTimer();
 }
 
 void ABaruGameMode::PostLogin(APlayerController* NewPlayer)
 {
-    // Super::PostLogin 내부에서 RestartPlayer() -> PlayerStart 탐색 -> Pawn 스폰 -> Possess가 실행
     Super::PostLogin(NewPlayer);
 
     if (IsValid(NewPlayer))
     {
-        BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Player Logged In: %s"), *NewPlayer->GetName());
+        BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Ingame Player Logged In: %s"), *NewPlayer->GetName());
     }
 
     UpdateAlivePlayerCount();
@@ -55,8 +56,8 @@ void ABaruGameMode::Logout(AController* Exiting)
 {
     if (IsValid(Exiting))
     {
-        BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Player Logged Out: %s"), *Exiting->GetName());
-        
+        BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Ingame Player Logged Out: %s"), *Exiting->GetName());
+
         if (APawn* ControlledPawn = Exiting->GetPawn())
         {
             ControlledPawn->Destroy();
@@ -81,10 +82,6 @@ void ABaruGameMode::SetMatchPhase(EBaruMatchState NewPhase)
         CachedBaruGameState->SetMatchState(NewPhase);
     }
 }
-
-// ==============================================================================
-// 탐사 제한 시간 관리
-// ==============================================================================
 
 void ABaruGameMode::StartRaidTimer()
 {
@@ -112,7 +109,7 @@ void ABaruGameMode::UpdateRaidCountdown()
     {
         CachedBaruGameState->SetRemainingRaidTime(CurrentTime - 1);
 
-        // 1분 남았을 때 긴급 경고 공지
+        // 잔여 시간 60초 긴급 경고 공지
         if (CurrentTime == 60)
         {
             CachedBaruGameState->Multicast_BroadcastNotification(
@@ -136,13 +133,9 @@ void ABaruGameMode::OnRaidTimeout()
             FText::FromString(TEXT("TIME OUT: Facility Locked. Extraction Failed.")), 5.0f);
     }
 
-    // 타임오버 시 전원 실패 정산 실행
+    // 시간 초과 시 전원 탈출 실패 정산 실행
     ProcessSettlement(false);
 }
-
-// ==============================================================================
-// 탈출 및 레벨 전환
-// ==============================================================================
 
 void ABaruGameMode::OnExtractionZoneCountChanged(int32 InZoneCount)
 {
@@ -150,7 +143,6 @@ void ABaruGameMode::OnExtractionZoneCountChanged(int32 InZoneCount)
 
     CachedBaruGameState->SetPlayersInExtractionZoneCount(InZoneCount);
 
-    // 생존자 전원이 탈출 구역에 진입하면 상태를 Extraction으로 전이
     const int32 AliveCount = CachedBaruGameState->GetAlivePlayerCount();
     if (AliveCount > 0 && InZoneCount >= AliveCount)
     {
@@ -168,7 +160,7 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
     PendingTargetMapURL = TargetMapURL;
     SetMatchPhase(EBaruMatchState::Extraction);
 
-    // 유효한 클라이언트에 3인칭 안도 시네마틱 연출 브로드캐스트
+    // 모든 클라이언트에 안도 시네마틱 연출 브로드캐스트
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         if (ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get()))
@@ -180,7 +172,7 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
         }
     }
 
-    // 연출 시간 대기 후 실제 Travel 실행
+    // 연출 시간 대기 후 실제 ServerTravel 실행
     GetWorldTimerManager().SetTimer(
         LevelTransitionTimerHandle,
         this,
@@ -199,14 +191,8 @@ void ABaruGameMode::ExecuteServerTravel()
     }
 
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Executing ServerTravel to: %s"), *PendingTargetMapURL);
-    
-    // Todo : 레벨 기믹 구현시 해당 ServerTravel() 함수 호출하여 실제 레벨 이동
     GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"));
 }
-
-// ==============================================================================
-// 생존, 사망 및 관전 모드
-// ==============================================================================
 
 void ABaruGameMode::UpdateAlivePlayerCount()
 {
@@ -234,18 +220,17 @@ void ABaruGameMode::UpdateAlivePlayerCount()
     }
 
     CachedBaruGameState->SetAlivePlayerCount(CurrentAlive);
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Alive Player Count: %d"), CurrentAlive);
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Ingame Alive Player Count: %d"), CurrentAlive);
 }
 
 void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerActor)
 {
-    BARU_NET_LOG(VictimController, LogBaruCombat, Log, TEXT("Player Died: %s (Killer: %s)"), 
-        VictimController ? *VictimController->GetName() : TEXT("None"), 
+    BARU_NET_LOG(VictimController, LogBaruCombat, Log, TEXT("Player Died: %s (Killer: %s)"),
+        VictimController ? *VictimController->GetName() : TEXT("None"),
         KillerActor ? *KillerActor->GetName() : TEXT("None"));
 
     UpdateAlivePlayerCount();
 
-    // 사망 플레이어를 관전 모드로 전환
     if (APlayerController* VictimPC = Cast<APlayerController>(VictimController))
     {
         StartSpectating(VictimPC);
@@ -258,11 +243,9 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
 {
     if (!IsValid(DeadController) || DeadController->IsPendingKillPending()) return;
 
-    // 기존 폰 빙의 해제 및 관전 전용 모드 전환
     DeadController->UnPossess();
     DeadController->StartSpectatingOnly();
 
-    // 다른 팀원 폰을 찾아 뷰 타깃 설정
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         APlayerController* OtherPC = Iterator->Get();
@@ -273,7 +256,7 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
                 if (PS->IsAlive() && OtherPC->GetPawn())
                 {
                     DeadController->SetViewTargetWithBlend(OtherPC->GetPawn(), 1.0f);
-                    
+
                     if (!DeadController->IsLocalController())
                     {
                         DeadController->ClientSetViewTarget(OtherPC->GetPawn(), FViewTargetTransitionParams());
@@ -299,10 +282,6 @@ void ABaruGameMode::CheckTeamWipe()
     }
 }
 
-// ==============================================================================
-// 정산 및 백엔드 DB 정산
-// ==============================================================================
-
 void ABaruGameMode::AddTeamScrapValue(int32 ScrapValue)
 {
     if (!CachedBaruGameState || ScrapValue <= 0) return;
@@ -317,7 +296,9 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
 
     const int32 TotalValue = CachedBaruGameState ? CachedBaruGameState->GetTeamScrapValue() : 0;
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Processing Settlement (Survived: %d, Total Team Value: %d)"), bAllExtracted, TotalValue);
-    
+
+    UBaruSaveGameSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
+
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         if (ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get()))
@@ -327,12 +308,18 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
             const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
             const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
+            const FString PlayerName = PS ? PS->GetPlayerName() : TEXT("Operative");
 
-            // 각 클라이언트 PC 로컬 SaveGame에 개별 기록
+            // 로컬 세이브 데이터에 정산 기록 반영
+            if (SaveSubsystem)
+            {
+                SaveSubsystem->RecordRaidResult(PlayerName, EarnedGold, bPlayerSurvived);
+            }
+
+            // 클라이언트 UI 호출
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
-            // Todo : 수집 아이템이 추가되면 조건문을 변경해서 ExtractedItemCount를 Item 데이터에서 읽어오도록 변경하기
             Report.ExtractedItemCount = bPlayerSurvived ? 5 : 0;
 
             BaruPC->Client_ShowSettlementUI(Report);
