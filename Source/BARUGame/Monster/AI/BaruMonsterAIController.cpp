@@ -5,12 +5,28 @@
 
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
+
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
 #include "Monster/Components/BaruMonsterNavigationComponent.h"
+
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "TimerManager.h"
 #include "BaruLog.h"
 
+namespace BaruMonsterBlackboardKeys
+{
+	const FName TargetActor(TEXT("TargetActor"));
+
+	const FName LastKnownTargetLocation(
+		TEXT("LastKnownTargetLocation")
+	);
+
+	const FName HasLastKnownTargetLocation(
+		TEXT("HasLastKnownTargetLocation")
+	);
+}
 
 ABaruMonsterAIController::ABaruMonsterAIController()
 {
@@ -125,6 +141,43 @@ void ABaruMonsterAIController::InitializeFromControlledMonster()
 
 	MonsterNavigationComponent->ApplyMovementSettings(
 		*MonsterDataAsset
+	);
+	
+	// 이 몬스터의 DataAsset에 지정된 Behavior Tree 확인
+	if (!IsValid(MonsterDataAsset->BehaviorTreeAsset))
+	{
+		BARU_NET_LOG(
+		   this,
+		   LogBaruAI,
+		   Error,
+		   TEXT("Monster BehaviorTree is not assigned.")
+		);
+
+		return;
+	}
+
+	// Behavior Tree와 연결된 Blackboard를 초기화하고 실행
+	if (!RunBehaviorTree(MonsterDataAsset->BehaviorTreeAsset))
+	{
+		BARU_NET_LOG(
+		   this,
+		   LogBaruAI,
+		   Error,
+		   TEXT("Failed to run Monster BehaviorTree.")
+		);
+
+		return;
+	}
+	
+	// BT 실행에 성공한 뒤 초기 감지 상태를 반영
+	UpdateBlackboardFromPerceptionState();
+
+	BARU_NET_LOG(
+	   this,
+	   LogBaruAI,
+	   Log,
+	   TEXT("Monster BehaviorTree started: %s"),
+	   *GetNameSafe(MonsterDataAsset->BehaviorTreeAsset)
 	);
 		
 }
@@ -282,8 +335,8 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		// 목록에 남아 있을 가능성도 함께 정리
 		RemoveVisiblePlayerCandidate(SensedPawn);
 		
-		// 남은 후보를 기준으로 이동 갱신
-		UpdateMovementFromPerceptionState();
+		// 남은 후보 상태를 블랙보드에 반영
+		UpdateBlackboardFromPerceptionState();
 
 		return;
 	}
@@ -299,8 +352,8 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		// 가장 가까운 플레이어를 현재 대상으로 선택
 		AddVisiblePlayerCandidate(SensedPawn);
 		
-		// 새로 선택된 타깃을 향해 이동
-		UpdateMovementFromPerceptionState();
+		// 새로 선택된 타깃을 블랙보드에 반영
+		UpdateBlackboardFromPerceptionState();
 		
 		BARU_NET_LOG(
 			this,
@@ -339,8 +392,8 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		);
 	}
 	
-	// 남은 타깃 또는 마지막 목격 위치를 기준으로 이동 갱신
-	UpdateMovementFromPerceptionState();
+	// 남은 타깃 또는 마지막 목격 위치를 블랙보드에 반영
+	UpdateBlackboardFromPerceptionState();
 	
 	BARU_NET_LOG(
 		this,
@@ -493,6 +546,9 @@ void ABaruMonsterAIController::ClearLastKnownTargetLocation()
 
 	LastKnownTargetLocation = FVector::ZeroVector;
 	bHasLastKnownTargetLocation = false;
+	
+	// 기억이 끝난 상태를 블랙보드에도 반영
+	UpdateBlackboardFromPerceptionState();
 
 	BARU_NET_LOG(
 		this,
@@ -501,6 +557,84 @@ void ABaruMonsterAIController::ClearLastKnownTargetLocation()
 		TEXT("Last known target location forgotten.")
 	);
 			
+}
+
+void ABaruMonsterAIController::UpdateBlackboardFromPerceptionState()
+{
+	UBlackboardComponent* BlackboardComponent = GetBlackboardComponent();
+
+	if (!IsValid(BlackboardComponent))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Error,
+			TEXT("Monster Blackboard Component is invalid.")
+		);
+
+		return;
+	}
+
+	APawn* TargetPawn = CurrentTarget.Get();
+
+	// 현재 보이는 추적 대상이 있는 경우
+	if (IsValid(TargetPawn))
+	{
+		BlackboardComponent->SetValueAsObject(
+			BaruMonsterBlackboardKeys::TargetActor,
+			TargetPawn
+		);
+
+		// 추적 대상이 보이면 이전 목격 위치는 사용하지 않음
+		BlackboardComponent->ClearValue(
+			BaruMonsterBlackboardKeys::
+				LastKnownTargetLocation
+		);
+
+		BlackboardComponent->SetValueAsBool(
+			BaruMonsterBlackboardKeys::
+				HasLastKnownTargetLocation,
+			false
+		);
+
+		return;
+	}
+
+	// 현재 보이는 대상이 없다면 추적 대상 키를 비움
+	BlackboardComponent->ClearValue(
+		BaruMonsterBlackboardKeys::TargetActor
+	);
+
+	// 유효한 마지막 목격 위치가 있는 경우
+	if (bHasLastKnownTargetLocation &&
+		!LastKnownTargetLocation.ContainsNaN())
+	{
+		BlackboardComponent->SetValueAsVector(
+			BaruMonsterBlackboardKeys::
+				LastKnownTargetLocation,
+			LastKnownTargetLocation
+		);
+
+		BlackboardComponent->SetValueAsBool(
+			BaruMonsterBlackboardKeys::
+				HasLastKnownTargetLocation,
+			true
+		);
+
+		return;
+	}
+
+	// 현재 대상과 마지막 목격 위치가 모두 없는 상태
+	BlackboardComponent->ClearValue(
+		BaruMonsterBlackboardKeys::
+			LastKnownTargetLocation
+	);
+
+	BlackboardComponent->SetValueAsBool(
+		BaruMonsterBlackboardKeys::
+			HasLastKnownTargetLocation,
+		false
+	);
 }
 
 void ABaruMonsterAIController::UpdateMovementFromPerceptionState()

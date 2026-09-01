@@ -6,6 +6,8 @@
 #include "Engine/DataAsset.h"
 #include "BaruMonsterDataAsset.generated.h"
 
+
+class UBehaviorTree;
 /**
  * 몬스터마다 다른 설정값을 보관하는 데이터 에셋
  */
@@ -15,6 +17,15 @@ class BARUGAME_API UBaruMonsterDataAsset : public UPrimaryDataAsset
 	GENERATED_BODY()
 	
 public:
+	
+	// 이 몬스터가 판단에 사용할 Behavior Tree
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|AI"
+	)
+	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
+	
 	// 플레이어를 처음 발견할 수 있는 거리
 	UPROPERTY(
 		EditDefaultsOnly,
