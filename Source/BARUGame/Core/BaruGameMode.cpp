@@ -58,9 +58,22 @@ void ABaruGameMode::Logout(AController* Exiting)
     {
         BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Ingame Player Logged Out: %s"), *Exiting->GetName());
 
-        if (APawn* ControlledPawn = Exiting->GetPawn())
+        APawn* ExitingPawn = Exiting->GetPawn();
+        
+        // (클라이언트 중도 이탈 시) 관전자의 카메라를 다른 생존자로 즉시 전환
+        for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
         {
-            ControlledPawn->Destroy();
+            APlayerController* PC = Iterator->Get();
+            if (IsValid(PC) && PC != Exiting && PC->GetViewTarget() == ExitingPawn)
+            {
+                StartSpectating(PC);
+            }
+        }
+
+        // 폰 안전 파괴
+        if (ExitingPawn)
+        {
+            ExitingPawn->Destroy();
         }
     }
 
@@ -189,6 +202,8 @@ void ABaruGameMode::ExecuteServerTravel()
         BARU_LOG(LogBaruSession, Error, TEXT("ExecuteServerTravel Failed: Empty Target Map URL."));
         return;
     }
+    
+    ProcessSettlement(true);
 
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Executing ServerTravel to: %s"), *PendingTargetMapURL);
     GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"));
@@ -203,7 +218,9 @@ void ABaruGameMode::UpdateAlivePlayerCount()
 
     if (!CachedBaruGameState) return;
 
-    int32 CurrentAlive = 0;
+    int32 CurrentActive = 0;
+    int32 CurrentDBNO = 0;
+    
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         APlayerController* PC = Iterator->Get();
@@ -211,16 +228,18 @@ void ABaruGameMode::UpdateAlivePlayerCount()
         {
             if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
             {
-                if (PS->IsAlive())
-                {
-                    CurrentAlive++;
-                }
+                if (PS->IsAlive()) CurrentActive++;
+                else if (PS->IsDBNOOnly()) CurrentDBNO++;
             }
         }
     }
 
-    CachedBaruGameState->SetAlivePlayerCount(CurrentAlive);
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Ingame Alive Player Count: %d"), CurrentAlive);
+    CachedBaruGameState->SetAlivePlayerCount(CurrentActive);
+
+    if (CurrentActive <= 0 && CurrentDBNO <= 0)
+    {
+        CheckTeamWipe();
+    }
 }
 
 void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerActor)
@@ -324,5 +343,18 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
 
             BaruPC->Client_ShowSettlementUI(Report);
         }
+    }
+    
+    // 정산 완료 후 일정 시간 뒤 전원 로비로 복귀시키는 타이머 가동
+    if (!bAllExtracted)
+    {
+        PendingTargetMapURL = DefaultReturnMapURL;
+        GetWorldTimerManager().SetTimer(
+            PostSettlementTimerHandle,
+            this,
+            &ABaruGameMode::ExecuteServerTravel,
+            PostSettlementReturnDelay,
+            false
+        );
     }
 }

@@ -1,5 +1,6 @@
 #include "Subsystems/BaruSessionSubsystem.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -8,6 +9,7 @@
 #include "Interfaces/OnlineExternalUIInterface.h"
 #include "OnlineSessionSettings.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/PackageName.h"
 #include "BaruLog.h"
 
 UBaruSessionSubsystem::UBaruSessionSubsystem()
@@ -23,13 +25,53 @@ void UBaruSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 	BARU_LOG(LogBaruSession, Log, TEXT("BaruSessionSubsystem Initialized. Default Lobby Map: %s"), *DefaultMainLobbyLevel.ToString());
+	
+	if (GEngine)
+	{
+		NetworkFailureDelegateHandle = GEngine->OnNetworkFailure().AddUObject(
+			this, 
+			&UBaruSessionSubsystem::HandleNetworkFailure
+		);
+	}
+}
+
+void UBaruSessionSubsystem::HandleNetworkFailure(
+	UWorld* World, 
+	UNetDriver* NetDriver, 
+	ENetworkFailure::Type FailureType, 
+	const FString& ErrorString)
+{
+	BARU_LOG(LogBaruSession, Warning, TEXT("Network Failure (%d): %s. Returning to MainMenuLevel."), 
+		static_cast<int32>(FailureType), *ErrorString);
+	
+	DestroySession(false);
+
+	if (UWorld* CurrentWorld = GetWorld())
+	{
+		UGameplayStatics::OpenLevel(CurrentWorld, TEXT("MainMenuLevel"));
+	}
 }
 
 void UBaruSessionSubsystem::Deinitialize()
 {
 	BARU_LOG(LogBaruSession, Log, TEXT("BaruSessionSubsystem Deinitialized."));
-	
-	DestroySession();
+
+	// Deinitialize -> 델리게이트 해제
+	if (GEngine && NetworkFailureDelegateHandle.IsValid())
+	{
+		GEngine->OnNetworkFailure().Remove(NetworkFailureDelegateHandle);
+		NetworkFailureDelegateHandle.Reset();
+	}
+
+	if (IOnlineSessionPtr SessionInterface = GetSessionInterface())
+	{
+		SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(CreateSessionCompleteDelegateHandle);
+		SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegateHandle);
+		SessionInterface->ClearOnJoinSessionCompleteDelegate_Handle(JoinSessionCompleteDelegateHandle);
+		SessionInterface->ClearOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteDelegateHandle);
+	}
+
+	DestroySession(false);
 	Super::Deinitialize();
 }
 
@@ -55,6 +97,8 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 {
 	StoredLobbyLevel = OverrideLobbyLevel.IsNull() ? DefaultMainLobbyLevel : OverrideLobbyLevel;
 	StoredServerName = ServerName;
+	StoredNumConnections = NumPublicConnections;
+	bStoredIsLANMatch = bIsLANMatch;
 
 	IOnlineSessionPtr SessionInterface = GetSessionInterface();
 
@@ -62,7 +106,7 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 	if (!SessionInterface.IsValid())
 	{
 		BARU_LOG(LogBaruSession, Warning, TEXT("CreateSession: OnlineSubsystem unavailable. Fallback to Local Listen Server."));
-       
+        
 		if (GetWorld() && GetWorld()->GetNetMode() != NM_ListenServer)
 		{
 			OpenLobbyLevelAsListenServer(StoredLobbyLevel);
@@ -76,6 +120,7 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 	if (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
 	{
 		bCreateSessionAfterDestroy = true;
+		DestroySessionCompleteDelegateHandle = SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteDelegate);
 		SessionInterface->DestroySession(NAME_GameSession);
 		return;
 	}
@@ -109,11 +154,9 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 	LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_HOST_NAME, HostPlayerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
 	const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
-	
-	// 세션 인터페이스 호출 전 LocalPlayer와 UniqueNetId의 유효성을 사전에 검증
 	FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
 
-	if (!NetId.IsValid() || !SessionInterface->CreateSession(*NetId, NAME_GameSession, *LastSessionSettings))
+	if (!NetId.IsValid() || !NetId.GetUniqueNetId().IsValid() || !SessionInterface->CreateSession(*NetId.GetUniqueNetId(), NAME_GameSession, *LastSessionSettings))
 	{
 		SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(CreateSessionCompleteDelegateHandle);
 		BARU_LOG(LogBaruSession, Error, TEXT("CreateSession failed immediately on execution."));
@@ -167,7 +210,7 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 	const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
 	FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
 
-	if (!SessionInterface.IsValid() || !NetId.IsValid())
+	if (!SessionInterface.IsValid() || !NetId.IsValid() || !NetId.GetUniqueNetId().IsValid())
 	{
 		OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
 		return;
@@ -180,7 +223,7 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 	LastSessionSearch->bIsLanQuery = bIsLANMatch;
 	LastSessionSearch->QuerySettings.Set(FName(TEXT("PRESENCESEARCH")), true, EOnlineComparisonOp::Equals);
 
-	if (!SessionInterface->FindSessions(*NetId, LastSessionSearch.ToSharedRef()))
+	if (!SessionInterface->FindSessions(*NetId.GetUniqueNetId(), LastSessionSearch.ToSharedRef()))
 	{
 		SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegateHandle);
 		OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);

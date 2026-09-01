@@ -30,13 +30,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
 	bool SaveCurrentGame();
 
+	// 특정 슬롯 세이브 데이터 디스크 저장 함수 선언
+	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
+	bool SaveGameBySlot(const FString& InSlotName);
+	
 	// 레이드 정산 결과 반영 및 즉시 저장
 	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
 	void RecordRaidResult(const FString& InPlayerName, int32 EarnedGold, bool bSurvived);
 
-	// 현재 메모리에 캐시된 세이브 객체 반환
+	// 현재 메모리에 캐시된 활성 슬롯의 세이브 객체 반환
 	UFUNCTION(BlueprintPure, Category = "BARU|SaveGame")
-	UBaruSaveGame* GetCachedSaveGame() const { return CachedSaveGame; }
+	UBaruSaveGame* GetCachedSaveGame() const;
+	
+	// 특정 플레이어 슬롯의 캐시 세이브 객체 반환
+	UFUNCTION(BlueprintPure, Category = "BARU|SaveGame")
+	UBaruSaveGame* GetCachedSaveGameByPlayer(const FString& InPlayerName) const;
 
 public:
 	UPROPERTY(BlueprintAssignable, Category = "BARU|SaveGame|Delegates")
@@ -47,7 +55,7 @@ public:
 
 protected:
 	UPROPERTY(Transient)
-	TObjectPtr<UBaruSaveGame> CachedSaveGame;
+	TMap<FString, TObjectPtr<UBaruSaveGame>> CachedSaveGames;
 
 	FString CurrentSlotName;
 	const int32 UserIndex = 0;

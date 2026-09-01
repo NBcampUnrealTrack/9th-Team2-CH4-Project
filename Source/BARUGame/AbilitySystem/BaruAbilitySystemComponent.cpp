@@ -59,18 +59,28 @@ void UBaruAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGam
             if (AbilitySpec->Ability)
             {
                 AbilitySpec->InputPressed = true;
-                if (AbilitySpec->IsActive())
-                {
-                    AbilitySpecInputPressed(*AbilitySpec);
-                }
-                else
+                if (AbilitySpec->IsActive()) AbilitySpecInputPressed(*AbilitySpec);
+                else AbilitiesToActivate.AddUnique(AbilitySpec->Handle);
+            }
+        }
+    }
+
+    // Held
+    for (const FGameplayAbilitySpecHandle& SpecHandle : InputHeldSpecHandles)
+    {
+        if (FGameplayAbilitySpec* AbilitySpec = FindAbilitySpecFromHandle(SpecHandle))
+        {
+            if (AbilitySpec->Ability && !AbilitySpec->IsActive())
+            {
+                const UBaruGameplayAbility* BaruAbility = Cast<UBaruGameplayAbility>(AbilitySpec->Ability);
+                if (BaruAbility && BaruAbility->GetActivationPolicy() == EBaruAbilityActivationPolicy::WhileInputActive)
                 {
                     AbilitiesToActivate.AddUnique(AbilitySpec->Handle);
                 }
             }
         }
     }
-
+    
     // Activate
     for (const FGameplayAbilitySpecHandle& AbilitySpecHandle : AbilitiesToActivate)
     {
