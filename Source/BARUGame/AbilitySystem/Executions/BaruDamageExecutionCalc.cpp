@@ -39,6 +39,7 @@ static const FBaruDamageStatics& DamageStatics()
 UBaruDamageExecutionCalc::UBaruDamageExecutionCalc()
 {
     RelevantAttributesToCapture.Add(DamageStatics().PhysicalDefenseDef);
+    RelevantAttributesToCapture.Add(DamageStatics().SpecialResistanceDef);
     RelevantAttributesToCapture.Add(DamageStatics().IncomingDamageDef);
     RelevantAttributesToCapture.Add(DamageStatics().IncomingSuppressionDamageDef);
 }
@@ -47,13 +48,11 @@ void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCusto
 {
     const FGameplayEffectSpec& Spec = ExecutionParams.GetOwningSpec();
     
+    FAggregatorEvaluateParameters EvaluationParameters;
+    
     // Source/Target 태그 컨테이너 조회
     const FGameplayTagContainer* SourceTags = Spec.CapturedSourceTags.GetAggregatedTags();
     const FGameplayTagContainer* TargetTags = Spec.CapturedTargetTags.GetAggregatedTags();
-    
-    FAggregatorEvaluateParameters EvaluationParameters;
-    EvaluationParameters.SourceTags = SourceTags;
-    EvaluationParameters.TargetTags = TargetTags;
 
     float TotalDamageToApply = 0.0f;
     

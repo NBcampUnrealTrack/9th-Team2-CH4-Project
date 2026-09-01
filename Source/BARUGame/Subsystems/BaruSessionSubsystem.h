@@ -132,6 +132,9 @@ private:
 
     TSoftObjectPtr<UWorld> StoredLobbyLevel;
     FString StoredServerName;
+    int32 StoredNumConnections = 5;
+    bool bStoredIsLANMatch = false;
+
     bool bCreateSessionAfterDestroy = false;
     bool bPendingReturnToMainMenu = false;
 };
