@@ -8,6 +8,8 @@
 #include "Engine/DataTable.h"
 #include "Engine/World.h"      // (SpawnActor, GetWorld, FActorSpawnParameters)
 #include "Net/UnrealNetwork.h"
+#include "GameFramework/PlayerState.h" // [추가] 컴포넌트 소유자가 PlayerState인지 확인
+#include "GameFramework/Pawn.h"        // [추가] 실제 캐릭터 위치를 사용
 
 UBaruInventoryComponent::UBaruInventoryComponent()
 {
@@ -370,14 +372,35 @@ void UBaruInventoryComponent::Server_DropItem_Implementation(UBaruItemInstance* 
 
 	const int32 Actual = FMath::Min(Count, Item->Quantity);
 
-		// 캐릭터 앞쪽에 스폰.
-	FVector SpawnLoc = GetOwner()->GetActorLocation()
-		+ GetOwner()->GetActorForwardVector() * 100.f;
+		// [수정:260901] 인벤토리의 소유자가 PlayerState.
+		// PlayerState가 아닌 실제 플레이어 Pawn(Character) 앞에 아이템을 드롭.
+	AActor* SpawnRef = GetOwner();	//Spawn Reference -> SpawnRef : 스폰 출처. 생성된 액터의 참조변수의 줄임말.
 
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	if (const APlayerState* OwnerPS = Cast<APlayerState>(GetOwner()))
+	{
+		if (APawn* OwnerPawn = OwnerPS->GetPawn())
+		{
+			SpawnRef = OwnerPawn;
+		}
+	}
 
+		// 소유자나 Pawn을 찾지 못한 비정상 상황에서는 드롭 안 함.
+	if (!IsValid(SpawnRef))
+	{
+		return;
+	}
+
+	const FVector SpawnLoc =
+		SpawnRef->GetActorLocation()
+		+ SpawnRef->GetActorForwardVector() * 100.f;
+
+		//아이템 액터를 생성할 때 사용할 설정상자 Params를 생성.
+	FActorSpawnParameters Params; //액터(Actor)를 스폰(Spawn)할 때 필요한 설정들을 담은(Param~) 구조체(F), 줄여서 변수명 Params.
+	Params.SpawnCollisionHandlingOverride =	// Spawn~ : 생성 위치에 충돌물이 있을 때 어떻게 할지 정하는 항목. world.h 에 구현.
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;	// EngineTypes.h에 구현.
+											//“원래 위치에 충돌물이 있으면, 근처의 가능한 위치로 조금 조정해 본다. 조정에 실패해도 Actor 생성 자체는 취소하지 말고 생성한다.”
+				//아이템 드롭 위치에 문제 있으면 다른 걸로 바꾸면 됨. AdjustIfPossibleButDontSpawnIfColliding. 로 하면 충돌시, 액터 생성 안 함.
+	
 		// 스폰 성공을 확인한 뒤에만 슬롯 제거 (데이터가 사라지는 순서로 일하지 않음).
 	ABaruBaseItem* Spawned = GetWorld()->SpawnActor<ABaruBaseItem>(
 		Data->ItemActorClass, SpawnLoc, FRotator::ZeroRotator, Params);

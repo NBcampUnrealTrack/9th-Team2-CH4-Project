@@ -10,9 +10,12 @@
 #include "Gameplay/Inventory/BaruInventoryComponent.h"	//습득한 "아이템"을 "인벤"으로 수납.
 #include "GameFramework/Pawn.h"	// Pawn을 주우니까.
 #include "GameFramework/PlayerState.h"	// PlayerState와 연결됨.
+#include "GameplayTags/BaruGameplayTags.h" // Pickup을 Tags에서 만들어진 Pickup 태그 사용
 
 ABaruBaseItem::ABaruBaseItem()
 {
+		// 레플리케이션 부분. 서버에서 Destroy된 월드 아이템이 클라이언트에서도 사라지도록 함.
+	bReplicates = true;
 	PrimaryActorTick.bCanEverTick = false;	// Tick 필요 없음.
 	
 		//1. 콜리전 크기, 형태 설정.
@@ -82,4 +85,44 @@ bool ABaruBaseItem::TryPickup(AActor* Picker)	// Actor : 타입 || Picker : 이�
 		// 획득한 아이템이 일부만 인벤토리로 들어갔으면 남은 수량으로 갱신.
 	PickupCount = Left;
 	return false;
+}
+
+
+	// 클라이언트도 프롬프트를 표시해야 하므로 여기서는 서버 권한을 검사하지 않음.
+	// 이 대상이 상호작용 가능한지 확인하는 부분.
+bool ABaruBaseItem::CanInteract_Implementation(APawn* Interactor) const
+{
+	return IsValid(Interactor)
+		&& PickupCount > 0
+		&& !ItemRow.RowName.IsNone();
+}
+
+	//UI에게 전달하는 부분. "이 아이템을 보고 있을 때, 화면에 F: 줍기라고 표시해주세요."
+FText ABaruBaseItem::GetInteractPromptText_Implementation(APawn* Interactor) const
+{
+		// 현재 프로젝트의 상호작용 입력이 F키이므로 F로 표시.
+	return FText::FromString(TEXT("F: 줍기"));	// 테스트 단계에서만 문구를 반환하는 것. 어차피 나중에 UI가 실제 키를 읽고 자동으로 표시하게 개선 가능.
+}
+
+	//상호작용의 종류는 무엇인가?
+FGameplayTag ABaruBaseItem::GetInteractionTag_Implementation() const
+{
+		// 이미 프로젝트에 정의된 태그를 사용. 새 태그를 만들 필요 없음.
+	return FBaruGameplayTags::Get().Interaction_Type_Pickup;
+}
+
+	// 얼마나 오래 눌러야 작용하는지. 0.f -> 즉시.
+float ABaruBaseItem::GetInteractionDuration_Implementation() const
+{
+		// 즉시 습득.
+	return 0.f;
+}
+
+	// 실제로 무엇을 작용할 지 묻는 부분.
+	// "실제로 상호작용을 실행하라고 명령하는 부분."
+void ABaruBaseItem::ExecuteInteraction_Implementation(APawn* Interactor)
+{
+		// 이 함수는 Character의 서버 상호작용 처리 안에서 호출되어야 함.
+		// TryPickup 내부에서 서버 권한과 인벤토리 존재 여부를 다시 확인.
+	TryPickup(Interactor);
 }

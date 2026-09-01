@@ -10,14 +10,16 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Engine/DataTable.h" // 데이터 테이블을 쓰기 위해서 필요.
+#include "Interfaces/InteractableInterface.h" // 상호작용 인터페이스. 엔진의 자체 클래스. Pick up용.
 #include "BaruBaseItem.generated.h"
 
 class USphereComponent; // 기본은 원형의 콜리전으로.
 class UStaticMeshComponent; // 움직이는 아이템이면 나중에 SkeletalMesh도 고려. 액터에 Skeletal 넣으려면 추가 조치 필요.
+class APawn; // PlayerState에서 인터렉트가 진행되므로, Pawn을 직접.
 
 UCLASS()
-class BARUGAME_API ABaruBaseItem : public AActor
-{
+class BARUGAME_API ABaruBaseItem : public AActor, public IInteractableInterface
+{					//BaruBaseItem은 Actor이면서, Inter~도 가짐. Inter를 추가함으로, 상호작용도 가능하게 됨.
 	GENERATED_BODY()
 	
 public:	
@@ -42,5 +44,12 @@ public:
 		//습득 시도. 서버 전용 코드. 습득하는 아이템 전량을 수납 성공하면 자신을 파괴한 뒤, true 반환.
 	UFUNCTION(BlueprintCallable, Category= "Item")
 	bool TryPickup(AActor* Picker);
+	
+		// Interaction 구현. 시스템이 아이템에 물어보는 함수들. 캐릭터가 이 액터를 상호작용 대상으로 인식하고 호출.(260901 추가.)
+	virtual bool CanInteract_Implementation(APawn* Interactor) const override;
+	virtual FText GetInteractPromptText_Implementation(APawn* Interactor) const override;
+	virtual FGameplayTag GetInteractionTag_Implementation() const override;
+	virtual float GetInteractionDuration_Implementation() const override;
+	virtual void ExecuteInteraction_Implementation(APawn* Interactor) override;
 	
 };

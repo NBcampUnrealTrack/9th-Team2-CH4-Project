@@ -27,7 +27,8 @@ public:
 		// 즉, 오브젝트만으로는 복제가 안 되니 Replicated Subobjects 기능 사용이 필요.
 		//참고 : https://dev.epicgames.com/documentation/unreal-engine/replicating-uobjects-in-unreal-engine?lang=ko
 	virtual bool IsSupportedForNetworking() const override { return true; } // 네트워크 대상이 될 자격 부여.(Like 비자.)
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutProps) const override; // 어떤 변수를 복제할지. -> cpp에서 고름.
+	virtual void GetLifetimeReplicatedProps(
+	TArray<FLifetimeProperty>& OutLifetimeProps) const override; // 어떤 변수를 복제할지. -> cpp에서 고름.
 	
 	// DT_Items의 행 이름. 아이템의 데이터테이블에 넣을 항목.
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
