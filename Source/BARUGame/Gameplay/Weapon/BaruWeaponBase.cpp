@@ -2,13 +2,29 @@
 
 
 #include "Gameplay/Weapon/BaruWeaponBase.h"
+#include "Components/SkeletalMeshComponent.h"
 
-// Sets default values
 ABaruWeaponBase::ABaruWeaponBase()
 {
- 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+		// 무기는 매 프레임 Tick할 필요 없음
 	PrimaryActorTick.bCanEverTick = false;
 
+		// 다른 플레이어에게도 장착 무기가 보이도록 Actor 복제
+	bReplicates = true;
+
+	// 무기는 Character에 붙어서 움직이므로 별도 위치 복제는 하지 않음
+	SetReplicateMovement(false);
+
+	// 무기의 보이는 몸체이자 RootComponent
+	WeaponMesh =
+		CreateDefaultSubobject<USkeletalMeshComponent>(
+			TEXT("WeaponMesh"));
+
+	SetRootComponent(WeaponMesh);
+
+	// 장착 무기는 충돌 판정을 하지 않음
+	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMesh->SetGenerateOverlapEvents(false);
 }
 
 void ABaruWeaponBase::Fire(AActor* WeaponInstigator)
