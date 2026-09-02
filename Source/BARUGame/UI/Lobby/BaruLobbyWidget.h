@@ -1,4 +1,4 @@
-// BaurLobbyWidget.h
+// BaruLobbyWidget.h
 
 #pragma once
 
@@ -10,7 +10,10 @@
 
 class UButton;
 class UCanvasPanel;
+class UListView;
+class UTextBlock;
 class UWidgetSwitcher;
+class UBaruSessionListItemData;
 
 UENUM(BlueprintType)
 enum class EBaruLobbyView : uint8
@@ -63,6 +66,18 @@ protected:
 		bool bWasSuccessful
 		);
 	
+	UFUNCTION()
+	void HandleCreateRoomClicked();
+	
+	UFUNCTION()
+	void HandleCreateSessionComplete(
+		bool bWasSuccessful
+		);
+	
+	void RebuildSessionResultList(
+		bool bWasSuccessful
+		);
+	
 	// 화면 패널
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UWidgetSwitcher> Switcher_LobbyView;
@@ -79,6 +94,29 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UCanvasPanel> Panel_SearchResults;
 	
+	// BindWidget
+	UPROPERTY(
+		BlueprintReadOnly,
+		meta = (BindWidget),
+		Category = "BARU|UI|Lobby|Session")
+	TObjectPtr<UListView> ListView_SearchResults;
+	
+	UPROPERTY(
+		BlueprintReadOnly,
+		meta = (BindWidget),
+		Category = "BARU|UI|Lobby|Session")
+	TObjectPtr<UTextBlock> Text_NoSearchResults;
+	
+	/**
+	 * ListView에 전달한 UObject Item들을 보관한다.
+	 * 
+	 * 검색을 다시 실행하면 기존 Item을 제거하고
+	 * 새로운 검색 결과로 다시 생성한다.
+	 */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBaruSessionListItemData>>
+	SessionListItems;
+	
 	// 버튼
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UButton> Button_OpenContract;
@@ -92,12 +130,19 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UButton> Button_BackFromSearchResults;
 	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
+	TObjectPtr<UButton> Button_CreateRoom;
+	
 	// 외부 시스템과 검색 데이터
 	UPROPERTY(Transient)
 	TObjectPtr<UBaruSessionSubsystem> SessionSubsystem;
 	
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI|Lobby")
 	TArray<FBaruSessionSearchResultInfo> SessionSearchResults;
+	
+	// 방 생성 중복 요청 방지
+	UPROPERTY(Transient)
+	bool bIsCreatingSession = false;
 	
 	// 현재 화면 상태
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI|Lobby")
