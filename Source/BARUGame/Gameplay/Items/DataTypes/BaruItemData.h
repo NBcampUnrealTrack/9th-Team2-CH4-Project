@@ -32,6 +32,7 @@ class ABaruBaseItem;
 class UTexture2D;
 class UBaruItemInstance;	// 아이템 실체.
 class UBaruInventoryComponent;	// 인벤 컴포넌트.
+class UBaruWeaponDataAsset; // 무기 상세 설정 DataAsset
 
 // 아이템 종류. 사용(UseItem)할 때 이 값으로 분기.
 UENUM(BlueprintType)
@@ -78,6 +79,12 @@ public:
 	// 아이템의 설계도(클래스). 버리기(드롭)할 때 사용
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data")
 	TSubclassOf<ABaruBaseItem> ItemActorClass;
+	
+	// 무기 아이템일 때 사용하는 무기 상세 설정 DataAsset.
+		// 예: DA_Weapon_Revolver, DA_Weapon_Rifle
+		// Weapon이 아닌 아이템은 비워둠.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weapon")
+	TSoftObjectPtr<UBaruWeaponDataAsset> WeaponDataAsset;
 	
 #pragma region 그리드와 스택 부분들. 아이템 중첩하는 등.
 		// 그리드 때문에 추가하는 부분들.

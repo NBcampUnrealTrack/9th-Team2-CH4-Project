@@ -6,6 +6,9 @@
 #include "GameFramework/Actor.h"
 #include "BaruWeaponBase.generated.h"
 
+class USkeletalMeshComponent;
+
+
 UCLASS()
 class BARUGAME_API ABaruWeaponBase : public AActor
 {
