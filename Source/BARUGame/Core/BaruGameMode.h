@@ -78,7 +78,7 @@ protected:
 	// 레벨 전환 연출 대기용 타이머 및 목적지 URL
 	FTimerHandle LevelTransitionTimerHandle;
 	FString PendingTargetMapURL;
-
+	
 	// 시네마틱 재생 후 실제 이동까지의 대기 시간
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
 	float TransitionDelayDuration = 3.5f;
@@ -88,8 +88,8 @@ protected:
 	FString DefaultReturnMapURL = TEXT("/Game/BARUGame/Maps/Company01_Lobby");
 
 	// 정산 UI 확인 후 로비로 강제 이동하기까지의 대기 시간 (초)
-	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
-	float PostSettlementReturnDelay = 10.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Rules")
+	float PostSettlementReturnDelay = 8.0f;
 
 	FTimerHandle PostSettlementTimerHandle;
 };

@@ -172,6 +172,8 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
 
     PendingTargetMapURL = TargetMapURL;
     SetMatchPhase(EBaruMatchState::Extraction);
+    
+    ProcessSettlement(true);
 
     // 모든 클라이언트에 안도 시네마틱 연출 브로드캐스트
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
@@ -186,11 +188,15 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
     }
 
     // 연출 시간 대기 후 실제 ServerTravel 실행
+    BARU_NET_LOG(this, LogBaruSession, Log, 
+        TEXT("Level transition requested. Traveling to '%s' in %.1f seconds..."), 
+        *PendingTargetMapURL, TransitionDelayDuration);
+
     GetWorldTimerManager().SetTimer(
         LevelTransitionTimerHandle,
         this,
         &ABaruGameMode::ExecuteServerTravel,
-        TransitionDelayDuration,
+        TransitionDelayDuration, // ★ 수정
         false
     );
 }
@@ -203,10 +209,8 @@ void ABaruGameMode::ExecuteServerTravel()
         return;
     }
     
-    ProcessSettlement(true);
-
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Executing ServerTravel to: %s"), *PendingTargetMapURL);
-    GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"));
+    GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"), true);
 }
 
 void ABaruGameMode::UpdateAlivePlayerCount()
@@ -327,15 +331,7 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
             const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
             const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
-            const FString PlayerName = PS ? PS->GetPlayerName() : TEXT("Operative");
 
-            // 로컬 세이브 데이터에 정산 기록 반영
-            if (SaveSubsystem)
-            {
-                SaveSubsystem->RecordRaidResult(PlayerName, EarnedGold, bPlayerSurvived);
-            }
-
-            // 클라이언트 UI 호출
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
@@ -350,7 +346,7 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
     {
         PendingTargetMapURL = DefaultReturnMapURL;
         GetWorldTimerManager().SetTimer(
-            PostSettlementTimerHandle,
+            LevelTransitionTimerHandle,
             this,
             &ABaruGameMode::ExecuteServerTravel,
             PostSettlementReturnDelay,
