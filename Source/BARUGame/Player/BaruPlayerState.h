@@ -65,6 +65,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
     bool IsDBNO() const { return bIsDBNO; }
     
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    bool IsDBNOOnly() const { return !bIsDead && bIsDBNO; }
+    
     // [추가] 사망 여부 / 생존 여부
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
     bool IsDead() const { return bIsDead; }
