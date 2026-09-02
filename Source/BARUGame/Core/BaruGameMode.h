@@ -3,12 +3,20 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "Engine/EngineTypes.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "Core/BaruGameState.h"
 #include "BaruGameMode.generated.h"
 
 class ABaruPlayerController;
 class ABaruPlayerState;
 class ABaruCharacter;
+
+struct FDisconnectedPlayerSnapshot
+{
+	FUniqueNetIdRepl UniqueId;
+	TWeakObjectPtr<APawn> PreservedPawn;
+	float DisconnectTime = 0.0f;
+};
 
 /**
  * 인게임(지하 던전 탐사) 전용 GameMode
@@ -64,6 +72,8 @@ protected:
 
 	void StartSpectating(APlayerController* DeadController);
 	void ExecuteServerTravel();
+	
+	void CleanUpExpiredSnapshots();
 
 protected:
 	UPROPERTY(Transient)
@@ -92,4 +102,12 @@ protected:
 	float PostSettlementReturnDelay = 8.0f;
 
 	FTimerHandle PostSettlementTimerHandle;
+	
+protected:
+	// 접속 해제자 스냅샷 맵
+	TMap<FString, FDisconnectedPlayerSnapshot> DisconnectedSnapshots;
+
+	// 접속이 끊긴 경우 90초의 유예 시간을 부여
+	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
+	float ReconnectGracePeriod = 90.0f;
 };
