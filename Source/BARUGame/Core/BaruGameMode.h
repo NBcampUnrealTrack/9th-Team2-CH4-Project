@@ -3,12 +3,20 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "Engine/EngineTypes.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "Core/BaruGameState.h"
 #include "BaruGameMode.generated.h"
 
 class ABaruPlayerController;
 class ABaruPlayerState;
 class ABaruCharacter;
+
+struct FDisconnectedPlayerSnapshot
+{
+	FUniqueNetIdRepl UniqueId;
+	TWeakObjectPtr<APawn> PreservedPawn;
+	float DisconnectTime = 0.0f;
+};
 
 /**
  * 인게임(지하 던전 탐사) 전용 GameMode
@@ -64,6 +72,8 @@ protected:
 
 	void StartSpectating(APlayerController* DeadController);
 	void ExecuteServerTravel();
+	
+	void CleanUpExpiredSnapshots();
 
 protected:
 	UPROPERTY(Transient)
@@ -78,7 +88,7 @@ protected:
 	// 레벨 전환 연출 대기용 타이머 및 목적지 URL
 	FTimerHandle LevelTransitionTimerHandle;
 	FString PendingTargetMapURL;
-
+	
 	// 시네마틱 재생 후 실제 이동까지의 대기 시간
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
 	float TransitionDelayDuration = 3.5f;
@@ -88,8 +98,16 @@ protected:
 	FString DefaultReturnMapURL = TEXT("/Game/BARUGame/Maps/Company01_Lobby");
 
 	// 정산 UI 확인 후 로비로 강제 이동하기까지의 대기 시간 (초)
-	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
-	float PostSettlementReturnDelay = 10.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Rules")
+	float PostSettlementReturnDelay = 8.0f;
 
 	FTimerHandle PostSettlementTimerHandle;
+	
+protected:
+	// 접속 해제자 스냅샷 맵
+	TMap<FString, FDisconnectedPlayerSnapshot> DisconnectedSnapshots;
+
+	// 접속이 끊긴 경우 90초의 유예 시간을 부여
+	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
+	float ReconnectGracePeriod = 90.0f;
 };

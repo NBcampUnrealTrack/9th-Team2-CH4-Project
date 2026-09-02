@@ -15,7 +15,7 @@ enum class EBaruMatchState : uint8
 };
 
 // [Ping] 타입 정의
-/**
+
 UENUM(BlueprintType)
 enum class EBaruPingType : uint8
 {
@@ -25,7 +25,6 @@ enum class EBaruPingType : uint8
 	Attack      UMETA(DisplayName = "Attack"),
 	Danger      UMETA(DisplayName = "Danger")
 };
-*/
 
 // UI Delegate
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruMatchStateChanged, EBaruMatchState, NewState);
@@ -33,11 +32,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruRaidTimerUpdated, int32, Rema
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruAlivePlayerCountChanged, int32, NewAliveCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruTeamScrapValueChanged, int32, NewTeamValue);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruExtractionPlayerCountChanged, int32, CurrentInZone, int32, RequiredCount);
-// DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruPingReceived, FVector, PingLocation, EBaruPingType, PingType);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruPingReceived, FVector, PingLocation, EBaruPingType, PingType);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruGlobalNotificationReceived, const FText&, MessageText, float, DisplayDuration);
+
 /**
  * 생존자 수, 팀 수집물 총 가치등 GameState 및 전역 브로드캐스트(Notification) 관리
- * Todo : 전역 관리가 필요한 정보가 있다면 추가
  */
 
 UCLASS()
@@ -85,11 +84,9 @@ public:
 	// Multicast RPC
 	UFUNCTION(NetMulticast, Reliable, Category = "BARU|GameState")
 	void Multicast_BroadcastNotification(const FText& MessageText, float DisplayDuration = 3.0f);
-
-	/*
+	
 	UFUNCTION(NetMulticast, Reliable, Category = "BARU|GameState")
 	void Multicast_BroadcastPing(FVector PingLocation, EBaruPingType PingType);
-	**/
 
 public:
 	// UI 델리게이트
@@ -107,11 +104,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
 	FOnBaruExtractionPlayerCountChanged OnExtractionPlayerCountChanged;
-
-	/*
+	
 	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
 	FOnBaruPingReceived OnPingReceived;
-	**/
 	
 	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
 	FOnBaruGlobalNotificationReceived OnGlobalNotificationReceived;

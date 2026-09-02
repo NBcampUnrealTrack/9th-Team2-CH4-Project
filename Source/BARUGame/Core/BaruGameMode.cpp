@@ -44,9 +44,54 @@ void ABaruGameMode::PostLogin(APlayerController* NewPlayer)
 {
     Super::PostLogin(NewPlayer);
 
-    if (IsValid(NewPlayer))
+    if (!IsValid(NewPlayer))
     {
-        BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Ingame Player Logged In: %s"), *NewPlayer->GetName());
+        return;
+    }
+
+    BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Ingame Player Logged In: %s"), *NewPlayer->GetName());
+
+    // 재접속 핸드셰이크 검증
+    if (ABaruPlayerState* NewPS = NewPlayer->GetPlayerState<ABaruPlayerState>())
+    {
+        const FString IdStr = NewPS->GetUniqueId().ToString();
+
+        if (FDisconnectedPlayerSnapshot* Found = DisconnectedSnapshots.Find(IdStr))
+        {
+            const float Elapsed = GetWorld()->GetTimeSeconds() - Found->DisconnectTime;
+
+            // 유예 시간 이내이며 기존 폰이 월드에 살아있는 경우
+            if (Elapsed <= ReconnectGracePeriod && Found->PreservedPawn.IsValid())
+            {
+                // Super::PostLogin에서 엔진이 자동 스폰한 임시 기본 폰 제거
+                if (APawn* DefaultSpawnedPawn = NewPlayer->GetPawn())
+                {
+                    if (DefaultSpawnedPawn != Found->PreservedPawn.Get())
+                    {
+                        DefaultSpawnedPawn->Destroy();
+                    }
+                }
+
+                // 월드에 남아있던 원래 폰에 재빙의
+                NewPlayer->Possess(Found->PreservedPawn.Get());
+                DisconnectedSnapshots.Remove(IdStr);
+
+                BARU_NET_LOG(NewPlayer, LogBaruSession, Log, 
+                    TEXT("Player successfully reconnected and re-possessed original Pawn (NetId: %s)"), *IdStr);
+
+                UpdateAlivePlayerCount();
+                return;
+            }
+            else
+            {
+                // 유예 시간이 지났거나 폰이 파괴된 경우 정리
+                if (Found->PreservedPawn.IsValid())
+                {
+                    Found->PreservedPawn->Destroy();
+                }
+                DisconnectedSnapshots.Remove(IdStr);
+            }
+        }
     }
 
     UpdateAlivePlayerCount();
@@ -54,23 +99,53 @@ void ABaruGameMode::PostLogin(APlayerController* NewPlayer)
 
 void ABaruGameMode::Logout(AController* Exiting)
 {
-    if (IsValid(Exiting))
+    if (APlayerController* PC = Cast<APlayerController>(Exiting))
     {
-        BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Ingame Player Logged Out: %s"), *Exiting->GetName());
+        BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("Ingame Player Logged Out: %s"), *PC->GetName());
 
-        APawn* ExitingPawn = Exiting->GetPawn();
-        
-        // (클라이언트 중도 이탈 시) 관전자의 카메라를 다른 생존자로 즉시 전환
-        for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+        APawn* ExitingPawn = PC->GetPawn();
+        ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>();
+
+        // 1. 생존 상태의 플레이어가 튕긴 경우: 폰을 파괴하지 않고 보존
+        if (ExitingPawn && PS && PS->IsAlive())
         {
-            APlayerController* PC = Iterator->Get();
-            if (IsValid(PC) && PC != Exiting && PC->GetViewTarget() == ExitingPawn)
+            FDisconnectedPlayerSnapshot Snapshot;
+            Snapshot.UniqueId = PS->GetUniqueId();
+            Snapshot.PreservedPawn = ExitingPawn;
+            Snapshot.DisconnectTime = GetWorld()->GetTimeSeconds();
+
+            FString IdStr = Snapshot.UniqueId.IsValid() ? Snapshot.UniqueId.ToString() : FString();
+            if (IdStr.IsEmpty())
             {
-                StartSpectating(PC);
+                IdStr = PS->GetPlayerName().IsEmpty() ? PC->GetName() : PS->GetPlayerName();
             }
+
+            DisconnectedSnapshots.Add(IdStr, Snapshot);
+
+            BARU_NET_LOG(PC, LogBaruSession, Warning, 
+                TEXT("Player disconnected while ALIVE. Pawn preserved for %.0fs (NetId: %s)"), 
+                ReconnectGracePeriod, *IdStr);
+
+            // 다른 관전자가 이 폰을 보고 있었다면 다른 생존자로 시점 변경
+            for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+            {
+                APlayerController* OtherPC = Iterator->Get();
+                if (IsValid(OtherPC) && OtherPC != PC && OtherPC->GetViewTarget() == ExitingPawn)
+                {
+                    StartSpectating(OtherPC);
+                }
+            }
+
+            // 폰을 월드에 그대로 남겨두기 위해 빙의만 해제
+            PC->UnPossess();
+
+            Super::Logout(Exiting);
+            UpdateAlivePlayerCount();
+            CheckTeamWipe();
+            return;
         }
 
-        // 폰 안전 파괴
+        // 2. 이미 사망했거나 폰이 없는 경우 정상 파괴
         if (ExitingPawn)
         {
             ExitingPawn->Destroy();
@@ -78,7 +153,6 @@ void ABaruGameMode::Logout(AController* Exiting)
     }
 
     Super::Logout(Exiting);
-
     UpdateAlivePlayerCount();
     CheckTeamWipe();
 }
@@ -117,16 +191,17 @@ void ABaruGameMode::UpdateRaidCountdown()
 {
     if (!CachedBaruGameState) return;
 
+    CleanUpExpiredSnapshots();
+
     const int32 CurrentTime = CachedBaruGameState->GetRemainingRaidTime();
     if (CurrentTime > 0)
     {
         CachedBaruGameState->SetRemainingRaidTime(CurrentTime - 1);
-
-        // 잔여 시간 60초 긴급 경고 공지
+        
         if (CurrentTime == 60)
         {
             CachedBaruGameState->Multicast_BroadcastNotification(
-                FText::FromString(TEXT("WARNING: Facility Shutdown in 60 Seconds!")), 5.0f);
+                FText::FromString(TEXT("WARNING: Facility Shutdown in 60 Seconds")), 5.0f);
         }
     }
     else
@@ -172,6 +247,8 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
 
     PendingTargetMapURL = TargetMapURL;
     SetMatchPhase(EBaruMatchState::Extraction);
+    
+    ProcessSettlement(true);
 
     // 모든 클라이언트에 안도 시네마틱 연출 브로드캐스트
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
@@ -186,11 +263,15 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
     }
 
     // 연출 시간 대기 후 실제 ServerTravel 실행
+    BARU_NET_LOG(this, LogBaruSession, Log, 
+        TEXT("Level transition requested. Traveling to '%s' in %.1f seconds..."), 
+        *PendingTargetMapURL, TransitionDelayDuration);
+
     GetWorldTimerManager().SetTimer(
         LevelTransitionTimerHandle,
         this,
         &ABaruGameMode::ExecuteServerTravel,
-        TransitionDelayDuration,
+        TransitionDelayDuration, // ★ 수정
         false
     );
 }
@@ -203,10 +284,8 @@ void ABaruGameMode::ExecuteServerTravel()
         return;
     }
     
-    ProcessSettlement(true);
-
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Executing ServerTravel to: %s"), *PendingTargetMapURL);
-    GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"));
+    GetWorld()->ServerTravel(PendingTargetMapURL + TEXT("?listen"), true);
 }
 
 void ABaruGameMode::UpdateAlivePlayerCount()
@@ -234,8 +313,11 @@ void ABaruGameMode::UpdateAlivePlayerCount()
         }
     }
 
+    CurrentActive += DisconnectedSnapshots.Num();
+
     CachedBaruGameState->SetAlivePlayerCount(CurrentActive);
 
+    // 완전 전멸(접속자 0 + 대기자 0) 시 전멸 검사
     if (CurrentActive <= 0 && CurrentDBNO <= 0)
     {
         CheckTeamWipe();
@@ -327,15 +409,7 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
             const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
             const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
-            const FString PlayerName = PS ? PS->GetPlayerName() : TEXT("Operative");
 
-            // 로컬 세이브 데이터에 정산 기록 반영
-            if (SaveSubsystem)
-            {
-                SaveSubsystem->RecordRaidResult(PlayerName, EarnedGold, bPlayerSurvived);
-            }
-
-            // 클라이언트 UI 호출
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
@@ -350,11 +424,44 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
     {
         PendingTargetMapURL = DefaultReturnMapURL;
         GetWorldTimerManager().SetTimer(
-            PostSettlementTimerHandle,
+            LevelTransitionTimerHandle,
             this,
             &ABaruGameMode::ExecuteServerTravel,
             PostSettlementReturnDelay,
             false
         );
+    }
+}
+
+void ABaruGameMode::CleanUpExpiredSnapshots()
+{
+    if (DisconnectedSnapshots.Num() == 0) return;
+
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+    TArray<FString> ExpiredIds;
+
+    for (auto& Pair : DisconnectedSnapshots)
+    {
+        if (CurrentTime - Pair.Value.DisconnectTime > ReconnectGracePeriod)
+        {
+            ExpiredIds.Add(Pair.Key);
+            if (Pair.Value.PreservedPawn.IsValid())
+            {
+                BARU_NET_LOG(this, LogBaruSession, Warning, 
+                    TEXT("Reconnect grace period expired for NetId: %s. Destroying pawn."), *Pair.Key);
+                Pair.Value.PreservedPawn->Destroy();
+            }
+        }
+    }
+
+    for (const FString& ExpiredId : ExpiredIds)
+    {
+        DisconnectedSnapshots.Remove(ExpiredId);
+    }
+
+    if (ExpiredIds.Num() > 0)
+    {
+        UpdateAlivePlayerCount();
+        CheckTeamWipe();
     }
 }

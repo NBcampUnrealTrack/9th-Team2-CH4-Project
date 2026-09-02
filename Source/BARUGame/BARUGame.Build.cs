@@ -27,6 +27,7 @@ public class BARUGame : ModuleRules
 			"GameplayTags",
 			"GameplayTasks",
 			"NetCore",
+			"CoreOnline",
 			"HTTP",
 			"Json",
 			"JsonUtilities",
