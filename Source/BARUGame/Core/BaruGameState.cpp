@@ -81,13 +81,11 @@ void ABaruGameState::Multicast_BroadcastNotification_Implementation(const FText&
     OnGlobalNotificationReceived.Broadcast(MessageText, DisplayDuration);
 }
 
-/*
 void ABaruGameState::Multicast_BroadcastPing_Implementation(FVector PingLocation, EBaruPingType PingType)
 {
     BARU_NET_LOG(this, LogBaruNet, Verbose, TEXT("Ping Broadcast: Type %d at %s"), static_cast<int32>(PingType), *PingLocation.ToString());
     OnPingReceived.Broadcast(PingLocation, PingType);
 }
-**/
 
 // RepNotifies
 
