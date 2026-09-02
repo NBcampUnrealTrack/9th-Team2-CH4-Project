@@ -307,8 +307,15 @@ void ABaruGameMode::UpdateAlivePlayerCount()
         {
             if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
             {
-                if (PS->IsAlive()) CurrentActive++;
-                else if (PS->IsDBNOOnly()) CurrentDBNO++;
+                if (PS->IsAlive()) 
+                {
+                    CurrentActive++;
+                }
+
+                else if (PS->IsDBNO() && !PS->IsDead()) 
+                {
+                    CurrentDBNO++;
+                }
             }
         }
     }
