@@ -1,21 +1,22 @@
 #include "Character/BaruCharacter.h" 
 #include "Camera/CameraComponent.h"
-#include "Components/SkeletalMeshComponent.h" // 1인칭 메쉬 제어용 필수 헤더
-#include "Components/CapsuleComponent.h"                          // [추가] 사망 시 콜리전 off
+#include "Components/SkeletalMeshComponent.h" 
+#include "Components/CapsuleComponent.h"                          
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
-#include "Net/UnrealNetwork.h"                                    // [추가] DOREPLIFETIME
-#include "TimerManager.h"                                         // [추가] SetTimerForNextTick
+#include "Net/UnrealNetwork.h"                                    
+#include "TimerManager.h"                                       
 #include "Player/BaruPlayerState.h"
 #include "AbilitySystemComponent.h"
-#include "GameplayEffectTypes.h"                                  // [추가] 
-#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"        // [추가] MoveSpeed 어트리뷰트
-#include "GameplayTags/BaruGameplayTags.h"                        // [추가] State.Dead 태그
-#include "Core/BaruGameMode.h"                                    // [추가]
-#include "Core/BaruTestGameMode.h"                                // [추가]
+#include "GameplayEffectTypes.h"                                  
+#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"        
+#include "Interfaces/InteractableInterface.h"   //[추가] 상호작용 대상 호출용
+#include "GameplayTags/BaruGameplayTags.h"                        
+#include "Core/BaruGameMode.h"                                    
+#include "Core/BaruTestGameMode.h"                                
 #include "Components/BaruHealthComponent.h"
 #include "DrawDebugHelpers.h"
 #include "BaruLog.h"
@@ -608,7 +609,24 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
    // 3) 확정 처리
    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Server Processed Interaction with: %s"), *ClaimedActor->GetName());
 
-   // Todo: InteractableInterface 를 구현한 대상이면 Execute_Interact(ClaimedActor, this) 호출
+   if (!ClaimedActor->Implements<UInteractableInterface>())
+   {
+      BARU_NET_LOG(this, LogBaruItem, Verbose,
+          TEXT("Interaction target does not implement InteractableInterface: %s"), *ClaimedActor->GetName());
+      return;
+   }
+
+   // CanInteract 판단은 대상이 스스로 합니다(쿨다운, 이미 열린 문, 인벤토리 가득참 등).
+   if (!IInteractableInterface::Execute_CanInteract(ClaimedActor, this))
+   {
+      BARU_NET_LOG(this, LogBaruItem, Log,
+          TEXT("Interaction refused by target: %s"), *ClaimedActor->GetName());
+      return;
+   }
+
+   IInteractableInterface::Execute_ExecuteInteraction(ClaimedActor, this);
+
+   BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *ClaimedActor->GetName());
 }
 
 UAbilitySystemComponent* ABaruCharacter::GetAbilitySystemComponent() const
