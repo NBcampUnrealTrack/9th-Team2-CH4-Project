@@ -13,7 +13,8 @@ class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
 class USkeletalMeshComponent; //  Mesh1P를 위한 전방 선언
-class UAbilitySystemComponent;               // 
+class UAbilitySystemComponent;
+class UBaruCharacterAnimSet;            //추가 애니메이션 데이터 에셋
 struct FOnAttributeChangeData;               //  MoveSpeed 어트리뷰트 콜백용
 
 UCLASS()
@@ -96,6 +97,9 @@ protected:
     // 크라우치를 넣을 때 반드시 다시 손대게 됩니다
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
     float CameraEyeHeight = 60.0f;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Animation")
+    TObjectPtr<UBaruCharacterAnimSet> AnimSet;  //이 캐릭터가 사용하는 몽타주 모음
     
     //역할 확정 imc등록 책임은 전부 캐릭터 헤더에서 처리하기로 정함  baruplayercontroller에 있는 mappingcontext는 중복이라 삭제
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
