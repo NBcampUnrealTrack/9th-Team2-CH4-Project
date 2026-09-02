@@ -26,11 +26,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
 	UBaruSaveGame* LoadOrCreateSaveGame(const FString& InPlayerName);
 
-	// 현재 캐시된 세이브 데이터 디스크 저장
+	// 현재 캐시된 활성 슬롯 세이브 데이터 비동기 저장
 	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
-	bool SaveCurrentGame();
+	void SaveCurrentGameAsync();
 
-	// 특정 슬롯 세이브 데이터 디스크 저장 함수 선언
+	// 특정 슬롯 비동기 저장
+	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
+	void SaveGameBySlotAsync(const FString& InSlotName);
+	
+	// 동기식 슬롯 저장 (에디터 종료/Deinitialize 전용)
 	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
 	bool SaveGameBySlot(const FString& InSlotName);
 	
@@ -59,4 +63,7 @@ protected:
 
 	FString CurrentSlotName;
 	const int32 UserIndex = 0;
+	
+private:
+	void HandleAsyncSaveFinished(const FString& SlotName, const int32 UserIndex, bool bSuccess);
 };

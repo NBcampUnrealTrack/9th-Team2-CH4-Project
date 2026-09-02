@@ -67,9 +67,40 @@ UBaruSaveGame* UBaruSaveGameSubsystem::LoadOrCreateSaveGame(const FString& InPla
     return TargetSaveGame;
 }
 
-bool UBaruSaveGameSubsystem::SaveCurrentGame()
+void UBaruSaveGameSubsystem::SaveCurrentGameAsync()
 {
-    return SaveGameBySlot(CurrentSlotName);
+    SaveGameBySlotAsync(CurrentSlotName);
+}
+
+void UBaruSaveGameSubsystem::SaveGameBySlotAsync(const FString& InSlotName)
+{
+    if (InSlotName.IsEmpty())
+    {
+        BARU_LOG(LogBaruSession, Warning, TEXT("SaveGameBySlotAsync Failed: SlotName is empty."));
+        OnSaveCompletedEvent.Broadcast(InSlotName, false);
+        return;
+    }
+
+    TObjectPtr<UBaruSaveGame>* FoundSave = CachedSaveGames.Find(InSlotName);
+    if (!FoundSave || !FoundSave->Get())
+    {
+        BARU_LOG(LogBaruSession, Warning, TEXT("SaveGameBySlotAsync Failed: No cached save game for slot '%s'."), *InSlotName);
+        OnSaveCompletedEvent.Broadcast(InSlotName, false);
+        return;
+    }
+    
+    UBaruSaveGame* SaveSnapshot = DuplicateObject<UBaruSaveGame>(FoundSave->Get(), this);
+
+    FAsyncSaveGameToSlotDelegate SavedDelegate;
+    SavedDelegate.BindUObject(this, &UBaruSaveGameSubsystem::HandleAsyncSaveFinished);
+
+    UGameplayStatics::AsyncSaveGameToSlot(SaveSnapshot, InSlotName, UserIndex, SavedDelegate);
+}
+
+void UBaruSaveGameSubsystem::HandleAsyncSaveFinished(const FString& SlotName, const int32 InUserIndex, bool bSuccess)
+{
+    BARU_LOG(LogBaruSession, Log, TEXT("Async Save to slot '%s': %s"), *SlotName, bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"));
+    OnSaveCompletedEvent.Broadcast(SlotName, bSuccess);
 }
 
 bool UBaruSaveGameSubsystem::SaveGameBySlot(const FString& InSlotName)
@@ -114,7 +145,7 @@ void UBaruSaveGameSubsystem::RecordRaidResult(const FString& InPlayerName, int32
         SaveData->TotalDeaths++;
     }
 
-    SaveGameBySlot(SlotName);
+    SaveGameBySlotAsync(SlotName);
 }
 
 UBaruSaveGame* UBaruSaveGameSubsystem::GetCachedSaveGame() const
