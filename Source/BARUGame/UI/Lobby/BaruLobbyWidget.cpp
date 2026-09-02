@@ -5,10 +5,13 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/WidgetSwitcher.h"
+#include "Components/ListView.h"
+#include "Components/TextBlock.h"
 
 #include "Engine/GameInstance.h"
 
 #include "BaruLog.h"
+#include "UI/Lobby/BaruSessionListItemData.h"
 
 UBaruLobbyWidget::UBaruLobbyWidget(
 	const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
@@ -56,6 +59,13 @@ void UBaruLobbyWidget::NativeOnInitialized()
 			this,
 			&UBaruLobbyWidget::HandleBackFromSearchResultsClicked
 			);
+	}
+	
+	if (IsValid(Button_CreateRoom))
+	{
+		Button_CreateRoom->OnClicked.AddDynamic(
+			this,
+			&ThisClass::HandleCreateRoomClicked);
 	}
 }
 
@@ -166,6 +176,10 @@ void UBaruLobbyWidget::HandleFindSessionsComplete(
 {
 	SessionSearchResults = SearchResults;
 	
+	RebuildSessionResultList(
+		bWasSuccessful
+		);
+	
 	BARU_LOG(
 		LogBaruUI,
 		Log,
@@ -175,6 +189,151 @@ void UBaruLobbyWidget::HandleFindSessionsComplete(
 		);
 	
 	ShowLobbyView(EBaruLobbyView::SearchResults);
+}
+
+void UBaruLobbyWidget::HandleCreateRoomClicked()
+{
+	if (bIsCreatingSession)
+	{
+		return;
+	}
+	
+	if (!IsValid(SessionSubsystem))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Error,
+			TEXT("방을 생성할 SessionSubsystem을 찾지 못했습니다.")
+			);
+		return;
+	}
+	
+	bIsCreatingSession = true;
+	
+	if (IsValid(Button_CreateRoom))
+	{
+		Button_CreateRoom->SetIsEnabled(false);
+	}
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("방 생성을 요청했습니다.")
+		);
+	
+	SessionSubsystem->CreateSession(
+		5,
+		false,
+		TEXT("BARU Room")
+		);
+}
+
+void UBaruLobbyWidget::HandleCreateSessionComplete(
+	bool bWasSuccessful)
+{
+	bIsCreatingSession = false;
+	
+	if (IsValid(Button_CreateRoom))
+	{
+		Button_CreateRoom->SetIsEnabled(true);
+	}
+	
+	if (bWasSuccessful)
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Log,
+			TEXT("방 생성에 성공했습니다.")
+			);
+	}
+	else
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Error,
+			TEXT("방 생성에 실패했습니다.")
+			);
+	}
+}
+
+void UBaruLobbyWidget::RebuildSessionResultList(
+	bool bWasSuccessful)
+{
+	if (!IsValid(ListView_SearchResults) ||
+		!IsValid(Text_NoSearchResults))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Error,
+			TEXT("세션 검색 결과를 표시할 ListView 또는 Text가 없습니다.")
+			);
+		return;
+	}
+	
+	// 이전 검색 결과 제거
+	ListView_SearchResults->ClearListItems();
+	SessionListItems.Reset();
+	
+	if (!bWasSuccessful)
+	{
+		Text_NoSearchResults->SetText(
+			FText::FromString(
+				TEXT("방 검색에 실패했습니다.")
+				)
+				);
+		ListView_SearchResults->SetVisibility(
+			ESlateVisibility::Collapsed);
+		
+		Text_NoSearchResults->SetVisibility(
+			ESlateVisibility::Visible);
+		return;
+	}
+	
+	for (const FBaruSessionSearchResultInfo& SearchResult : SessionSearchResults)
+	{
+		UBaruSessionListItemData* NewItem =
+			NewObject<UBaruSessionListItemData>(this);
+		
+		if (!IsValid(NewItem))
+		{
+			continue;
+		}
+		
+		NewItem->Initialize(
+			SearchResult
+			);
+		
+		SessionListItems.Add(
+			NewItem
+			);
+		
+		ListView_SearchResults->AddItem(
+			NewItem
+			);
+	}
+	
+	const bool bHasSearchResults =
+		SessionListItems.Num() > 0;
+	
+	ListView_SearchResults->SetVisibility(
+		bHasSearchResults
+		? ESlateVisibility::Visible
+		: ESlateVisibility::Collapsed
+		);
+	Text_NoSearchResults->SetVisibility(
+		bHasSearchResults
+		? ESlateVisibility::Collapsed
+		: ESlateVisibility::Visible
+		);
+	
+	if (!bHasSearchResults)
+	{
+		Text_NoSearchResults->SetText(
+			FText::FromString(
+				TEXT("검색된 방이 없습니다.")
+				)
+				);
+	}
 }
 
 void UBaruLobbyWidget::NativeOnActivated()
@@ -198,6 +357,17 @@ void UBaruLobbyWidget::NativeOnActivated()
 			this,
 			&UBaruLobbyWidget::HandleFindSessionsComplete
 			);
+		
+		SessionSubsystem->OnCreateSessionCompleteEvent.RemoveDynamic(
+			this,
+			&ThisClass::HandleCreateSessionComplete
+			);
+		
+		SessionSubsystem->OnCreateSessionCompleteEvent.AddDynamic(
+			this,
+			&ThisClass::HandleCreateSessionComplete
+			);
+		
 	}
 	
 	ShowLobbyView(EBaruLobbyView::Home);
@@ -208,6 +378,7 @@ void UBaruLobbyWidget::NativeOnActivated()
 		TEXT("로비 UI가 활성화되었습니다. Widget=%s"),
 		*GetName()
 		);
+	
 }
 
 void UBaruLobbyWidget::NativeOnDeactivated()
@@ -217,6 +388,11 @@ void UBaruLobbyWidget::NativeOnDeactivated()
 		SessionSubsystem->OnFindSessionsCompleteEvent.RemoveDynamic(
 			this,
 			&UBaruLobbyWidget::HandleFindSessionsComplete
+			);
+		
+		SessionSubsystem->OnCreateSessionCompleteEvent.RemoveDynamic(
+			this,
+			&ThisClass::HandleCreateSessionComplete
 			);
 	}
 	
