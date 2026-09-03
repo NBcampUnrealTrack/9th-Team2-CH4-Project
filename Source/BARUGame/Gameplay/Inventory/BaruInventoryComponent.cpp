@@ -241,10 +241,11 @@ int32 UBaruInventoryComponent::AddItem(FName ItemID, int32 Count)
 			AddReplicatedSubObject(NewItem);
 		}
 		
-			// [09.03. 추가] 새로 만든 UObject를 복제 목록에 등록
-		if (IsUsingRegisteredSubObjectList() && IsReadyForReplication())
+			// [임시 테스트]
+			// UI 없이도 “무기 습득 → 인벤토리 추가 → 장착” 흐름을 확인한느 용도.
+		if (bAutoEquipWeaponOnPickupForTest && Data->ItemType == EItemType::Weapon)
 		{
-			AddReplicatedSubObject(NewItem);
+			EquipWeaponItem(NewItem);
 		}
 
 		Remaining -= NewItem->Quantity;

@@ -23,7 +23,7 @@
 
 	// 포인터로만 사용하기 때문에 전방 선언
 class ABaruWeaponBase;
-
+class UGameplayEffect;	//GAS 용.
 
 
 UCLASS(BlueprintType)
@@ -69,4 +69,14 @@ public:
 	UPROPERTY(EditDefaultsOnly,	BlueprintReadOnly,	Category = "BARU|Weapon|Combat",
 		meta = (ClampMin = "0.01", Units = "s"))
 	float FireInterval = 0.25f;
+	
+	
+	// GAS.
+		// 이 무기가 명중했을 때 적용할 GAS GameplayEffect.
+		// 실제 피해량은 BaseDamage를 Data.Damage로 전달.
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "BARU|Weapon|GAS")
+	TSoftClassPtr<UGameplayEffect> DamageEffectClass;
 };

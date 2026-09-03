@@ -22,6 +22,10 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	
+		// [임시 테스트 용도]
+		// 게임 시작 시 테스트 무기를 자동 장착할지 여부
+	virtual void BeginPlay() override;
+	
 		// 서버에서 Weapon DataAsset을 받아 실제 Weapon Actor를 생성·장착.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
 	bool EquipWeapon(UBaruWeaponDataAsset* WeaponData);
@@ -29,6 +33,24 @@ public:
 		// 지정한 무기 슬롯의 Weapon Actor를 제거.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
 	void UnequipWeapon(EBaruEquipmentSlot WeaponSlot);
+	
+		// GAS.
+	// ActiveWeaponSlot에 따라 현재 손에 든 무기를 반환.
+	UFUNCTION(BlueprintPure, Category = "BARU|Equipment")
+	ABaruWeaponBase* GetActiveWeapon() const;
+
+		// GAS.
+	// Character 입력을 현재 장착 무기에 전달.
+	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
+	void RequestFireActiveWeapon();
+	
+	// 서버 RPC를 추가.
+		// 클라이언트의 발사 입력을 서버로 전달.
+	UFUNCTION(Server, Reliable, WithValidation)
+	void Server_RequestFireActiveWeapon();
+
+		// 서버가 현재 장착 무기를 검증하고 실제 Fire()를 호출.
+	void FireActiveWeaponOnServer();
 
 protected:
 		// 주무기 슬롯에 실제로 생성되어 있는 Weapon Actor
@@ -63,4 +85,21 @@ protected:
 	FName ThirdPersonWeaponAttachPoint = TEXT("weapon_r");
 	
 	
+	// [임시 테스트 용도] ///지워야할 부분.
+	// true이면 서버에서 BeginPlay 시 TestWeaponData를 자동 장착합니다.
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "BARU|Equipment|Test")
+	bool bAutoEquipTestWeapon = false;
+
+		// [임시 테스트 용도] ///지워야할 부분.
+		// 자동 장착에 사용할 무기 DataAsset
+		// 예: DA_Weapon_Revolver
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "BARU|Equipment|Test",
+		meta = (EditCondition = "bAutoEquipTestWeapon"))
+	TSoftObjectPtr<UBaruWeaponDataAsset> TestWeaponData;
 };

@@ -40,6 +40,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Inventory")
 	UDataTable* ItemDataTable = nullptr;
 	
+	//[09.03 추가. 무기 습득 및 장착.] [임시 테스트]
+		// 무기 아이템을 습득했을 때 자동으로 장착할지 여부.
+		// UI의 장착 버튼을 만들기 전, 전체 연결을 검증하기 위한 옵션.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Inventory|Test")
+	bool bAutoEquipWeaponOnPickupForTest = false;
+	
 	
 	// 3. 슬롯 판정과 인벤 내 2D 겹침 검사. - 서버, 클라(클라는 UI 프리뷰용) 공용.
 		// (1) 지정 좌표에 해당 크기의 아이템을 놓을 수 있는지 확인.

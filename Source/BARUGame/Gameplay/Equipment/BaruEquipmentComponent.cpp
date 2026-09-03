@@ -24,6 +24,41 @@ UBaruEquipmentComponent::UBaruEquipmentComponent()
 }
 
 
+// [임시 테스트]
+// EquipmentComponent가 Character에 붙어 게임을 시작하면 호출됩니다.
+void UBaruEquipmentComponent::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // 테스트 설정이 꺼져 있거나,
+    // 서버가 아니라면 아무 작업도 하지 않습니다.
+    if (!bAutoEquipTestWeapon
+        || !GetOwner()
+        || !GetOwner()->HasAuthority())
+    {
+        return;
+    }
+
+    // BP에서 지정한 DataAsset을 실제 메모리로 불러옵니다.
+    UBaruWeaponDataAsset* WeaponData =
+        TestWeaponData.LoadSynchronous();
+
+    if (!WeaponData)
+    {
+        BARU_NET_LOG(
+            GetOwner(),
+            LogBaruItem,
+            Warning,
+            TEXT("자동 장착 테스트 실패: TestWeaponData가 비어 있습니다."));
+
+        return;
+    }
+
+    // 앞 단계에서 만든 실제 장착 C++ 함수를 호출합니다.
+    EquipWeapon(WeaponData);
+}
+
+
 	// 위에서 Replicated로 선언한 변수들을 실제 복제 목록에 등록.
 void UBaruEquipmentComponent::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -226,4 +261,85 @@ void UBaruEquipmentComponent::UnequipWeapon(
     }
 
     GetOwner()->ForceNetUpdate();
+}
+
+    //GAS
+ABaruWeaponBase* UBaruEquipmentComponent::GetActiveWeapon() const
+{
+    switch (ActiveWeaponSlot)
+    {
+    case EBaruEquipmentSlot::PrimaryWeapon:
+        return PrimaryWeapon;
+
+    case EBaruEquipmentSlot::SecondaryWeapon:
+        return SecondaryWeapon;
+
+    default:
+        return nullptr;
+    }
+}
+    //GAS
+    //Character가 발사 입력을 받았을 때 호출. 진입점.
+void UBaruEquipmentComponent::RequestFireActiveWeapon()
+{
+    if (!IsValid(GetOwner()))
+        { return; }
+    
+        // 리슨 서버 호스트 = 서버 그 자체. -> RPC를 거치지 않고 처리.
+    if (GetOwner() -> HasAuthority())
+    {
+            //발사!
+        FireActiveWeaponOnServer();
+        return;
+    }
+    
+        // 일반(다른) 클라들은 서버에 발사를 요청.
+    Server_RequestFireActiveWeapon();   // 서버_ 응답 -> 발싸!!! 액티브 웨폰.
+    
+}
+
+        //RPC 데이터에는 별도 입력값이 없음. -> 최소한 컴포넌트의 Owner가 정상인지 확인 필요.
+bool UBaruEquipmentComponent::Server_RequestFireActiveWeapon_Validate()
+{
+    return IsValid(GetOwner());
+}
+
+
+        // 서버에서 실제 검증 함수 호출.
+void UBaruEquipmentComponent::Server_RequestFireActiveWeapon_Implementation()
+{
+    FireActiveWeaponOnServer();
+}
+
+        // 서버가 현재 장착된 무기를 직접 찾아서 발사.
+void UBaruEquipmentComponent::FireActiveWeaponOnServer()
+{
+    AActor* OwnerActor = GetOwner();
+
+    if (!IsValid(OwnerActor) || !OwnerActor->HasAuthority())
+    {
+        return;
+    }
+
+    ABaruWeaponBase* ActiveWeapon = GetActiveWeapon();
+
+    if (!IsValid(ActiveWeapon))
+    {
+        return;
+    }
+    
+        // 다른 클라(플레이어)들의 무기를 발사하는 비정상 요청은 방지.
+    if (ActiveWeapon ->GetOwner() != OwnerActor)
+    {
+        BARU_NET_LOG(
+            OwnerActor,
+            LogBaruItem,
+            Warning,
+            TEXT("발사 거절 : 현재 Character가 소유한 무기가 아닙니다."));
+        
+        return;
+    }
+    
+        //기존의 WeaponBase의 실제 발사 함수 호출 부분.
+    ActiveWeapon -> Fire(OwnerActor);
 }
