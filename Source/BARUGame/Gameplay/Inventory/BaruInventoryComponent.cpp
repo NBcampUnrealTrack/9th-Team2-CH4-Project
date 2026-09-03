@@ -10,6 +10,9 @@
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/PlayerState.h" // [추가] 컴포넌트 소유자가 PlayerState인지 확인
 #include "GameFramework/Pawn.h"        // [추가] 실제 캐릭터 위치를 사용
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"	// [09.03 추가]
+#include "Gameplay/Weapon/Data/BaruWeaponDataAsset.h"	// [09.03 추가]
+#include "BaruLog.h"	// [09.03 추가]
 
 UBaruInventoryComponent::UBaruInventoryComponent()
 {
@@ -237,6 +240,12 @@ int32 UBaruInventoryComponent::AddItem(FName ItemID, int32 Count)
 		{
 			AddReplicatedSubObject(NewItem);
 		}
+		
+			// [09.03. 추가] 새로 만든 UObject를 복제 목록에 등록
+		if (IsUsingRegisteredSubObjectList() && IsReadyForReplication())
+		{
+			AddReplicatedSubObject(NewItem);
+		}
 
 		Remaining -= NewItem->Quantity;
 	}
@@ -312,7 +321,94 @@ bool UBaruInventoryComponent::RemoveItem(UBaruItemInstance* Item, int32 Count)
 	return true;
 }
 
-	// 아이템 사용. 타입별로 분기 (회복 등). 사용 후 1개 소모.
+
+// [09.03 추가]
+	// ItemInstance가 가리키는 DT_Item 행에서 WeaponDataAsset을 읽고,
+	// 현재 PlayerState가 소유한 Pawn의 EquipmentComponent에 장착을 요청.
+bool UBaruInventoryComponent::EquipWeaponItem(
+	UBaruItemInstance* Item)
+{
+		// 서버가 아니거나, 인벤토리에 실제로 없는 Item이면 거부.
+	if (!GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !IsValid(Item)
+		|| !FindSlot(Item))
+	{
+		return false;
+	}
+
+	const FItemData* Data = FindItemData(Item->ItemID);
+
+		// Weapon 타입이 아니면 장착하지 않음.
+	if (!Data || Data->ItemType != EItemType::Weapon)
+	{
+		return false;
+	}
+
+		// DT_Item에 DA_Weapon_Revolver 등이 지정되지 않은 경우.
+	if (Data->WeaponDataAsset.IsNull())
+	{
+		BARU_NET_LOG(
+			GetOwner(),
+			LogBaruItem,
+			Warning,
+			TEXT("무기 장착 실패: '%s'의 WeaponDataAsset이 비어 있습니다."),
+			*Item->ItemID.ToString());
+
+		return false;
+	}
+
+		// DT_Item이 가리키는 무기 DataAsset을 불러옴.
+	UBaruWeaponDataAsset* WeaponData =
+		Data->WeaponDataAsset.LoadSynchronous();
+
+	if (!WeaponData)
+	{
+		return false;
+	}
+
+		// InventoryComponent의 소유자는 PlayerState.
+		// 실제 장착 대상은 PlayerState가 소유한 현재 Pawn(Character).
+	APlayerState* OwnerPlayerState =
+		Cast<APlayerState>(GetOwner());
+
+	APawn* OwnerPawn =
+		OwnerPlayerState
+		? OwnerPlayerState->GetPawn()
+		: nullptr;
+
+	if (!OwnerPawn)
+	{
+		return false;
+	}
+
+		// Character에 부착된 EquipmentComponent를 찾기.
+	UBaruEquipmentComponent* EquipmentComponent =
+		OwnerPawn->FindComponentByClass<UBaruEquipmentComponent>();
+
+	if (!EquipmentComponent)
+	{
+		BARU_NET_LOG(
+			GetOwner(),
+			LogBaruItem,
+			Warning,
+			TEXT("무기 장착 실패: Character에 EquipmentComponent가 없습니다."));
+
+		return false;
+	}
+
+		// 실제 무기 Actor 생성·부착은 EquipmentComponent가 담당.
+	return EquipmentComponent->EquipWeapon(WeaponData);
+}
+
+
+
+
+	// 아이템 사용 요청에 대한 고용ㅇ 처리 함수.
+	// 타입에 따라서 다르게 행동함.
+	// Weapon(장비) : 장착만. 수량은 소모 안 함.
+	// Consumable(소비템) : 타입별로 분기 (회복 등). 사용 후 1개 소모.
+	// 다른 타입이 있다면 여기 추가할 것.
 void UBaruInventoryComponent::UseItem(UBaruItemInstance* Item)
 {
 	if (!GetOwner()->HasAuthority() || !IsValid(Item)) return;
@@ -320,6 +416,7 @@ void UBaruInventoryComponent::UseItem(UBaruItemInstance* Item)
 	const FItemData* Data = FindItemData(Item->ItemID);
 	if (!Data) return;
 
+	/* [09.03. 삭제]
 		// 타입별 효과 분기. 지금은 뼈대만 - 실제 효과는 팀 로직 붙일 때 채움.
 	switch (Data->ItemType)
 	{
@@ -328,6 +425,22 @@ void UBaruInventoryComponent::UseItem(UBaruItemInstance* Item)
 		break;
 	default:
 			// 그 외 타입은 아직 사용 효과 없음.
+		return;
+	}
+	*/
+		// [09.03 추가]
+	switch (Data->ItemType)
+	{
+	case EItemType::Weapon:
+			// 무기는 소비하지 않고 장착만.
+		EquipWeaponItem(Item);
+		return;
+
+	case EItemType::Consumable:
+		// TODO: 회복 등 소비 효과
+		break;
+
+	default:
 		return;
 	}
 
