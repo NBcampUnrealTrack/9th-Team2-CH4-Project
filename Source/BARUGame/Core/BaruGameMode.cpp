@@ -154,7 +154,6 @@ void ABaruGameMode::Logout(AController* Exiting)
 
     Super::Logout(Exiting);
     UpdateAlivePlayerCount();
-    CheckTeamWipe();
 }
 
 void ABaruGameMode::SetMatchPhase(EBaruMatchState NewPhase)
@@ -343,8 +342,6 @@ void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerAc
     {
         StartSpectating(VictimPC);
     }
-
-    CheckTeamWipe();
 }
 
 void ABaruGameMode::StartSpectating(APlayerController* DeadController)
@@ -379,7 +376,27 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
 
 void ABaruGameMode::CheckTeamWipe()
 {
-    if (CachedBaruGameState && CachedBaruGameState->GetAlivePlayerCount() <= 0)
+    if (!CachedBaruGameState)
+    {
+        return;
+    }
+    
+    // DBNO 상태인 플레이어가 1명이라도 있으면 전멸이 아님 (방어 코드)
+    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    {
+        if (APlayerController* PC = Iterator->Get())
+        {
+            if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
+            {
+                if (PS->IsDBNO() && !PS->IsDead())
+                {
+                    return;
+                }
+            }
+        }
+    }
+    
+    if (CachedBaruGameState->GetAlivePlayerCount() <= 0)
     {
         BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("Team wiped. Processing Failure Settlement."));
 

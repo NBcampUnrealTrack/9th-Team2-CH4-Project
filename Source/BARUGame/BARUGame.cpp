@@ -23,4 +23,4 @@ public:
 	}
 };
 
-IMPLEMENT_PRIMARY_GAME_MODULE( FDefaultGameModuleImpl, BARUGame, "BARUGame" );
+IMPLEMENT_PRIMARY_GAME_MODULE( FBARUGameModule, BARUGame, "BARUGame" );
