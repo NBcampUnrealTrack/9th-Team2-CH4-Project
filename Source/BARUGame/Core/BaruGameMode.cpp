@@ -240,11 +240,17 @@ void ABaruGameMode::OnExtractionZoneCountChanged(int32 InZoneCount)
 
 void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
 {
-    if (TargetMapURL.IsEmpty()) return;
+    // 목적지가 비어있을 경우 DefaultReturnMapURL로 FallBack
+    FString FinalTargetMapURL = TargetMapURL;
+    if (FinalTargetMapURL.IsEmpty())
+    {
+        FinalTargetMapURL = DefaultReturnMapURL;
+        BARU_LOG(LogBaruSession, Warning, TEXT("TargetMapURL was empty. Fallback to DefaultReturnMapURL: %s"), *DefaultReturnMapURL);
+    }
 
     if (GetWorldTimerManager().IsTimerActive(LevelTransitionTimerHandle)) return;
 
-    PendingTargetMapURL = TargetMapURL;
+    PendingTargetMapURL = FinalTargetMapURL;
     SetMatchPhase(EBaruMatchState::Extraction);
     
     ProcessSettlement(true);
@@ -261,16 +267,18 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
         }
     }
 
-    // 연출 시간 대기 후 실제 ServerTravel 실행
+    // 연출 시간 대기 후 실제 ServerTravel 실행 : 5초 대기
+    const float SafeTransitionDelay = FMath::Max(TransitionDelayDuration, 5.0f);
+
     BARU_NET_LOG(this, LogBaruSession, Log, 
         TEXT("Level transition requested. Traveling to '%s' in %.1f seconds..."), 
-        *PendingTargetMapURL, TransitionDelayDuration);
+        *PendingTargetMapURL, SafeTransitionDelay);
 
     GetWorldTimerManager().SetTimer(
         LevelTransitionTimerHandle,
         this,
         &ABaruGameMode::ExecuteServerTravel,
-        TransitionDelayDuration, // ★ 수정
+        SafeTransitionDelay,
         false
     );
 }
