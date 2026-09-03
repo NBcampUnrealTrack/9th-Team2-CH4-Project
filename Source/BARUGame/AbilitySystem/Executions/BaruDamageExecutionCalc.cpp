@@ -118,7 +118,7 @@ void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCusto
     // ==============================================================================
     // 제압도(Suppression) 연계
     // ==============================================================================
-    const FGameplayTag SuppressionDamageTag = FGameplayTag::RequestGameplayTag(TEXT("Data.Damage.Suppression"), false);
+    const FGameplayTag SuppressionDamageTag = FBaruGameplayTags::Get().Data_Damage_Suppression;
     float BaseSuppressionDamage = SuppressionDamageTag.IsValid() 
         ? Spec.GetSetByCallerMagnitude(SuppressionDamageTag, false, -1.0f) 
         : -1.0f;

@@ -1,5 +1,6 @@
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
 #include "AbilitySystem/Abilities/BaruGameplayAbility.h"
+#include "GameplayTags/BaruGameplayTags.h"
 #include "BaruLog.h"
 
 UBaruAbilitySystemComponent::UBaruAbilitySystemComponent()
@@ -150,4 +151,81 @@ bool UBaruAbilitySystemComponent::TryActivateAbilityByTag(FGameplayTag AbilityTa
     }
     
     return bSuccess;
+}
+
+
+
+
+// Helper 함수
+
+FActiveGameplayEffectHandle UBaruAbilitySystemComponent::ApplyDamageEffectToTarget(
+    TSubclassOf<UGameplayEffect> DamageEffectClass,
+    UAbilitySystemComponent* TargetASC,
+    float PhysicalDamage,
+    float SpecialDamage,
+    float SuppressionDamage)
+{
+    if (!DamageEffectClass || !TargetASC)
+    {
+        BARU_NET_LOG(GetAvatarActor(), LogBaruGAS, Warning, TEXT("ApplyDamageEffectToTarget Failed: Invalid EffectClass or TargetASC."));
+        return FActiveGameplayEffectHandle();
+    }
+
+    // Effect Context
+    FGameplayEffectContextHandle ContextHandle = MakeEffectContext();
+    ContextHandle.AddInstigator(GetOwnerActor(), GetAvatarActor());
+
+    // Spec
+    const FGameplayEffectSpecHandle SpecHandle = MakeOutgoingSpec(DamageEffectClass, 1.0f, ContextHandle);
+    if (!SpecHandle.IsValid() || !SpecHandle.Data.IsValid())
+    {
+        return FActiveGameplayEffectHandle();
+    }
+
+    
+    // SetByCaller Magnitude
+    
+    // PhysicalDamage
+    SpecHandle.Data->SetSetByCallerMagnitude(FBaruGameplayTags::Get().Data_Damage, PhysicalDamage);
+
+    // SpecialDamage
+    if (SpecialDamage > 0.0f)
+    {
+        SpecHandle.Data->SetSetByCallerMagnitude(FBaruGameplayTags::Get().Data_Damage_Special, SpecialDamage);
+    }
+
+    // SuppressionDamage
+    if (SuppressionDamage >= 0.0f)
+    {
+        const FGameplayTag SuppressionTag = FGameplayTag::RequestGameplayTag(TEXT("Data.Damage.Suppression"), false);
+        if (SuppressionTag.IsValid())
+        {
+            SpecHandle.Data->SetSetByCallerMagnitude(SuppressionTag, SuppressionDamage);
+        }
+    }
+
+    // 대상 ASC에 이펙트 적용
+    return ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+}
+
+FActiveGameplayEffectHandle UBaruAbilitySystemComponent::ApplyGenericEffectToTarget(
+    TSubclassOf<UGameplayEffect> EffectClass,
+    UAbilitySystemComponent* TargetASC,
+    float Level)
+{
+    if (!EffectClass || !TargetASC)
+    {
+        return FActiveGameplayEffectHandle();
+    }
+
+    FGameplayEffectContextHandle ContextHandle = MakeEffectContext();
+    ContextHandle.AddInstigator(GetOwnerActor(), GetAvatarActor());
+
+    const FGameplayEffectSpecHandle SpecHandle = MakeOutgoingSpec(EffectClass, Level, ContextHandle);
+    if (SpecHandle.IsValid() && SpecHandle.Data.IsValid())
+    {
+        return ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+    }
+
+    return FActiveGameplayEffectHandle();
 }

@@ -28,6 +28,22 @@ public:
 	
 	UFUNCTION(BlueprintCallable, Category = "BARU|GAS")
 	bool TryActivateAbilityByTag(FGameplayTag AbilityTag);
+	
+	// SetByCaller 방식으로 BaruDamageExecutionCalc에 Damage, Effect를 전달하는 Helper 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|GAS")
+	FActiveGameplayEffectHandle ApplyDamageEffectToTarget(
+		TSubclassOf<UGameplayEffect> DamageEffectClass,
+		UAbilitySystemComponent* TargetASC,
+		float PhysicalDamage,
+		float SpecialDamage = 0.0f,
+		float SuppressionDamage = -1.0f);
+	
+	// Target 또는 Self 에 일반적인 버프/디버프/회복 GE를 적용하는 Helper 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|GAS")
+	FActiveGameplayEffectHandle ApplyGenericEffectToTarget(
+		TSubclassOf<UGameplayEffect> EffectClass,
+		UAbilitySystemComponent* TargetASC,
+		float Level = 1.0f);
 
 public:
 	// UI 델리게이트
