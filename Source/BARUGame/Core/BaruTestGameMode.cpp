@@ -6,6 +6,8 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "BaruLog.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 
 ABaruTestGameMode::ABaruTestGameMode()
 {
@@ -115,14 +117,20 @@ void ABaruTestGameMode::RespawnPlayer(AController* TargetController)
 
     // 엔진 기본 리스폰 파이프라인 (새 Pawn 스폰 및 빙의)
     RestartPlayer(TargetController);
-
-    // PlayerState의 DBNO 및 상태 초기화
+    
     if (ABaruPlayerState* PS = TargetController->GetPlayerState<ABaruPlayerState>())
     {
         PS->SetDBNOState(false);
+        PS->SetDeadState(false);
         PS->SetSanityValue(100.0f);
+        
+        if (UAbilitySystemComponent* ASC = PS->GetAbilitySystemComponent())
+        {
+            const float MaxHP = PS->GetMaxHealth() > 0.0f ? PS->GetMaxHealth() : 100.0f;
+            ASC->SetNumericAttributeBase(UBaruCoreAttributeSet::GetHealthAttribute(), MaxHP);
+        }
     }
-
+    
     BARU_NET_LOG(TargetController, LogBaruSession, Log, TEXT("[TEST_MODE] Player Respawned: %s"), *TargetController->GetName());
     UpdateTestPlayerCount();
 }

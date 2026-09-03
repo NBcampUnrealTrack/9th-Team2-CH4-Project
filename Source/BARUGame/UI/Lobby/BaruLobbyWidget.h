@@ -14,6 +14,8 @@ class UListView;
 class UTextBlock;
 class UWidgetSwitcher;
 class UBaruSessionListItemData;
+class ABaruLobbyGameState;
+class ABaruPlayerState;
 
 UENUM(BlueprintType)
 enum class EBaruLobbyView : uint8
@@ -61,6 +63,19 @@ protected:
 	void HandleBackFromSearchResultsClicked();
 	
 	UFUNCTION()
+	void HandleLobbyActionClicked();
+
+	/**
+	 * 방장이 게임 시작을 요청한다.
+	 * 실제 서버 이동 연결은 GameMode/PlayerController 담당에서 처리한다.
+	 */
+	UFUNCTION(
+		BlueprintImplementableEvent,
+		Category = "BARU|UI|Lobby"
+		)
+	void BP_OnHostStartGameRequested();
+	
+	UFUNCTION()
 	void HandleFindSessionsComplete(
 		const TArray<FBaruSessionSearchResultInfo>& SearchResults,
 		bool bWasSuccessful
@@ -73,6 +88,24 @@ protected:
 	void HandleCreateSessionComplete(
 		bool bWasSuccessful
 		);
+	
+	UFUNCTION()
+	void HandleTargetMapChanged(
+		const FString& NewMapURL
+		);
+	
+	UFUNCTION()
+	void HandleAllPlayersReadyChanged(
+		bool bAllReady
+		);
+	
+	UFUNCTION()
+	void HandleLocalReadyStatusChanged(
+		bool bIsReady
+		);
+	
+	void RefreshLobbyActionButton();
+	
 	
 	void RebuildSessionResultList(
 		bool bWasSuccessful
@@ -95,17 +128,17 @@ protected:
 	TObjectPtr<UCanvasPanel> Panel_SearchResults;
 	
 	// BindWidget
-	UPROPERTY(
-		BlueprintReadOnly,
-		meta = (BindWidget),
-		Category = "BARU|UI|Lobby|Session")
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Session")
 	TObjectPtr<UListView> ListView_SearchResults;
 	
-	UPROPERTY(
-		BlueprintReadOnly,
-		meta = (BindWidget),
-		Category = "BARU|UI|Lobby|Session")
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Session")
 	TObjectPtr<UTextBlock> Text_NoSearchResults;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTextBlock> Text_SelectedContractName;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
+	TObjectPtr<UTextBlock> Text_LobbyAction;
 	
 	/**
 	 * ListView에 전달한 UObject Item들을 보관한다.
@@ -133,16 +166,28 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UButton> Button_CreateRoom;
 	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
+	TObjectPtr<UButton> Button_LobbyAction;
+	
 	// 외부 시스템과 검색 데이터
 	UPROPERTY(Transient)
 	TObjectPtr<UBaruSessionSubsystem> SessionSubsystem;
 	
+	UPROPERTY(Transient)
+	TObjectPtr<ABaruLobbyGameState> LobbyGameState;
+	
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI|Lobby")
 	TArray<FBaruSessionSearchResultInfo> SessionSearchResults;
+	
+	UPROPERTY(Transient)
+	TObjectPtr<ABaruPlayerState> LocalPlayerState;
 	
 	// 방 생성 중복 요청 방지
 	UPROPERTY(Transient)
 	bool bIsCreatingSession = false;
+	
+	UPROPERTY(Transient)
+	bool bIsLobbyHost = false;
 	
 	// 현재 화면 상태
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI|Lobby")

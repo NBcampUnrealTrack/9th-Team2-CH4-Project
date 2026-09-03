@@ -54,7 +54,7 @@ void UBaruMonsterAttributeSet::PostGameplayEffectExecute(const FGameplayEffectMo
             // State.Debuff.Groggy 태그
             if (NewSuppression <= 0.0f && TargetASC)
             {
-                const FGameplayTag GroggyTag = FGameplayTag::RequestGameplayTag(TEXT("State.Debuff.Groggy"));
+                const FGameplayTag GroggyTag = FBaruGameplayTags::Get().State_Debuff_Groggy;
                 if (!TargetASC->HasMatchingGameplayTag(GroggyTag))
                 {
                     TargetASC->AddLooseGameplayTag(GroggyTag);
@@ -72,7 +72,7 @@ void UBaruMonsterAttributeSet::PostGameplayEffectExecute(const FGameplayEffectMo
         // State.Debuff.Groggy 태그
         if (GetSuppression() <= 0.0f && TargetASC)
         {
-            const FGameplayTag GroggyTag = FGameplayTag::RequestGameplayTag(TEXT("State.Debuff.Groggy"));
+            const FGameplayTag GroggyTag = FBaruGameplayTags::Get().State_Debuff_Groggy;
             if (!TargetASC->HasMatchingGameplayTag(GroggyTag))
             {
                 TargetASC->AddLooseGameplayTag(GroggyTag);
