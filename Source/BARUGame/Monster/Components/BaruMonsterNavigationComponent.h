@@ -47,11 +47,11 @@ public:
 	
 	// 현재 진행 중인 이동 요청을 중단
 	void StopMovement();
-
-private:
-
+	
 	// CoreAttributeSet의 기본 이동속도를 변경
 	void SetControlledMonsterMoveSpeed(float NewBaseMoveSpeed);
+
+private:
 	
 	// 평상시 배회 속도
 	float PatrolSpeed = 0.0f;
