@@ -9,7 +9,9 @@ public:
 	static const FBaruGameplayTags& Get() { return GameplayTags; }
 	static void InitializeNativeGameplayTags();
 
+	// =========================================================================
 	// Input Tags
+	// =========================================================================
 	FGameplayTag InputTag_Move;
 	FGameplayTag InputTag_Look;
 	FGameplayTag InputTag_Sprint;
@@ -21,7 +23,9 @@ public:
 	FGameplayTag InputTag_Ability_Secondary;
 	FGameplayTag InputTag_Reload;
 
+	// =========================================================================
 	// State & Status Tags
+	// =========================================================================
 	FGameplayTag State_Dead;
 	FGameplayTag State_DBNO;
 	FGameplayTag State_Sanity_Stage1;
@@ -32,30 +36,49 @@ public:
 	FGameplayTag State_Extracted;
 	FGameplayTag State_Immune;
 	FGameplayTag State_Combat_Reloading;
+	FGameplayTag State_Debuff_Groggy;
 
+	// =========================================================================
 	// Combat & Damage Tags
+	// =========================================================================
+	// SetByCaller Magnitude Keys
 	FGameplayTag Data_Damage;
 	FGameplayTag Data_Damage_Special;
+	FGameplayTag Data_Damage_Suppression;
+
+	// Damage Types
 	FGameplayTag Damage_Type_Physical;
 	FGameplayTag Damage_Type_Sanity;
+	FGameplayTag Damage_Type_Special;
+
+	// Hit Reactions
 	FGameplayTag Damage_HitReaction_Light;
 	FGameplayTag Damage_HitReaction_Heavy;
 
+	// =========================================================================
 	// Interaction Tags
+	// =========================================================================
 	FGameplayTag Interaction_Type_Pickup;
 	FGameplayTag Interaction_Type_Door;
 	FGameplayTag Interaction_Type_CoOp;
 	FGameplayTag Interaction_Type_Elevator;
 	FGameplayTag Interaction_Type_Fuse;
 
+	// =========================================================================
 	// Event & Directing Tags
+	// =========================================================================
 	FGameplayTag Event_Montage_Hit;
 	FGameplayTag Event_Montage_End;
 	FGameplayTag Event_Noise_Footstep;
 	FGameplayTag Event_Noise_Loud;
-	
-	// Ability Tags
+
+	// =========================================================================
+	// Ability & Failure Tags
+	// =========================================================================
 	FGameplayTag Ability_Action_Reload;
+	FGameplayTag Ability_ActivateFail_Cooldown;
+	FGameplayTag Ability_ActivateFail_Cost;
+	FGameplayTag Ability_ActivateFail_TagsBlocked;
 
 private:
 	static FBaruGameplayTags GameplayTags;

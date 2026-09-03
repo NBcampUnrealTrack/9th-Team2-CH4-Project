@@ -154,7 +154,6 @@ void ABaruGameMode::Logout(AController* Exiting)
 
     Super::Logout(Exiting);
     UpdateAlivePlayerCount();
-    CheckTeamWipe();
 }
 
 void ABaruGameMode::SetMatchPhase(EBaruMatchState NewPhase)
@@ -241,11 +240,17 @@ void ABaruGameMode::OnExtractionZoneCountChanged(int32 InZoneCount)
 
 void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
 {
-    if (TargetMapURL.IsEmpty()) return;
+    // 목적지가 비어있을 경우 DefaultReturnMapURL로 FallBack
+    FString FinalTargetMapURL = TargetMapURL;
+    if (FinalTargetMapURL.IsEmpty())
+    {
+        FinalTargetMapURL = DefaultReturnMapURL;
+        BARU_LOG(LogBaruSession, Warning, TEXT("TargetMapURL was empty. Fallback to DefaultReturnMapURL: %s"), *DefaultReturnMapURL);
+    }
 
     if (GetWorldTimerManager().IsTimerActive(LevelTransitionTimerHandle)) return;
 
-    PendingTargetMapURL = TargetMapURL;
+    PendingTargetMapURL = FinalTargetMapURL;
     SetMatchPhase(EBaruMatchState::Extraction);
     
     ProcessSettlement(true);
@@ -262,16 +267,18 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
         }
     }
 
-    // 연출 시간 대기 후 실제 ServerTravel 실행
+    // 연출 시간 대기 후 실제 ServerTravel 실행 : 5초 대기
+    const float SafeTransitionDelay = FMath::Max(TransitionDelayDuration, 5.0f);
+
     BARU_NET_LOG(this, LogBaruSession, Log, 
         TEXT("Level transition requested. Traveling to '%s' in %.1f seconds..."), 
-        *PendingTargetMapURL, TransitionDelayDuration);
+        *PendingTargetMapURL, SafeTransitionDelay);
 
     GetWorldTimerManager().SetTimer(
         LevelTransitionTimerHandle,
         this,
         &ABaruGameMode::ExecuteServerTravel,
-        TransitionDelayDuration, // ★ 수정
+        SafeTransitionDelay,
         false
     );
 }
@@ -343,8 +350,6 @@ void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerAc
     {
         StartSpectating(VictimPC);
     }
-
-    CheckTeamWipe();
 }
 
 void ABaruGameMode::StartSpectating(APlayerController* DeadController)
@@ -379,7 +384,27 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
 
 void ABaruGameMode::CheckTeamWipe()
 {
-    if (CachedBaruGameState && CachedBaruGameState->GetAlivePlayerCount() <= 0)
+    if (!CachedBaruGameState)
+    {
+        return;
+    }
+    
+    // DBNO 상태인 플레이어가 1명이라도 있으면 전멸이 아님 (방어 코드)
+    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    {
+        if (APlayerController* PC = Iterator->Get())
+        {
+            if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
+            {
+                if (PS->IsDBNO() && !PS->IsDead())
+                {
+                    return;
+                }
+            }
+        }
+    }
+    
+    if (CachedBaruGameState->GetAlivePlayerCount() <= 0)
     {
         BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("Team wiped. Processing Failure Settlement."));
 
