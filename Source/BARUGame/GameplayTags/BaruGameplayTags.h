@@ -28,14 +28,20 @@ public:
 	// =========================================================================
 	FGameplayTag State_Dead;
 	FGameplayTag State_DBNO;
+	
 	FGameplayTag State_Sanity_Stage1;
 	FGameplayTag State_Sanity_Stage2;
 	FGameplayTag State_Sanity_Stage3;
 	FGameplayTag State_Sanity_Frenzy;
+	
 	FGameplayTag State_Extracting;
 	FGameplayTag State_Extracted;
+	
 	FGameplayTag State_Immune;
+	
 	FGameplayTag State_Combat_Reloading;
+	FGameplayTag State_Combat_Aiming;
+	
 	FGameplayTag State_Debuff_Groggy;
 
 	// =========================================================================

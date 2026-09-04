@@ -27,14 +27,19 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
 	// =========================================================================
 	GameplayTags.State_Dead = Manager.AddNativeGameplayTag(TEXT("State.Dead"), TEXT("Actor is Dead"));
 	GameplayTags.State_DBNO = Manager.AddNativeGameplayTag(TEXT("State.DBNO"), TEXT("Down But Not Out"));
+	
 	GameplayTags.State_Sanity_Stage1 = Manager.AddNativeGameplayTag(TEXT("State.Sanity.Stage1"), TEXT("Sanity 100-70"));
 	GameplayTags.State_Sanity_Stage2 = Manager.AddNativeGameplayTag(TEXT("State.Sanity.Stage2"), TEXT("Sanity 70-40"));
 	GameplayTags.State_Sanity_Stage3 = Manager.AddNativeGameplayTag(TEXT("State.Sanity.Stage3"), TEXT("Sanity 40-10"));
 	GameplayTags.State_Sanity_Frenzy = Manager.AddNativeGameplayTag(TEXT("State.Sanity.Frenzy"), TEXT("Sanity 10-0 Frenzy"));
+	
 	GameplayTags.State_Extracting = Manager.AddNativeGameplayTag(TEXT("State.Extracting"), TEXT("Extracting in Progress"));
 	GameplayTags.State_Extracted = Manager.AddNativeGameplayTag(TEXT("State.Extracted"), TEXT("Extraction Successful"));
+	
 	GameplayTags.State_Immune = Manager.AddNativeGameplayTag(TEXT("State.Immune"), TEXT("Invulnerable State"));
+	
 	GameplayTags.State_Combat_Reloading = Manager.AddNativeGameplayTag(TEXT("State.Combat.Reloading"), TEXT("Actor is Reloading Weapon"));
+	GameplayTags.State_Combat_Aiming = Manager.AddNativeGameplayTag(TEXT("State.Combat.Aiming"), TEXT("Player is Aiming Down Sights"));
 	
 	// [추가] 몬스터 제압 및 디버프 상태
 	GameplayTags.State_Debuff_Groggy = Manager.AddNativeGameplayTag(TEXT("State.Debuff.Groggy"), TEXT("Monster is in Groggy State"));
