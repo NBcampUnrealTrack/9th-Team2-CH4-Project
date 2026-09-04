@@ -5,6 +5,11 @@
 #include "GameplayTagContainer.h"
 #include "BaruGameplayAbility.generated.h"
 
+class APawn;
+class AController;
+class ABaruCharacter;
+class UBaruAbilitySystemComponent;
+
 // [Ability] 타입 정의
 UENUM(BlueprintType)
 enum class EBaruAbilityActivationPolicy : uint8
@@ -27,6 +32,8 @@ public:
 
 	virtual void OnAvatarSet(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec) override;
 	
+	virtual void InputReleased(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo) override;
+	
 	EBaruAbilityActivationPolicy GetActivationPolicy() const { return ActivationPolicy; }
 	
 	FGameplayTag GetInputTag() const { return InputTag; }
@@ -47,4 +54,10 @@ protected:
 
 	UFUNCTION(BlueprintPure, Category = "BARU|Ability")
 	AController* GetControllerFromActorInfo() const;
+	
+	UFUNCTION(BlueprintPure, Category = "BARU|Ability")
+	ABaruCharacter* GetBaruCharacterFromActorInfo() const;
+
+	UFUNCTION(BlueprintPure, Category = "BARU|Ability")
+	UBaruAbilitySystemComponent* GetBaruAbilitySystemComponentFromActorInfo() const;
 };

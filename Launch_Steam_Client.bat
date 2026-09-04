@@ -125,11 +125,11 @@ goto TERMINATE_SCRIPT
 
 :: --- [3] Local IP Direct 2-Player Split Test ---
 :LAUNCH_LOCAL_DUAL
-echo [STATUS] Launching Local Listen Server Host at MainLobbyLevel...
-start "Host (Server)" "%UE_EDITOR%" "%PROJECT_PATH%" %LOBBY_MAP%?listen -game -log -WINDOWED ResX=960 ResY=540 -WinX=30 -WinY=50
-timeout /t 4 /nobreak >nul
+echo [STATUS] Launching Local Listen Server Host at MainLobbyLevel (Offline Socket)...
+start "Host (Server)" "%UE_EDITOR%" "%PROJECT_PATH%" %LOBBY_MAP%?listen -game -log -NOSTEAM -WINDOWED ResX=960 ResY=540 -WinX=30 -WinY=50
+timeout /t 5 /nobreak >nul
 echo [STATUS] Launching Local Client (Connecting to 127.0.0.1)...
-start "Client 1" "%UE_EDITOR%" "%PROJECT_PATH%" 127.0.0.1 -game -log -WINDOWED ResX=960 ResY=540 -WinX=1000 -WinY=50
+start "Client 1" "%UE_EDITOR%" "%PROJECT_PATH%" 127.0.0.1 -game -log -NOSTEAM -WINDOWED ResX=960 ResY=540 -WinX=1000 -WinY=50
 goto TERMINATE_SCRIPT
 
 :: --- [4] Direct Combat and AI Sandbox Host ---

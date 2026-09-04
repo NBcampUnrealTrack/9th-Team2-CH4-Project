@@ -2,6 +2,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerController.h"
+#include "Character/BaruCharacter.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
 #include "BaruLog.h"
 
@@ -27,10 +28,20 @@ void UBaruGameplayAbility::OnAvatarSet(const FGameplayAbilityActorInfo* ActorInf
 	}
 }
 
+void UBaruGameplayAbility::InputReleased(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo)
+{
+	Super::InputReleased(Handle, ActorInfo, ActivationInfo);
+	
+	if (ActivationPolicy == EBaruAbilityActivationPolicy::WhileInputActive)
+	{
+		// 키를 떼는 즉시 종료
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+	}
+}
+
 APawn* UBaruGameplayAbility::GetAvatarPawnChecked() const
 {
-	AActor* Avatar = GetAvatarActorFromActorInfo();
-	return Cast<APawn>(Avatar);
+	return Cast<APawn>(GetAvatarActorFromActorInfo());
 }
 
 AController* UBaruGameplayAbility::GetControllerFromActorInfo() const
@@ -42,11 +53,20 @@ AController* UBaruGameplayAbility::GetControllerFromActorInfo() const
 			return PC;
 		}
 
-		AActor* OwnerActor = Info->OwnerActor.Get();
-		if (APawn* Pawn = Cast<APawn>(OwnerActor))
+		if (APawn* Pawn = Cast<APawn>(Info->OwnerActor.Get()))
 		{
 			return Pawn->GetController();
 		}
 	}
 	return nullptr;
+}
+
+ABaruCharacter* UBaruGameplayAbility::GetBaruCharacterFromActorInfo() const
+{
+	return Cast<ABaruCharacter>(GetAvatarActorFromActorInfo());
+}
+
+UBaruAbilitySystemComponent* UBaruGameplayAbility::GetBaruAbilitySystemComponentFromActorInfo() const
+{
+	return Cast<UBaruAbilitySystemComponent>(GetAbilitySystemComponentFromActorInfo());
 }
