@@ -101,6 +101,12 @@ private:
 
 	FInventorySlot* FindSlot(const UBaruItemInstance* Item);
 	const FItemData* FindItemData(FName ItemID) const;
+	
+	
+	// [09.03. 추가]
+		// 인벤토리 안의 Weapon Item을 Character의 EquipmentComponent에 장착.
+		// 서버 내부에서만 호출.
+	bool EquipWeaponItem(UBaruItemInstance* Item);
 
 	friend struct FInventorySlotArray; // friend는 friend로 지정된 FInventorySlotArray만 RebuildCellCache 등의 private 함수를 쓸 수 있고, 접근 가능하게. 델타 복제 콜백 시.
 };

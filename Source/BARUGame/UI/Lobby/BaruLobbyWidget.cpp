@@ -9,8 +9,13 @@
 #include "Components/TextBlock.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
+
+#include "GameFramework/PlayerController.h"
 
 #include "BaruLog.h"
+#include "Core/BaruLobbyGameState.h"
+#include "Player/BaruPlayerState.h"
 #include "UI/Lobby/BaruSessionListItemData.h"
 
 UBaruLobbyWidget::UBaruLobbyWidget(
@@ -66,6 +71,13 @@ void UBaruLobbyWidget::NativeOnInitialized()
 		Button_CreateRoom->OnClicked.AddDynamic(
 			this,
 			&ThisClass::HandleCreateRoomClicked);
+	}
+	
+	if (IsValid(Button_LobbyAction))
+	{
+		Button_LobbyAction->OnClicked.AddDynamic(
+			this,
+			&ThisClass::HandleLobbyActionClicked);
 	}
 }
 
@@ -256,6 +268,162 @@ void UBaruLobbyWidget::HandleCreateSessionComplete(
 	}
 }
 
+void UBaruLobbyWidget::HandleTargetMapChanged(
+	const FString& NewMapURL)
+{
+	if (!IsValid(Text_SelectedContractName))
+	{
+		return;
+	}
+	
+	FString ContractName = NewMapURL;
+	
+	/**
+	 * "/Game/BaruGame/Maps.Targym"에서
+	 * 마지막 부분인 "TextGym"만 꺼낸다
+	 */
+	int32 LastSlashIndex = INDEX_NONE;
+	
+	if (ContractName.FindLastChar(
+		TEXT('/'),
+		LastSlashIndex))
+	{
+		ContractName.RightChopInline(
+			LastSlashIndex + 1);
+	}
+	
+	// 오브젝트 경로에 ".TestGym" 같은 부분이 붙어 있다면 제거한다.
+	int32 DotIndex = INDEX_NONE;
+	
+	if (ContractName.FindChar(
+		TEXT('.'),
+		DotIndex))
+	{
+		ContractName.LeftInline(DotIndex);
+	}
+	
+	if (ContractName.IsEmpty())
+	{
+		ContractName = TEXT("선택된 계약 없음");
+	}
+	
+	Text_SelectedContractName->SetText(
+		FText::FromString(ContractName));
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("선택된 계약 UI를 갱신했습니다. Map=%s"),
+		*NewMapURL);
+}
+
+void UBaruLobbyWidget::HandleAllPlayersReadyChanged(
+	bool bAllReady)
+{
+	RefreshLobbyActionButton();
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("전체 준비 상태를 UI에 반영했습니다. AllReady=%d"),
+		bAllReady);
+}
+
+void UBaruLobbyWidget::HandleLobbyActionClicked()
+{
+	if (bIsLobbyHost)
+	{
+		if (!IsValid(LobbyGameState) ||
+			!LobbyGameState->IsAllPlayersReady())
+		{
+			BARU_LOG(
+				LogBaruUI,
+				Warning,
+				TEXT("아직 모든 참가자가 준비되지 않아 게임을 시작할 수 없습니다."));
+			return;
+		}
+		
+		BARU_LOG(
+			LogBaruUI,
+			Log,
+			TEXT("방장이 게임 시작을 요청했습니다."));
+		
+		BP_OnHostStartGameRequested();
+		return;
+	}
+	
+	if (!IsValid(LocalPlayerState))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Error,
+			TEXT("준비 상태를 변경할 LocalPlayerState가 없습니다."));
+		return;
+	}
+	
+	const bool bNewReady =
+		!LocalPlayerState->IsReady();
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("플레이어 준비 상태 변경을 요청했습니다. NewReady=%d"),
+		bNewReady);
+	
+	LocalPlayerState->Server_SetReadyStatus(
+		bNewReady);
+}
+
+void UBaruLobbyWidget::HandleLocalReadyStatusChanged(
+	bool bIsReady)
+{
+	RefreshLobbyActionButton();
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("로컬 플레이어 준비 상태 UI를 갱신했습니다. Ready=%d"),
+		bIsReady);
+}
+
+void UBaruLobbyWidget::RefreshLobbyActionButton()
+{
+	if (!IsValid(Button_LobbyAction) ||
+		!IsValid(Text_LobbyAction))
+	{
+		return;
+	}
+	
+	if (bIsLobbyHost)
+	{
+		Text_LobbyAction->SetText(
+			FText::FromString(TEXT("게임 시작")));
+		
+		const bool bCanStartGame =
+			IsValid(LobbyGameState) &&
+				LobbyGameState->IsAllPlayersReady();
+		
+		Button_LobbyAction->SetIsEnabled(
+			bCanStartGame);
+		
+		return;
+	}
+	
+	const bool bIsReady =
+		IsValid(LocalPlayerState) &&
+			LocalPlayerState->IsReady();
+	
+	Text_LobbyAction->SetText(
+		FText::FromString(
+			bIsReady
+			? TEXT("준비 취소")
+			: TEXT("준비")));
+	
+	// 참가자는 준비/준비 취소를 위해 항상 클릭 가능
+	Button_LobbyAction->SetIsEnabled(
+		IsValid(LocalPlayerState));
+}
+
 void UBaruLobbyWidget::RebuildSessionResultList(
 	bool bWasSuccessful)
 {
@@ -370,6 +538,80 @@ void UBaruLobbyWidget::NativeOnActivated()
 		
 	}
 	
+	if (UWorld* World = GetWorld())
+	{
+		LobbyGameState =
+			World->GetGameState<ABaruLobbyGameState>();
+	}
+	
+	if (IsValid(LobbyGameState))
+	{
+		// 재활성화될 때 중복 등록되는 것을 방지
+		LobbyGameState->OnTargetMapChanged.RemoveDynamic(
+			this,
+			&ThisClass::HandleTargetMapChanged);
+		
+		LobbyGameState->OnTargetMapChanged.AddDynamic(
+			this,
+			&ThisClass::HandleTargetMapChanged);
+		
+		LobbyGameState->OnAllPlayersReadyChanged.RemoveDynamic(
+			this,
+			&ThisClass::HandleAllPlayersReadyChanged);
+		
+		LobbyGameState->OnAllPlayersReadyChanged.AddDynamic(
+			this,
+			&ThisClass::HandleAllPlayersReadyChanged);
+		
+		// UI가 만들어지기 전에 값이 이미 설정됐을 수 있으므로
+		// 현재 상태를 즉시 한 번 반영한다.
+		HandleTargetMapChanged(
+			LobbyGameState->GetSelectedTargetMapURL());
+		
+		HandleAllPlayersReadyChanged(
+			LobbyGameState->IsAllPlayersReady());
+	}
+	else
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("BaruLobbyGameState를 찾지 못했습니다."));
+	}
+	
+	if (APlayerController* OwningPlayer =
+		GetOwningPlayer())
+	{
+		bIsLobbyHost =
+			OwningPlayer->HasAuthority();
+		
+		LocalPlayerState =
+			OwningPlayer->GetPlayerState<ABaruPlayerState>();
+	}
+	
+	if (IsValid(LocalPlayerState))
+	{
+		LocalPlayerState->OnReadyStatusChanged.RemoveDynamic(
+			this,
+			&ThisClass::HandleLocalReadyStatusChanged);
+		
+		LocalPlayerState->OnReadyStatusChanged.AddDynamic(
+			this,
+			&ThisClass::HandleLocalReadyStatusChanged);
+		
+		HandleLocalReadyStatusChanged(
+			LocalPlayerState->IsReady());
+	}
+	else
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("로컬 BaruPlayerState를 찾지 못했습니다."));
+	}
+	
+	RefreshLobbyActionButton();
+	
 	ShowLobbyView(EBaruLobbyView::Home);
 	
 	BARU_LOG(
@@ -397,6 +639,29 @@ void UBaruLobbyWidget::NativeOnDeactivated()
 	}
 	
 	SessionSubsystem = nullptr;
+	
+	if (IsValid(LobbyGameState))
+	{
+		LobbyGameState->OnTargetMapChanged.RemoveDynamic(
+			this,
+			&ThisClass::HandleTargetMapChanged);
+		
+		LobbyGameState->OnAllPlayersReadyChanged.RemoveDynamic(
+			this,
+			&ThisClass::HandleAllPlayersReadyChanged);
+	}
+	
+	if (IsValid(LocalPlayerState))
+	{
+		LocalPlayerState->OnReadyStatusChanged.RemoveDynamic(
+			this,
+			&ThisClass::HandleLocalReadyStatusChanged);
+	}
+	
+	LocalPlayerState = nullptr;
+	bIsLobbyHost = false;
+	
+	LobbyGameState = nullptr;
 	
 	BARU_LOG(
 		LogBaruUI,

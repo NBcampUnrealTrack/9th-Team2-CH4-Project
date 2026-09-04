@@ -6,6 +6,8 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "BaruLog.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 
 ABaruTestGameMode::ABaruTestGameMode()
 {
@@ -73,6 +75,12 @@ void ABaruTestGameMode::Logout(AController* Exiting)
     {
         BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("[TEST_MODE] Client Disconnected: %s"), *Exiting->GetName());
 
+        if (FTimerHandle* FoundTimer = RespawnTimers.Find(Exiting))
+        {
+            GetWorldTimerManager().ClearTimer(*FoundTimer);
+            RespawnTimers.Remove(Exiting);
+        }
+
         if (APawn* ControlledPawn = Exiting->GetPawn())
         {
             ControlledPawn->Destroy();
@@ -87,21 +95,32 @@ void ABaruTestGameMode::OnPlayerDied(AController* VictimController, AActor* Kill
 {
     if (!IsValid(VictimController)) return;
 
-    BARU_NET_LOG(VictimController, LogBaruCombat, Log, TEXT("[TEST_MODE] Player Died: %s (Killer: %s) -> Scheduling Respawn"),
-        *VictimController->GetName(), KillerActor ? *KillerActor->GetName() : TEXT("None"));
+    BARU_NET_LOG(VictimController, LogBaruCombat, Log, TEXT("[TEST_MODE] Player Died: %s (Killer: %s) -> Scheduling Respawn in %.1fs"),
+        *VictimController->GetName(), KillerActor ? *KillerActor->GetName() : TEXT("None"), AutoRespawnDelay);
 
-    // 기존 폰 정리
+    APlayerController* VictimPC = Cast<APlayerController>(VictimController);
+
     if (APawn* DeadPawn = VictimController->GetPawn())
     {
-        DeadPawn->Destroy();
+        if (VictimPC)
+        {
+            VictimPC->SetViewTargetWithBlend(DeadPawn, 0.5f);
+            if (!VictimPC->IsLocalController())
+            {
+                VictimPC->ClientSetViewTarget(DeadPawn, FViewTargetTransitionParams());
+            }
+        }
+        
+        VictimController->UnPossess();
+        
+        DeadPawn->SetLifeSpan(AutoRespawnDelay + 2.0f);
     }
-
-    // 지정된 딜레이 후 자동 리스폰
+    
     if (AutoRespawnDelay > 0.0f)
     {
-        FTimerHandle RespawnTimerHandle;
+        FTimerHandle& RespawnHandle = RespawnTimers.FindOrAdd(VictimController);
         FTimerDelegate RespawnDelegate = FTimerDelegate::CreateUObject(this, &ABaruTestGameMode::RespawnPlayer, VictimController);
-        GetWorldTimerManager().SetTimer(RespawnTimerHandle, RespawnDelegate, AutoRespawnDelay, false);
+        GetWorldTimerManager().SetTimer(RespawnHandle, RespawnDelegate, AutoRespawnDelay, false);
     }
     else
     {
@@ -112,17 +131,24 @@ void ABaruTestGameMode::OnPlayerDied(AController* VictimController, AActor* Kill
 void ABaruTestGameMode::RespawnPlayer(AController* TargetController)
 {
     if (!IsValid(TargetController) || TargetController->IsPendingKillPending()) return;
+    
+    RespawnTimers.Remove(TargetController);
 
-    // 엔진 기본 리스폰 파이프라인 (새 Pawn 스폰 및 빙의)
     RestartPlayer(TargetController);
-
-    // PlayerState의 DBNO 및 상태 초기화
+    
     if (ABaruPlayerState* PS = TargetController->GetPlayerState<ABaruPlayerState>())
     {
         PS->SetDBNOState(false);
+        PS->SetDeadState(false);
         PS->SetSanityValue(100.0f);
+        
+        if (UAbilitySystemComponent* ASC = PS->GetAbilitySystemComponent())
+        {
+            const float MaxHP = PS->GetMaxHealth() > 0.0f ? PS->GetMaxHealth() : 100.0f;
+            ASC->SetNumericAttributeBase(UBaruCoreAttributeSet::GetHealthAttribute(), MaxHP);
+        }
     }
-
+    
     BARU_NET_LOG(TargetController, LogBaruSession, Log, TEXT("[TEST_MODE] Player Respawned: %s"), *TargetController->GetName());
     UpdateTestPlayerCount();
 }
