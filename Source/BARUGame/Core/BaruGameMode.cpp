@@ -348,7 +348,22 @@ void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerAc
 
     if (APlayerController* VictimPC = Cast<APlayerController>(VictimController))
     {
-        StartSpectating(VictimPC);
+        if (APawn* DeadPawn = VictimPC->GetPawn())
+        {
+            VictimPC->SetViewTargetWithBlend(DeadPawn, 0.5f);
+            if (!VictimPC->IsLocalController())
+            {
+                VictimPC->ClientSetViewTarget(DeadPawn, FViewTargetTransitionParams());
+            }
+        }
+        VictimPC->UnPossess();
+        
+        if (CachedBaruGameState && CachedBaruGameState->GetAlivePlayerCount() > 0)
+        {
+            FTimerHandle SpectateTimerHandle;
+            FTimerDelegate SpectateDelegate = FTimerDelegate::CreateUObject(this, &ABaruGameMode::StartSpectating, VictimPC);
+            GetWorldTimerManager().SetTimer(SpectateTimerHandle, SpectateDelegate, DeathSpectateDelay, false);
+        }
     }
 }
 
@@ -356,9 +371,8 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
 {
     if (!IsValid(DeadController) || DeadController->IsPendingKillPending()) return;
 
-    DeadController->UnPossess();
     DeadController->StartSpectatingOnly();
-
+    
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         APlayerController* OtherPC = Iterator->Get();
