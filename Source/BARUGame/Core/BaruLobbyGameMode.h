@@ -35,11 +35,19 @@ public:
     // 방장이 선택한 목표 탐사 맵 URL 설정
     UFUNCTION(BlueprintCallable, Category = "BARU|Lobby")
     void SetTargetRaidMap(const FString& InMapName);
+    
+    // 서버 전용 헬퍼
+    UFUNCTION(BlueprintPure, Category = "BARU|Lobby")
+    FString GetTargetRaidMap() const;
 
     // 방장이 탐사 시작 버튼을 눌렀을 때 심리스 트래블을 통해 B1 던전 또는 회사 로비로 이동
     UFUNCTION(BlueprintCallable, Category = "BARU|Lobby")
     void StartGameRaid(const FString& OverrideTargetMapURL = TEXT(""));
 
+protected:
+    UFUNCTION()
+    void HandlePlayerReadyStatusChanged(bool bIsReady);
+    
 protected:
     UPROPERTY(Transient)
     TObjectPtr<ABaruLobbyGameState> CachedLobbyGameState;
