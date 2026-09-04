@@ -12,11 +12,14 @@
 #include "Engine/World.h"
 
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/GameStateBase.h"
+#include "TimerManager.h"
 
 #include "BaruLog.h"
 #include "Core/BaruLobbyGameState.h"
 #include "Player/BaruPlayerState.h"
 #include "UI/Lobby/BaruSessionListItemData.h"
+#include "UI/Lobby/BaruLobbyPlayerListItemData.h"
 
 UBaruLobbyWidget::UBaruLobbyWidget(
 	const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
@@ -66,6 +69,14 @@ void UBaruLobbyWidget::NativeOnInitialized()
 			);
 	}
 	
+	if (IsValid(Button_LeaveLobby))
+	{
+		Button_LeaveLobby->OnClicked.AddDynamic(
+			this,
+			&UBaruLobbyWidget::HandleLeaveLobbyClicked
+			);
+	}
+
 	if (IsValid(Button_CreateRoom))
 	{
 		Button_CreateRoom->OnClicked.AddDynamic(
@@ -158,6 +169,11 @@ void UBaruLobbyWidget::HandleCloseContractClicked()
 
 void UBaruLobbyWidget::HandleFindSessionClicked()
 {
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("매칭 버튼이 클릭되어 세션 검색을 요청합니다."));
+
 	if (!IsValid(SessionSubsystem))
 	{
 		BARU_LOG(
@@ -180,6 +196,32 @@ void UBaruLobbyWidget::HandleFindSessionClicked()
 void UBaruLobbyWidget::HandleBackFromSearchResultsClicked()
 {
 	ShowLobbyView(EBaruLobbyView::Home);
+}
+
+void UBaruLobbyWidget::HandleLeaveLobbyClicked()
+{
+	if (!IsValid(SessionSubsystem))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Error,
+			TEXT("로비를 나갈 SessionSubsystem을 찾지 못했습니다.")
+			);
+		return;
+	}
+
+	if (IsValid(Button_LeaveLobby))
+	{
+		Button_LeaveLobby->SetIsEnabled(false);
+	}
+
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("로비 나가기를 요청했습니다.")
+		);
+
+	SessionSubsystem->DestroySession(true);
 }
 
 void UBaruLobbyWidget::HandleFindSessionsComplete(
@@ -424,6 +466,87 @@ void UBaruLobbyWidget::RefreshLobbyActionButton()
 		IsValid(LocalPlayerState));
 }
 
+void UBaruLobbyWidget::RefreshLobbyPlayerList()
+{
+	if (!IsValid(ListView_LobbyPlayers) || !IsValid(LobbyGameState))
+	{
+		return;
+	}
+
+	TArray<ABaruPlayerState*> LobbyPlayers;
+	for (APlayerState* PlayerState : LobbyGameState->PlayerArray)
+	{
+		if (ABaruPlayerState* BaruPlayerState =
+			Cast<ABaruPlayerState>(PlayerState))
+		{
+			LobbyPlayers.Add(BaruPlayerState);
+		}
+	}
+
+	LobbyPlayers.Sort([](
+		const ABaruPlayerState& Left,
+		const ABaruPlayerState& Right)
+	{
+		return Left.GetPlayerId() < Right.GetPlayerId();
+	});
+
+	FString NewSignature;
+	for (const ABaruPlayerState* PlayerState : LobbyPlayers)
+	{
+		NewSignature += FString::Printf(
+			TEXT("%d|%s|%d;"),
+			PlayerState->GetPlayerId(),
+			*PlayerState->GetPlayerName(),
+			PlayerState->IsReady());
+	}
+
+	if (NewSignature == LastLobbyPlayerListSignature)
+	{
+		return;
+	}
+
+	LastLobbyPlayerListSignature = MoveTemp(NewSignature);
+	ListView_LobbyPlayers->ClearListItems();
+	LobbyPlayerListItems.Reset();
+
+	for (int32 PlayerIndex = 0;
+		PlayerIndex < LobbyPlayers.Num();
+		++PlayerIndex)
+	{
+		ABaruPlayerState* PlayerState = LobbyPlayers[PlayerIndex];
+		FString PlayerName = PlayerState->GetPlayerName();
+		if (PlayerName.IsEmpty())
+		{
+			PlayerName = FString::Printf(
+				TEXT("Player %d"),
+				PlayerIndex + 1);
+		}
+
+		UBaruLobbyPlayerListItemData* NewItem =
+			NewObject<UBaruLobbyPlayerListItemData>(this);
+		if (!IsValid(NewItem))
+		{
+			continue;
+		}
+
+		// 현재 공용 코드에는 방장 ID가 없으므로 가장 먼저 접속한 PlayerId를 방장으로 표시한다.
+		NewItem->Initialize(
+			PlayerName,
+			PlayerIndex == 0,
+			PlayerState->IsReady(),
+			PlayerState == LocalPlayerState);
+
+		LobbyPlayerListItems.Add(NewItem);
+		ListView_LobbyPlayers->AddItem(NewItem);
+	}
+
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("로비 참가자 목록을 갱신했습니다. Count=%d"),
+		LobbyPlayerListItems.Num());
+}
+
 void UBaruLobbyWidget::RebuildSessionResultList(
 	bool bWasSuccessful)
 {
@@ -611,6 +734,17 @@ void UBaruLobbyWidget::NativeOnActivated()
 	}
 	
 	RefreshLobbyActionButton();
+	RefreshLobbyPlayerList();
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			LobbyPlayerListRefreshTimerHandle,
+			this,
+			&ThisClass::RefreshLobbyPlayerList,
+			0.5f,
+			true);
+	}
 	
 	ShowLobbyView(EBaruLobbyView::Home);
 	
@@ -625,6 +759,15 @@ void UBaruLobbyWidget::NativeOnActivated()
 
 void UBaruLobbyWidget::NativeOnDeactivated()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			LobbyPlayerListRefreshTimerHandle);
+	}
+
+	LastLobbyPlayerListSignature.Reset();
+	LobbyPlayerListItems.Reset();
+
 	if (IsValid(SessionSubsystem))
 	{
 		SessionSubsystem->OnFindSessionsCompleteEvent.RemoveDynamic(
