@@ -652,43 +652,4 @@ void ABaruMonsterAIController::UpdateBlackboardFromPerceptionState()
 	);
 }
 
-void ABaruMonsterAIController::UpdateMovementFromPerceptionState()
-{
-	// 몬스터의 이동 판단은 서버에서만 수행
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	if (!IsValid(MonsterNavigationComponent))
-	{
-		return;
-	}
-
-	// 현재 보이는 타깃이 있다면 계속 추적
-	if (APawn* TargetPawn = GetCurrentTarget();
-		IsValid(TargetPawn))
-	{
-		MonsterNavigationComponent->ChaseTarget(
-			TargetPawn
-		);
-
-		return;
-	}
-
-	// 보이는 타깃은 없지만 마지막 목격 위치가 있다면
-	// 해당 위치까지 이동해 플레이어를 수색
-	if (bHasLastKnownTargetLocation)
-	{
-		MonsterNavigationComponent->MoveToLocation(
-			LastKnownTargetLocation
-		);
-
-		return;
-	}
-
-	// 추적 대상과 마지막 목격 위치가 모두 없다면 이동 중단
-	MonsterNavigationComponent->StopMovement();
-}
-
 
