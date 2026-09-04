@@ -9,6 +9,7 @@
 
 class USkeletalMeshComponent;
 class UBaruWeaponDataAsset;
+class UGameplayEffect; // GAS 피해 GameplayEffect
 
 UCLASS()
 class BARUGAME_API ABaruWeaponBase : public AActor
@@ -22,13 +23,25 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Weapon")
 	TObjectPtr<USkeletalMeshComponent> WeaponMesh;
 
-		// 서버에서만 실행. 발사 처리.
-	UFUNCTION(BlueprintCallable, Category = "Weapon")
+		// 서버에서만 실행. 발사 처리. EqupmentComponent가 서버 검증을 끝낸 뒤 호출하는 실제 발사.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Weapon")
 	virtual void Fire(AActor* WeaponInstigator);
 	
 		// EquipmentComponent가 무기를 생성한 직후,
 		// Weapon DataAsset의 값을 이 Actor의 런타임 수치로 복사하는 함수
 	void InitializeFromData(const UBaruWeaponDataAsset* WeaponData);
+	
+	//---------Holster(아래 두 함수)까지 비활성 무기 장착 부분.
+		// EquipmentComponent가 무기를 홀스터 위치로 옮길 때 사용.
+	FName GetHolsterSocketName() const
+	{
+		return HolsterSocketName;
+	}
+
+		const FTransform& GetHolsterRelativeTransform() const
+	{
+		return HolsterRelativeTransform;
+	}
 
 		// DataAsset에서 받은 실제 런타임 피해량
 	UPROPERTY(
@@ -63,7 +76,34 @@ public:
 	float FireInterval = 0.0f;
 	
 	
+	//-----비활성 무기 장착 부분/
+		// 비활성 상태일 때 붙을 Character Mesh 소켓.
+		// DataAsset에서 장착 시 한 번 복사받습니다.
+	UPROPERTY(Transient, VisibleInstanceOnly,
+		BlueprintReadOnly, Category = "BARU|Weapon|Attachment")
+	FName HolsterSocketName = NAME_None;
+
+		// 홀스터 소켓에 부착한 뒤 적용할 무기별 위치·회전 보정값.
+	UPROPERTY(Transient, VisibleInstanceOnly,
+		BlueprintReadOnly, Category = "BARU|Weapon|Attachment")
+	FTransform HolsterRelativeTransform = FTransform::Identity;
+	
+		//GAS 부분.
+		// DataAsset에서 불러온 피해 GameplayEffect 클래스.
+		// 서버 발사 처리에서만 사용하므로 복제하지 않음.
+	UPROPERTY(
+		Transient,
+		VisibleInstanceOnly,
+		BlueprintReadOnly,
+		Category = "BARU|Weapon|Runtime")
+	TSubclassOf<UGameplayEffect> DamageEffectClass;
+	
+	
 		// 위 Replicated 변수들을 실제 네트워크 복제 목록에 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+private:
+		// 서버가 허용하는 다음 발사 시각.(연속 발사 요청 간격을 검사하기 위해.)
+	double NextAllowedFireTime = 0.0;
+	
 };

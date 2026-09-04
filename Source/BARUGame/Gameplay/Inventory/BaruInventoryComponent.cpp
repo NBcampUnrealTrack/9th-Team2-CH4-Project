@@ -240,12 +240,6 @@ int32 UBaruInventoryComponent::AddItem(FName ItemID, int32 Count)
 		{
 			AddReplicatedSubObject(NewItem);
 		}
-		
-			// [09.03. 추가] 새로 만든 UObject를 복제 목록에 등록
-		if (IsUsingRegisteredSubObjectList() && IsReadyForReplication())
-		{
-			AddReplicatedSubObject(NewItem);
-		}
 
 		Remaining -= NewItem->Quantity;
 	}
