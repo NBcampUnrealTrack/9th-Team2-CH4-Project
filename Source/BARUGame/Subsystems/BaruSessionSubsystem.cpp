@@ -219,10 +219,18 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 	FindSessionsCompleteDelegateHandle = SessionInterface->AddOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegate);
 
 	LastSessionSearch = MakeShareable(new FOnlineSessionSearch());
-	LastSessionSearch->MaxSearchResults = MaxSearchResults;
+	
+	LastSessionSearch->MaxSearchResults = FMath::Clamp(MaxSearchResults, 50, 100);
 	LastSessionSearch->bIsLanQuery = bIsLANMatch;
+	
 	LastSessionSearch->QuerySettings.Set(FName(TEXT("PRESENCESEARCH")), true, EOnlineComparisonOp::Equals);
 
+	LastSessionSearch->QuerySettings.Set(
+		BaruMatchmakingConstants::SETTING_MATCH_KEY,
+		BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE,
+		EOnlineComparisonOp::Equals
+	);
+	
 	if (!SessionInterface->FindSessions(*NetId.GetUniqueNetId(), LastSessionSearch.ToSharedRef()))
 	{
 		SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegateHandle);
