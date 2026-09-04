@@ -26,6 +26,10 @@ namespace BaruMonsterBlackboardKeys
 	const FName HasLastKnownTargetLocation(
 		TEXT("HasLastKnownTargetLocation")
 	);
+	
+	const FName MoveAcceptanceRadius(
+		TEXT("MoveAcceptanceRadius")
+	);
 }
 
 ABaruMonsterAIController::ABaruMonsterAIController()
@@ -167,6 +171,17 @@ void ABaruMonsterAIController::InitializeFromControlledMonster()
 		);
 
 		return;
+	}
+	
+	// DataAsset에서 적용된 이동 도착 허용 반경을
+	// Behavior Tree가 사용할 블랙보드에 저장
+	if (UBlackboardComponent* BlackboardComponent =
+	GetBlackboardComponent())
+	{
+		BlackboardComponent->SetValueAsFloat(
+			BaruMonsterBlackboardKeys::MoveAcceptanceRadius,
+			MonsterNavigationComponent->GetMoveAcceptanceRadius()
+		);
 	}
 	
 	// BT 실행에 성공한 뒤 초기 감지 상태를 반영
