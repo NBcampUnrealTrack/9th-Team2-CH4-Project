@@ -87,6 +87,11 @@ public:
 	FGameplayTag Ability_ActivateFail_TagsBlocked;
 	
 	// =========================================================================
+	// Monster Ability Tags
+	// =========================================================================
+	FGameplayTag Ability_Action_Monster_Attack;
+	
+	// =========================================================================
 	// Weapon Classification Tags
 	// =========================================================================
 	FGameplayTag Weapon_Type_Rifle;

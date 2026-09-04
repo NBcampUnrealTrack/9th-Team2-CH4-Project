@@ -40,8 +40,7 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
 	
 	GameplayTags.State_Combat_Reloading = Manager.AddNativeGameplayTag(TEXT("State.Combat.Reloading"), TEXT("Actor is Reloading Weapon"));
 	GameplayTags.State_Combat_Aiming = Manager.AddNativeGameplayTag(TEXT("State.Combat.Aiming"), TEXT("Player is Aiming Down Sights"));
-	
-	// [추가] 몬스터 제압 및 디버프 상태
+
 	GameplayTags.State_Debuff_Groggy = Manager.AddNativeGameplayTag(TEXT("State.Debuff.Groggy"), TEXT("Monster is in Groggy State"));
 
 	// =========================================================================
@@ -84,6 +83,10 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
 	GameplayTags.Ability_ActivateFail_Cost = Manager.AddNativeGameplayTag(TEXT("Ability.ActivateFail.Cost"), TEXT("Ability Activation Failed: Insufficient Cost"));
 	GameplayTags.Ability_ActivateFail_TagsBlocked = Manager.AddNativeGameplayTag(TEXT("Ability.ActivateFail.TagsBlocked"), TEXT("Ability Activation Failed: Tags Blocked"));
 	
+	// =========================================================================
+	// Monster Ability Tags
+	// =========================================================================
+	GameplayTags.Ability_Action_Monster_Attack = Manager.AddNativeGameplayTag(TEXT("Ability.Action.Monster.Attack"), TEXT("Monster Basic Attack Action"));
 	
 	// =========================================================================
 	// Weapon & Damage & Feedback
