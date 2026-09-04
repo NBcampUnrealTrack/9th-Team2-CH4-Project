@@ -78,6 +78,32 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
 	GameplayTags.Ability_ActivateFail_Cooldown = Manager.AddNativeGameplayTag(TEXT("Ability.ActivateFail.Cooldown"), TEXT("Ability Activation Failed: Cooldown"));
 	GameplayTags.Ability_ActivateFail_Cost = Manager.AddNativeGameplayTag(TEXT("Ability.ActivateFail.Cost"), TEXT("Ability Activation Failed: Insufficient Cost"));
 	GameplayTags.Ability_ActivateFail_TagsBlocked = Manager.AddNativeGameplayTag(TEXT("Ability.ActivateFail.TagsBlocked"), TEXT("Ability Activation Failed: Tags Blocked"));
+	
+	
+	// =========================================================================
+	// Weapon & Damage & Feedback
+	// =========================================================================
+	
+	// Weapon Classification
+    GameplayTags.Weapon_Type_Rifle = Manager.AddNativeGameplayTag(TEXT("Weapon.Type.Rifle"), TEXT("Assault Rifle"));
+    GameplayTags.Weapon_Type_Revolver = Manager.AddNativeGameplayTag(TEXT("Weapon.Type.Revolver"), TEXT("Revolver Handgun"));
+    GameplayTags.Weapon_Type_Grenade = Manager.AddNativeGameplayTag(TEXT("Weapon.Type.Grenade"), TEXT("Throwable Grenade"));
+    
+    // Weapon Action
+    GameplayTags.Ability_Action_Fire_Rifle = Manager.AddNativeGameplayTag(TEXT("Ability.Action.Fire.Rifle"), TEXT("Rifle FullAuto/Burst Fire"));
+    GameplayTags.Ability_Action_Fire_Revolver = Manager.AddNativeGameplayTag(TEXT("Ability.Action.Fire.Revolver"), TEXT("Revolver Single Fire"));
+    GameplayTags.Ability_Action_Throw_Grenade = Manager.AddNativeGameplayTag(TEXT("Ability.Action.Throw.Grenade"), TEXT("Throw Grenade"));
+    GameplayTags.Ability_Action_Reload_Rifle = Manager.AddNativeGameplayTag(TEXT("Ability.Action.Reload.Rifle"), TEXT("Rifle Magazine Reload"));
+    GameplayTags.Ability_Action_Reload_Revolver = Manager.AddNativeGameplayTag(TEXT("Ability.Action.Reload.Revolver"), TEXT("Revolver Cylinder Reload"));
+    
+    // Damage & Cues
+    GameplayTags.Damage_Type_Explosion = Manager.AddNativeGameplayTag(TEXT("Damage.Type.Explosion"), TEXT("Explosive Area Damage"));
+    
+    GameplayTags.GameplayCue_Weapon_Rifle_Fire = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Weapon.Rifle.Fire"), TEXT("Rifle Muzzle and Sound"));
+    GameplayTags.GameplayCue_Weapon_Revolver_Fire = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Weapon.Revolver.Fire"), TEXT("Revolver Muzzle and Sound"));
+    GameplayTags.GameplayCue_Weapon_Grenade_Explode = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Weapon.Grenade.Explode"), TEXT("Grenade Explosion VFX and SFX"));
+	
+	
 
 	BARU_LOG(LogBaruGAS, Log, TEXT("FBaruGameplayTags initialized with Extended Native Tags."));
 }
