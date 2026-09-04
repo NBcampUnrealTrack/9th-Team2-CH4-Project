@@ -1,4 +1,5 @@
 #include "Core/BaruLobbyGameState.h"
+#include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "BaruLog.h"
 
@@ -53,4 +54,18 @@ void ABaruLobbyGameState::OnRep_SelectedTargetMapURL()
 {
 	BARU_NET_LOG(this, LogBaruSession, Verbose, TEXT("OnRep_SelectedTargetMapURL: %s"), *SelectedTargetMapURL);
 	OnTargetMapChanged.Broadcast(SelectedTargetMapURL);
+}
+
+void ABaruLobbyGameState::AddPlayerState(APlayerState* PlayerState)
+{
+	Super::AddPlayerState(PlayerState);
+	BARU_NET_LOG(this, LogBaruSession, Log, TEXT("PlayerState Added to Lobby: %s"), *GetNameSafe(PlayerState));
+	OnLobbyPlayerArrayUpdated.Broadcast();
+}
+
+void ABaruLobbyGameState::RemovePlayerState(APlayerState* PlayerState)
+{
+	Super::RemovePlayerState(PlayerState);
+	BARU_NET_LOG(this, LogBaruSession, Log, TEXT("PlayerState Removed from Lobby: %s"), *GetNameSafe(PlayerState));
+	OnLobbyPlayerArrayUpdated.Broadcast();
 }

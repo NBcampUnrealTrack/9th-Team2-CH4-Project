@@ -14,6 +14,7 @@ class UListView;
 class UTextBlock;
 class UWidgetSwitcher;
 class UBaruSessionListItemData;
+class UBaruLobbyPlayerListItemData;
 class ABaruLobbyGameState;
 class ABaruPlayerState;
 
@@ -63,6 +64,9 @@ protected:
 	void HandleBackFromSearchResultsClicked();
 	
 	UFUNCTION()
+	void HandleLeaveLobbyClicked();
+
+	UFUNCTION()
 	void HandleLobbyActionClicked();
 
 	/**
@@ -105,6 +109,9 @@ protected:
 		);
 	
 	void RefreshLobbyActionButton();
+
+	/** 복제된 PlayerArray를 읽어 참가자 ListView를 최신 상태로 맞춘다. */
+	void RefreshLobbyPlayerList();
 	
 	
 	void RebuildSessionResultList(
@@ -139,6 +146,10 @@ protected:
 	
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UTextBlock> Text_LobbyAction;
+
+	/** 기존 WBP_Lobby와의 호환을 위해 블루프린트 배치 전까지 선택 바인딩으로 둔다. */
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "BARU|UI|Lobby|Player")
+	TObjectPtr<UListView> ListView_LobbyPlayers;
 	
 	/**
 	 * ListView에 전달한 UObject Item들을 보관한다.
@@ -149,6 +160,10 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBaruSessionListItemData>>
 	SessionListItems;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBaruLobbyPlayerListItemData>>
+	LobbyPlayerListItems;
 	
 	// 버튼
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
@@ -164,11 +179,15 @@ protected:
 	TObjectPtr<UButton> Button_BackFromSearchResults;
 	
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
+	TObjectPtr<UButton> Button_LeaveLobby;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UButton> Button_CreateRoom;
 	
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UButton> Button_LobbyAction;
-	
+
+
 	// 외부 시스템과 검색 데이터
 	UPROPERTY(Transient)
 	TObjectPtr<UBaruSessionSubsystem> SessionSubsystem;
@@ -188,6 +207,11 @@ protected:
 	
 	UPROPERTY(Transient)
 	bool bIsLobbyHost = false;
+
+	/** 목록 내용이 실제로 바뀔 때만 ListView를 다시 만들기 위한 비교 값 */
+	FString LastLobbyPlayerListSignature;
+
+	FTimerHandle LobbyPlayerListRefreshTimerHandle;
 	
 	// 현재 화면 상태
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI|Lobby")

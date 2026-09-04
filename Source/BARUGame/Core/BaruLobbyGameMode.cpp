@@ -31,6 +31,12 @@ void ABaruLobbyGameMode::PostLogin(APlayerController* NewPlayer)
     if (IsValid(NewPlayer))
     {
         BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Lobby Player Logged In: %s"), *NewPlayer->GetName());
+        
+        if (ABaruPlayerState* PS = NewPlayer->GetPlayerState<ABaruPlayerState>())
+        {
+            PS->OnReadyStatusChanged.RemoveDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
+            PS->OnReadyStatusChanged.AddDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
+        }
     }
 
     if (!CachedLobbyGameState)
@@ -57,6 +63,11 @@ void ABaruLobbyGameMode::Logout(AController* Exiting)
     if (IsValid(Exiting))
     {
         BARU_NET_LOG(Exiting, LogBaruSession, Log, TEXT("Lobby Player Logged Out: %s"), *Exiting->GetName());
+        
+        if (ABaruPlayerState* PS = Exiting->GetPlayerState<ABaruPlayerState>())
+        {
+            PS->OnReadyStatusChanged.RemoveDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
+        }
 
         if (APawn* ControlledPawn = Exiting->GetPawn())
         {
@@ -95,6 +106,21 @@ void ABaruLobbyGameMode::SetTargetRaidMap(const FString& InMapName)
     BARU_LOG(LogBaruSession, Log, TEXT("Lobby Target Map Changed: %s"), *InMapName);
 }
 
+FString ABaruLobbyGameMode::GetTargetRaidMap() const
+{
+    if (CachedLobbyGameState && !CachedLobbyGameState->GetSelectedTargetMapURL().IsEmpty())
+    {
+        return CachedLobbyGameState->GetSelectedTargetMapURL();
+    }
+
+    return DefaultRaidMapURL;
+}
+
+void ABaruLobbyGameMode::HandlePlayerReadyStatusChanged(bool /*bIsReady*/)
+{
+    OnPlayerReadyStatusChanged();
+}
+
 void ABaruLobbyGameMode::OnPlayerReadyStatusChanged()
 {
     if (!CachedLobbyGameState)
@@ -102,27 +128,37 @@ void ABaruLobbyGameMode::OnPlayerReadyStatusChanged()
         CachedLobbyGameState = GetGameState<ABaruLobbyGameState>();
     }
 
-    int32 TotalPlayers = 0;
-    int32 ReadyPlayers = 0;
+    // 방장 제외 인원 집계
+    int32 GuestPlayerCount = 0;
+    int32 ReadyGuestCount = 0;
 
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         APlayerController* PC = Iterator->Get();
-        if (IsValid(PC) && !PC->IsPendingKillPending())
+        if (!IsValid(PC) || PC->IsPendingKillPending())
         {
-            TotalPlayers++;
-            if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
+            continue;
+        }
+
+        // 리슨 서버의 호스트(방장 머신) 컨트롤러는 준비 대상에서 제외
+        if (PC->IsLocalController())
+        {
+            continue;
+        }
+
+        GuestPlayerCount++;
+        if (const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
+        {
+            if (PS->IsReady())
             {
-                if (PS->IsReady())
-                {
-                    ReadyPlayers++;
-                }
+                ReadyGuestCount++;
             }
         }
     }
 
-    // 최소 1명 이상 접속 중이고 모든 인원이 레디를 마쳤는지 검사
-    const bool bAllReady = (TotalPlayers > 0) && (ReadyPlayers == TotalPlayers);
+    // 게스트가 없는 1인 방(솔로 플레이)이면 즉시 출발 가능(true),
+    // 게스트가 1명 이상 접속해 있다면 게스트 전원이 레디해야 true 판정
+    const bool bAllReady = (GuestPlayerCount == 0) || (ReadyGuestCount == GuestPlayerCount);
 
     // GameState를 통해 모든 클라이언트로 복제 전파
     if (CachedLobbyGameState)
@@ -130,7 +166,8 @@ void ABaruLobbyGameMode::OnPlayerReadyStatusChanged()
         CachedLobbyGameState->SetAllPlayersReady(bAllReady);
     }
 
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Lobby Ready Status: %d / %d Ready (bAllReady: %d)"), ReadyPlayers, TotalPlayers, bAllReady);
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Lobby Ready Status: %d / %d Guests Ready (bAllReady: %d)"),
+        ReadyGuestCount, GuestPlayerCount, bAllReady);
 }
 
 void ABaruLobbyGameMode::StartGameRaid(const FString& OverrideTargetMapURL)

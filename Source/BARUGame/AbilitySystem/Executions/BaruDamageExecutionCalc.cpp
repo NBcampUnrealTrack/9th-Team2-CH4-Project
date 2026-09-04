@@ -1,6 +1,7 @@
 #include "AbilitySystem/Executions/BaruDamageExecutionCalc.h"
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 #include "AbilitySystem/Attributes/BaruMonsterAttributeSet.h"
+#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
 #include "GameplayTags/BaruGameplayTags.h"
 #include "BaruLog.h"
@@ -47,6 +48,44 @@ UBaruDamageExecutionCalc::UBaruDamageExecutionCalc()
 void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCustomExecutionParameters& ExecutionParams, FGameplayEffectCustomExecutionOutput& OutExecutionOutput) const
 {
     const FGameplayEffectSpec& Spec = ExecutionParams.GetOwningSpec();
+    
+    // ==============================================================================
+    // 팀킬 / 아군 피견 검사 로직
+    // ==============================================================================
+    UAbilitySystemComponent* TargetASC = ExecutionParams.GetTargetAbilitySystemComponent();
+    UAbilitySystemComponent* SourceASC = ExecutionParams.GetSourceAbilitySystemComponent();
+    
+    if (TargetASC && SourceASC && TargetASC != SourceASC)
+    {
+        const UBaruPlayerAttributeSet* TargetPlayerSet = TargetASC->GetSet<UBaruPlayerAttributeSet>();
+        const UBaruPlayerAttributeSet* SourcePlayerSet = SourceASC->GetSet<UBaruPlayerAttributeSet>();
+
+        // 플레이어 간 상호작용인 경우
+        if (TargetPlayerSet != nullptr && SourcePlayerSet != nullptr)
+        {
+            const float AttackerSanity = SourcePlayerSet->GetSanity();
+            const FGameplayTag FrenzyTag = FBaruGameplayTags::Get().State_Sanity_Frenzy;
+
+            // 광란 상태 조건
+            const bool bIsAttackerInFrenzy = (AttackerSanity <= 20.0f) || SourceASC->HasMatchingGameplayTag(FrenzyTag);
+
+            // 광란 상태가 아닐 경우
+            if (!bIsAttackerInFrenzy)
+            {
+                BARU_NET_LOG(TargetASC->GetAvatarActor(), LogBaruCombat, Log,
+                    TEXT("[FRIENDLY_FIRE_BLOCKED] Attacker '%s' Sanity: %.1f > 20.0. Team damage prevented."),
+                    *GetNameSafe(SourceASC->GetAvatarActor()), AttackerSanity);
+                return;
+            }
+
+            BARU_NET_LOG(TargetASC->GetAvatarActor(), LogBaruCombat, Warning,
+                TEXT("[FRIENDLY_FIRE_ALLOWED] Attacker '%s' is in FRENZY. (Sanity: %.1f <= 20.0). Team damage applied."),
+                *GetNameSafe(SourceASC->GetAvatarActor()), AttackerSanity);
+        }
+    }
+    
+    
+    
     
     FAggregatorEvaluateParameters EvaluationParameters;
     
