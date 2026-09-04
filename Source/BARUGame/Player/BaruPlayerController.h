@@ -57,6 +57,10 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Input")
 	void Server_RequestDropItem(int32 SlotIndex, int32 Count);
 	
+	//추가
+	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Lobby")
+	void Server_RequestStartRaid();
+	
 	// Client RPC
 	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
 	void Client_ShowSettlementUI(const FBaruSettlementReport& Report);

@@ -12,12 +12,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSani
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDeadStatusChanged, bool, bIsDead); // [추가]
 
 class UAbilitySystemComponent;
-class UBaruAbilitySystemComponent;      // [추가]
+class UBaruAbilitySystemComponent;      
 class UBaruCoreAttributeSet;
 class UBaruPlayerAttributeSet;
 class UBaruHealthComponent;
-class UBaruInventoryComponent;      // item-iven 연동
-struct FOnAttributeChangeData;          // [추가] Sanity 어트리뷰트 콜백용
+class UBaruInventoryComponent;      
+struct FOnAttributeChangeData;         
 
 //플레이어 상태 및 ASC, AttributeSet 소유
 //Todo : 캐릭터가 죽은 뒤에 아이디는 그대로 유지하고 스테이터스 및 장비를 초기화하는 로직이 필요
