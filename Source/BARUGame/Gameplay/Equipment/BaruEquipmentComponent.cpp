@@ -23,39 +23,23 @@ UBaruEquipmentComponent::UBaruEquipmentComponent()
 	SetIsReplicatedByDefault(true);
 }
 
-
-// [임시 테스트]
-// EquipmentComponent가 Character에 붙어 게임을 시작하면 호출됩니다.
-void UBaruEquipmentComponent::BeginPlay()
+// 플레이어 캐릭터 사망 시 액터도 사라지게 하는 내용.
+    // Owner Character가 Destroy될 때 호출됨.
+    // 단순 사망 상태가 아니라 Actor가 실제로 사라질 때만 실행됨.
+    // 부활 후 리스폰 할 때에도 무기가 사라지도록.
+void UBaruEquipmentComponent::EndPlay(
+    const EEndPlayReason::Type EndPlayReason)
 {
-    Super::BeginPlay();
-
-    // 테스트 설정이 꺼져 있거나,
-    // 서버가 아니라면 아무 작업도 하지 않습니다.
-    if (!bAutoEquipTestWeapon
-        || !GetOwner()
-        || !GetOwner()->HasAuthority())
+        // 무기 Actor의 Destroy는 서버만 결정하고, 결과를 클라이언트에 복제합니다.
+    if (AActor* OwnerActor = GetOwner();
+        IsValid(OwnerActor) && OwnerActor->HasAuthority())
     {
-        return;
+            // 기존 장착 해제 함수가 내부에서 Weapon->Destroy()를 수행한다는 전제입니다.
+        UnequipWeapon(EBaruEquipmentSlot::PrimaryWeapon);
+        UnequipWeapon(EBaruEquipmentSlot::SecondaryWeapon);
     }
 
-    // BP에서 지정한 DataAsset을 실제 메모리로 불러옵니다.
-    UBaruWeaponDataAsset* WeaponData =
-        TestWeaponData.LoadSynchronous();
-
-    if (!WeaponData)
-    {
-        BARU_NET_LOG(
-            GetOwner(),
-            LogBaruItem,
-            Warning,
-            TEXT("자동 장착 테스트 실패: TestWeaponData가 비어 있습니다."));
-
-        return;
-    }
-
-    // 앞 단계에서 만든 실제 장착 C++ 함수를 호출합니다.
-    EquipWeapon(WeaponData);
+    Super::EndPlay(EndPlayReason);
 }
 
 
@@ -170,51 +154,74 @@ bool UBaruEquipmentComponent::EquipWeapon(
         // 무기별 수치의 기준을 DataAsset 한 곳으로 유지하기 위함.
     NewWeapon->InitializeFromData(WeaponData);
 
+    /* 비활성 무기를 캐릭터 메시에 붙이기로 한 다음 주석처리한 부분.
+     * 만약 비활성 무기를 안 할 거라면 다시 복구할 것.
         // Character의 weapon_r 위치에 무기를 맞춰 부착.
     NewWeapon->AttachToComponent(
         CharacterMesh,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale,
         ThirdPersonWeaponAttachPoint);
-
-        // 기존에 사용하던 무기는 숨깁니다.
-    if (ActiveWeaponSlot == EBaruEquipmentSlot::PrimaryWeapon
-        && IsValid(PrimaryWeapon))
-    {
-        PrimaryWeapon->SetActorHiddenInGame(true);
-    }
-    else if (ActiveWeaponSlot == EBaruEquipmentSlot::SecondaryWeapon
-        && IsValid(SecondaryWeapon))
-    {
-        SecondaryWeapon->SetActorHiddenInGame(true);
-    }
-
+*/
+    /* 비활성 무기도 착용하는 코드를 넣은 뒤, 주석처리한 부분.
+     * 
         // 같은 슬롯에 이미 장착된 무기가 있다면 교체하기 전에 제거.
         // 반쯤 오류 방지용. 같은 슬롯에 무기 Actor가 두 개 남는 것을 방지하는 용도.
     if (TargetSlot == EBaruEquipmentSlot::PrimaryWeapon)
+    {   if (IsValid(PrimaryWeapon)) {   PrimaryWeapon->Destroy();   }
+        PrimaryWeapon = NewWeapon;   }
+    else
+    {   if (IsValid(SecondaryWeapon)) {    SecondaryWeapon->Destroy();   }
+        SecondaryWeapon = NewWeapon;    }
+    */
+    
+    //-------비활성 무기 장착 부분.
+        // 같은 슬롯에 기존 무기가 있는지 확인
+    ABaruWeaponBase* PreviousWeaponInSlot =
+        TargetSlot == EBaruEquipmentSlot::PrimaryWeapon
+        ? PrimaryWeapon.Get()
+        : SecondaryWeapon.Get();
+    
+        // 교체되는 슬롯이 현재 손에 든 슬롯이었는지 기억
+    const bool bReplacingActiveSlot =
+        ActiveWeaponSlot == TargetSlot;
+    
+    // 새 무기 생성에 성공했으므로 기존 같은 슬롯 무기를 제거
+    if (IsValid(PreviousWeaponInSlot))
     {
-        if (IsValid(PrimaryWeapon))
-        {
-            PrimaryWeapon->Destroy();
-        }
-
+        PreviousWeaponInSlot->Destroy();
+    }
+    
+    // 새 무기를 해당 슬롯에 보관
+    if (TargetSlot == EBaruEquipmentSlot::PrimaryWeapon)
+    {
         PrimaryWeapon = NewWeapon;
     }
     else
     {
-        if (IsValid(SecondaryWeapon))
-        {
-            SecondaryWeapon->Destroy();
-        }
-
         SecondaryWeapon = NewWeapon;
     }
-
-        // 새로 장착한 무기는 현재 사용 무기로 설정.
+    
     NewWeapon->SetActorHiddenInGame(false);
-    ActiveWeaponSlot = TargetSlot;
 
-        // 장착 상태 변경을 즉시 네트워크 갱신 대상으로 표시.
+
+        // 첫 무기 또는 현재 사용 중인 슬롯의 교체 무기는 손에 부착
+    const bool bShouldAttachToHand =
+        ActiveWeaponSlot == EBaruEquipmentSlot::None
+        || bReplacingActiveSlot;
+
+    if (bShouldAttachToHand)
+    {
+        ActiveWeaponSlot = TargetSlot;
+        AttachWeaponToHand(NewWeapon);
+    }
+    else
+    {
+           // 이미 손에 든 무기가 있으면 새 무기는 등/허리에 보관
+        AttachWeaponToHolster(NewWeapon);
+    }
+
     GetOwner()->ForceNetUpdate();
+    //-------여기까지 비활성 무기 장착 부분.
 
     BARU_NET_LOG(
         GetOwner(),
@@ -342,4 +349,186 @@ void UBaruEquipmentComponent::FireActiveWeaponOnServer()
     
         //기존의 WeaponBase의 실제 발사 함수 호출 부분.
     ActiveWeapon -> Fire(OwnerActor);
+}
+
+
+
+
+    // 비활성 무기칸.
+void UBaruEquipmentComponent::RequestSetActiveWeaponSlot(
+    EBaruEquipmentSlot NewWeaponSlot)
+{
+    if (!IsValid(GetOwner()))
+    {
+        return;
+    }
+
+    // 서버라면 즉시 처리, 클라이언트라면 서버에 요청
+    if (GetOwner()->HasAuthority())
+    {
+        SetActiveWeaponSlotOnServer(NewWeaponSlot);
+    }
+    else
+    {
+        Server_SetActiveWeaponSlot(NewWeaponSlot);
+    }
+}
+
+void UBaruEquipmentComponent::Server_SetActiveWeaponSlot_Implementation(
+    EBaruEquipmentSlot NewWeaponSlot)
+{
+    SetActiveWeaponSlotOnServer(NewWeaponSlot);
+}
+
+void UBaruEquipmentComponent::SetActiveWeaponSlotOnServer(
+    EBaruEquipmentSlot NewWeaponSlot)
+{
+    if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority())
+    {
+        return;
+    }
+
+        // 주무기·보조무기 이외의 슬롯 요청은 거절
+    if (NewWeaponSlot != EBaruEquipmentSlot::PrimaryWeapon
+        && NewWeaponSlot != EBaruEquipmentSlot::SecondaryWeapon)
+    {
+        return;
+    }
+
+    ABaruWeaponBase* NewActiveWeapon =
+        (NewWeaponSlot == EBaruEquipmentSlot::PrimaryWeapon)
+        ? PrimaryWeapon.Get()
+        : SecondaryWeapon.Get();
+
+        // 해당 슬롯에 실제 장착된 무기가 없으면 전환하지 않음
+    if (!IsValid(NewActiveWeapon))
+    {
+        return;
+    }
+
+        // 이미 활성화된 무기라면 처리하지 않음
+    if (ActiveWeaponSlot == NewWeaponSlot)
+    {
+        return;
+    }
+
+        // 기존 손 무기는 등/허리로 이동
+    if (ABaruWeaponBase* PreviousWeapon = GetActiveWeapon())
+    {
+        AttachWeaponToHolster(PreviousWeapon);
+    }
+
+        // 새 무기는 손으로 이동
+    ActiveWeaponSlot = NewWeaponSlot;
+    AttachWeaponToHand(NewActiveWeapon);
+
+    GetOwner()->ForceNetUpdate();
+}
+
+    //무기를 손에 붙이기.
+void UBaruEquipmentComponent::AttachWeaponToHand(
+    ABaruWeaponBase* Weapon)
+{
+    ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (!IsValid(Weapon) || !IsValid(OwnerCharacter))
+    {
+        return;
+    }
+
+    USkeletalMeshComponent* CharacterMesh = OwnerCharacter->GetMesh();
+    if (!IsValid(CharacterMesh))
+    {
+        return;
+    }
+
+    const bool bHasAttachPoint =
+        CharacterMesh->DoesSocketExist(ThirdPersonWeaponAttachPoint)
+        || CharacterMesh->GetBoneIndex(ThirdPersonWeaponAttachPoint) != INDEX_NONE;
+
+    if (!bHasAttachPoint)
+    {
+        return;
+    }
+
+    Weapon->AttachToComponent(
+        CharacterMesh,
+        FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+        ThirdPersonWeaponAttachPoint);
+
+    Weapon->SetActorRelativeTransform(FTransform::Identity);
+}
+
+    // 홀스터에 무기 붙이기.
+void UBaruEquipmentComponent::AttachWeaponToHolster(
+    ABaruWeaponBase* Weapon)
+{
+    ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (!IsValid(Weapon) || !IsValid(OwnerCharacter))
+    {
+        return;
+    }
+
+    const FName HolsterSocketName = Weapon->GetHolsterSocketName();    
+    if (HolsterSocketName.IsNone())
+    {
+        BARU_NET_LOG(
+            GetOwner(),
+            LogBaruItem,
+            Warning,
+            TEXT("홀스터 부착 실패: %s의 HolsterSocketName이 None입니다."),
+            *GetNameSafe(Weapon));
+
+        return;
+    }
+
+    USkeletalMeshComponent* CharacterMesh = OwnerCharacter->GetMesh();
+    if (!IsValid(CharacterMesh))
+    {
+        return;
+    }
+
+    const bool bHasAttachPoint =
+        CharacterMesh->DoesSocketExist(HolsterSocketName)
+        || CharacterMesh->GetBoneIndex(HolsterSocketName) != INDEX_NONE;
+
+    if (!bHasAttachPoint)
+    {
+        BARU_NET_LOG(
+            GetOwner(),
+            LogBaruItem,
+            Warning,
+            TEXT("홀스터 부착 실패: Character Mesh에서 '%s'를 찾지 못했습니다."),
+            *HolsterSocketName.ToString());
+
+        return;
+    }
+
+    const bool bAttached = Weapon->AttachToComponent(
+    CharacterMesh,
+    FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+    HolsterSocketName);
+
+    if (!bAttached)
+    {
+        BARU_NET_LOG(
+            GetOwner(),
+            LogBaruItem,
+            Warning,
+            TEXT("홀스터 부착 실패: AttachToComponent 실패. Weapon=%s, Socket=%s"),
+            *GetNameSafe(Weapon),
+            *HolsterSocketName.ToString());
+
+        return;
+    }
+
+    Weapon->SetActorRelativeTransform(
+        Weapon->GetHolsterRelativeTransform());
+
+    BARU_NET_LOG(
+        GetOwner(),
+        LogBaruItem,
+        Log,
+        TEXT("홀스터 부착 성공: Weapon=%s, Socket=%s"),
+        *GetNameSafe(Weapon),
+        *HolsterSocketName.ToString());
 }

@@ -44,6 +44,19 @@ public:
 		// 예: BP_Weapon_Revolver, BP_Weapon_Rifle
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Weapon")
 	TSoftClassPtr<ABaruWeaponBase> WeaponActorClass;
+	
+	//-----하단 두 함수 : 비활성 무기 장착 슬롯 부분. 허리랑 등짝.
+		// 이 무기가 비활성 상태일 때 붙을 Character Mesh 소켓 이름.
+		// 예: Weapon_BackSocket, Weapon_HipSocket
+		// 나중에 부착할 부분의 이름을 그렇게 정하면 됨.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "BARU|Weapon|Attachment")
+	FName HolsterSocketName = NAME_None;
+	
+		// 홀스터 소켓에 붙은 뒤 적용할 무기별 위치·회전 보정값.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "BARU|Weapon|Attachment")
+	FTransform HolsterRelativeTransform = FTransform::Identity;
 
 
 		// 무기의 기본 피해량

@@ -30,6 +30,18 @@ public:
 		// EquipmentComponent가 무기를 생성한 직후,
 		// Weapon DataAsset의 값을 이 Actor의 런타임 수치로 복사하는 함수
 	void InitializeFromData(const UBaruWeaponDataAsset* WeaponData);
+	
+	//---------Holster(아래 두 함수)까지 비활성 무기 장착 부분.
+		// EquipmentComponent가 무기를 홀스터 위치로 옮길 때 사용.
+	FName GetHolsterSocketName() const
+	{
+		return HolsterSocketName;
+	}
+
+		const FTransform& GetHolsterRelativeTransform() const
+	{
+		return HolsterRelativeTransform;
+	}
 
 		// DataAsset에서 받은 실제 런타임 피해량
 	UPROPERTY(
@@ -62,6 +74,19 @@ public:
 		Replicated,
 		Category = "BARU|Weapon|Runtime")
 	float FireInterval = 0.0f;
+	
+	
+	//-----비활성 무기 장착 부분/
+		// 비활성 상태일 때 붙을 Character Mesh 소켓.
+		// DataAsset에서 장착 시 한 번 복사받습니다.
+	UPROPERTY(Transient, VisibleInstanceOnly,
+		BlueprintReadOnly, Category = "BARU|Weapon|Attachment")
+	FName HolsterSocketName = NAME_None;
+
+		// 홀스터 소켓에 부착한 뒤 적용할 무기별 위치·회전 보정값.
+	UPROPERTY(Transient, VisibleInstanceOnly,
+		BlueprintReadOnly, Category = "BARU|Weapon|Attachment")
+	FTransform HolsterRelativeTransform = FTransform::Identity;
 	
 		//GAS 부분.
 		// DataAsset에서 불러온 피해 GameplayEffect 클래스.

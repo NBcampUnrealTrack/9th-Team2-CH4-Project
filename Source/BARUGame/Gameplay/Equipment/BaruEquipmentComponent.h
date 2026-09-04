@@ -22,10 +22,6 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	
-		// [임시 테스트 용도]
-		// 게임 시작 시 테스트 무기를 자동 장착할지 여부
-	virtual void BeginPlay() override;
-	
 		// 서버에서 Weapon DataAsset을 받아 실제 Weapon Actor를 생성·장착.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
 	bool EquipWeapon(UBaruWeaponDataAsset* WeaponData);
@@ -79,27 +75,38 @@ protected:
 	EBaruEquipmentSlot ActiveWeaponSlot = EBaruEquipmentSlot::None;
 	
 		// 3인칭 Character Mesh에서 무기를 붙일 소켓 또는 본 이름
-		// 현재 Character Skeleton의 weapon_r을 기본값으로 사용.
+		// 현재 Character Skeleton의 hand_r을 기본값으로 사용.
 		// 나중에 캐릭터 변경 시, 확인 필요한, 바꿔야할 부분!!!
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Equipment|Weapon")
-	FName ThirdPersonWeaponAttachPoint = TEXT("weapon_r");
+	FName ThirdPersonWeaponAttachPoint = TEXT("hand_r");
 	
+		// Character가 실제로 제거될 때, 장착 무기 Actor도 서버에서 정리.
+		// 안 쓰면 캐릭터 사망 후에도 무기가 레벨에 남게됨.
+	virtual void EndPlay(
+		const EEndPlayReason::Type EndPlayReason) override;
 	
-	// [임시 테스트 용도] ///지워야할 부분.
-	// true이면 서버에서 BeginPlay 시 TestWeaponData를 자동 장착합니다.
-	UPROPERTY(
-		EditDefaultsOnly,
-		BlueprintReadOnly,
-		Category = "BARU|Equipment|Test")
-	bool bAutoEquipTestWeapon = false;
+	// 비활성 무기 장착 부분.
+public:
+	UFUNCTION(BlueprintPure, Category = "BARU|Equipment")
+	EBaruEquipmentSlot GetActiveWeaponSlot() const
+	{
+		return ActiveWeaponSlot;
+	}
 
-		// [임시 테스트 용도] ///지워야할 부분.
-		// 자동 장착에 사용할 무기 DataAsset
-		// 예: DA_Weapon_Revolver
-	UPROPERTY(
-		EditDefaultsOnly,
-		BlueprintReadOnly,
-		Category = "BARU|Equipment|Test",
-		meta = (EditCondition = "bAutoEquipTestWeapon"))
-	TSoftObjectPtr<UBaruWeaponDataAsset> TestWeaponData;
+		// 입력 또는 UI가 호출하는 무기 전환 요청 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment|Weapon")
+	void RequestSetActiveWeaponSlot(EBaruEquipmentSlot NewWeaponSlot);
+
+protected:
+	UFUNCTION(Server, Reliable)
+	void Server_SetActiveWeaponSlot(EBaruEquipmentSlot NewWeaponSlot);
+
+		// 서버에서 실제 무기 전환을 처리
+	void SetActiveWeaponSlotOnServer(EBaruEquipmentSlot NewWeaponSlot);
+
+		// 활성 무기: 손에 부착
+	void AttachWeaponToHand(ABaruWeaponBase* Weapon);
+
+		// 비활성 무기: DataAsset에 지정된 등/허리 소켓에 부착
+	void AttachWeaponToHolster(ABaruWeaponBase* Weapon);
 };

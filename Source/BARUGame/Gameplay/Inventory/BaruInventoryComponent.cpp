@@ -240,13 +240,6 @@ int32 UBaruInventoryComponent::AddItem(FName ItemID, int32 Count)
 		{
 			AddReplicatedSubObject(NewItem);
 		}
-		
-			// [임시 테스트]
-			// UI 없이도 “무기 습득 → 인벤토리 추가 → 장착” 흐름을 확인한느 용도.
-		if (bAutoEquipWeaponOnPickupForTest && Data->ItemType == EItemType::Weapon)
-		{
-			EquipWeaponItem(NewItem);
-		}
 
 		Remaining -= NewItem->Quantity;
 	}

@@ -187,6 +187,11 @@ void ABaruWeaponBase::InitializeFromData(
 	MagazineCapacity = WeaponData->MagazineCapacity;
 	FireInterval = WeaponData->FireInterval;
 	
+	//----- 비활성 무기 부착
+		// 무기별 비활성 보관 위치 정보도 런타임 Weapon Actor에 복사.
+	HolsterSocketName = WeaponData->HolsterSocketName;
+	HolsterRelativeTransform = WeaponData->HolsterRelativeTransform;
+	
 		// Soft Class는 발사할 때마다 에셋을 로드하지 않기 위해, 장착할 때 한 번만 실제 클래스로 불러옴.
 	DamageEffectClass = WeaponData->DamageEffectClass.LoadSynchronous();
 
