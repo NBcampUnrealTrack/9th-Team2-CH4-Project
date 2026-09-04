@@ -110,4 +110,8 @@ protected:
 	// 접속이 끊긴 경우 90초의 유예 시간을 부여
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
 	float ReconnectGracePeriod = 90.0f;
+	
+	// 사망 직후 일정 연출 시간 필요 (5초)
+	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
+	float DeathSpectateDelay = 5.0f;
 };

@@ -43,5 +43,8 @@ protected:
 
 	// 사망 후 자동 리스폰 딜레이 (초 단위, 0이면 즉시)
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Test")
-	float AutoRespawnDelay = 2.0f;
+	float AutoRespawnDelay = 5.0f;
+	
+	UPROPERTY(Transient)
+	TMap<TWeakObjectPtr<AController>, FTimerHandle> RespawnTimers;
 };
