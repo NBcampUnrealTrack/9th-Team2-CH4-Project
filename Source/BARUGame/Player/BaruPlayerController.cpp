@@ -5,6 +5,8 @@
 #include "EnhancedInputComponent.h"       // [추가] 관전 입력 바인딩
 #include "GameFramework/GameStateBase.h" 
 #include "Player/BaruPlayerState.h"
+#include "Core/BaruLobbyGameMode.h"    // [추가] StartGameRaid 호출
+#include "Core/BaruLobbyGameState.h"   // [추가] 준비 상태 / 목표 맵 조회
 #include "AbilitySystem/BaruAbilitySystemComponent.h"   // ★[추가] ProcessAbilityInput 호출용
 #include "Subsystems/BaruSaveGameSubsystem.h"
 #include "BaruLog.h"
@@ -241,4 +243,59 @@ void ABaruPlayerController::GatherSpectatablePawns(TArray<APawn*>& OutPawns) con
             OutPawns.Add(SpectatablePawn);
         }
     }
+}
+
+// [추가 09.04]
+bool ABaruPlayerController::Server_RequestStartRaid_Validate()
+{
+    
+    return true;
+}
+
+void ABaruPlayerController::Server_RequestStartRaid_Implementation()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    if (!IsLocalController())
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("StartRaid rejected: requester is not the host."));
+        return;
+    }
+
+    
+    ABaruLobbyGameMode* LobbyGM = Cast<ABaruLobbyGameMode>(World->GetAuthGameMode());
+    if (!LobbyGM)
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("StartRaid rejected: current GameMode is not a lobby."));
+        return;
+    }
+
+   
+    const ABaruLobbyGameState* LobbyGS = World->GetGameState<ABaruLobbyGameState>();
+    if (!LobbyGS)
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("StartRaid rejected: LobbyGameState not found."));
+        return;
+    }
+
+    if (!LobbyGS->IsAllPlayersReady())
+    {
+        BARU_NET_LOG(this, LogBaruSession, Log, TEXT("StartRaid rejected: not all players are ready."));
+        return;
+    }
+
+    if (LobbyGS->GetSelectedTargetMapURL().IsEmpty())
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("StartRaid rejected: no target map selected."));
+        return;
+    }
+
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("StartRaid approved. Target: %s"),
+        *LobbyGS->GetSelectedTargetMapURL());
+    
+    LobbyGM->StartGameRaid();
 }

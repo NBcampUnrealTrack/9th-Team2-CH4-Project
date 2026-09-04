@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "AbilitySystemInterface.h"  //IAbilitySystemInterface 상속
+#include "AbilitySystemInterface.h"  
 #include "InputActionValue.h"
-#include "Engine/EngineTypes.h"     //ECollisionChannel(전용 트레이스 채널)
+#include "Engine/EngineTypes.h"     
 #include "Interfaces/CombatInterface.h" 
 #include "BaruCharacter.generated.h"     
 
@@ -12,10 +12,11 @@
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
-class USkeletalMeshComponent; //  Mesh1P를 위한 전방 선언
+class USkeletalMeshComponent; 
 class UAbilitySystemComponent;
-class UBaruCharacterAnimSet;            //추가 애니메이션 데이터 에셋
-struct FOnAttributeChangeData;               //  MoveSpeed 어트리뷰트 콜백용
+class UBaruCharacterAnimSet;           
+class UBaruEquipmentComponent;  //[추가] 무기장착 컴포넌트
+struct FOnAttributeChangeData;               
 
 UCLASS()
 class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface // [추가] ICombatInterface 상속
@@ -93,7 +94,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Mesh")
     TObjectPtr<USkeletalMeshComponent> Mesh1P;
     
-    // [추가] 카메라 눈높이. 생성자에 60.0f 를 박아두면 README 4-3장 하드코딩 금지에 걸림
+    //인벤토리 컴포넌트 추가
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Equipment")
+    TObjectPtr<UBaruEquipmentComponent> EquipmentComponent;
+    
     // 크라우치를 넣을 때 반드시 다시 손대게 됩니다
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
     float CameraEyeHeight = 60.0f;

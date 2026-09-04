@@ -13,8 +13,9 @@
 #include "AbilitySystemComponent.h"
 #include "GameplayEffectTypes.h"                                  
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"        
-#include "Interfaces/InteractableInterface.h"   //[추가] 상호작용 대상 호출용
-#include "GameplayTags/BaruGameplayTags.h"                        
+#include "Interfaces/InteractableInterface.h"   
+#include "GameplayTags/BaruGameplayTags.h"    
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"   // ★[추가] 무기 장착
 #include "Core/BaruGameMode.h"                                    
 #include "Core/BaruTestGameMode.h"                                
 #include "Components/BaruHealthComponent.h"
@@ -47,6 +48,9 @@ ABaruCharacter::ABaruCharacter()
     // 1인칭 캐릭터 회전 제어 
     bUseControllerRotationYaw = true; // 마우스 좌우 회전 시 캐릭터 몸통도 함께 회전
     GetCharacterMovement()->bOrientRotationToMovement = false; 
+   
+   // [추가] 무기 장착 컴포넌트 생성
+   EquipmentComponent = CreateDefaultSubobject<UBaruEquipmentComponent>(TEXT("EquipmentComponent"));
 }
 
 // [추가] bIsDead 복제 등록. 없으면 클라이언트에서 시체 연출이 안 나옴
