@@ -22,6 +22,16 @@ namespace BaruSaveCrypto
         0x5F, 0x32, 0x30, 0x32, 0x36, 0x5F, 0x30, 0x39, // _ 2 0 2 6 _ 0 9
         0x5F, 0x30, 0x31, 0x21, 0x40, 0x23, 0x24, 0x25  // _ 0 1 ! @ # $ %
     };
+    
+    #pragma pack(push, 1)
+    struct FBaruSaveHeader
+    {
+        uint32 Magic = SAVE_MAGIC;
+        int32 Version = CURRENT_CRYPTO_VERSION;
+        int32 OriginalSize = 0;
+        uint8 Checksum[20] = {0};
+    };
+    #pragma pack(pop)
 }
 
 UBaruSaveGameSubsystem::UBaruSaveGameSubsystem()
@@ -40,7 +50,7 @@ void UBaruSaveGameSubsystem::Deinitialize()
     {
         if (Pair.Value)
         {
-            UGameplayStatics::SaveGameToSlot(Pair.Value, Pair.Key, UserIndex);
+            SaveEncryptedSlotInternal(Pair.Value, Pair.Key);
         }
     }
     CachedSaveGames.Empty();
@@ -124,23 +134,22 @@ bool UBaruSaveGameSubsystem::SaveEncryptedSlotInternal(UBaruSaveGame* SaveObject
     RawBytes.SetNumZeroed(PaddedSize);
 
     // AES-256 데이터 암호화
-    FAES::EncryptData(RawBytes.GetData(), static_cast<uint64>(PaddedSize), BaruSaveCrypto::AES_KEY, 32);
+    FAES::EncryptData(RawBytes.GetData(), static_cast<uint32>(PaddedSize), BaruSaveCrypto::AES_KEY, 32);
 
     // 암호화된 데이터의 SHA-256 체크섬 계산 (Encrypt-then-MAC)
     FSHAHash Checksum;
     FSHA1::HashBuffer(RawBytes.GetData(), static_cast<uint64>(PaddedSize), Checksum.Hash);
-
-    // 최종 바이너리 패킷 조립 [Magic(4) + Version(4) + OriginalSize(4) + Checksum(32) + EncryptedBytes(PaddedSize)]
+    
+    // FBaruSaveHeader 구조체를 활용한 단일 블록 패킷 조립
+    BaruSaveCrypto::FBaruSaveHeader Header;
+    Header.OriginalSize = OriginalSize;
+    FMemory::Memcpy(Header.Checksum, Checksum.Hash, sizeof(Header.Checksum));
+    
     TArray<uint8> FileData;
-    FileData.Reserve(sizeof(uint32) + sizeof(int32) + sizeof(int32) + sizeof(Checksum.Hash) + PaddedSize);
-
-    FileData.Append(reinterpret_cast<const uint8*>(&BaruSaveCrypto::SAVE_MAGIC), sizeof(uint32));
-    FileData.Append(reinterpret_cast<const uint8*>(&BaruSaveCrypto::CURRENT_CRYPTO_VERSION), sizeof(int32));
-    FileData.Append(reinterpret_cast<const uint8*>(&OriginalSize), sizeof(int32));
-    FileData.Append(Checksum.Hash, sizeof(Checksum.Hash));
+    FileData.Reserve(sizeof(BaruSaveCrypto::FBaruSaveHeader) + PaddedSize);
+    FileData.Append(reinterpret_cast<const uint8*>(&Header), sizeof(BaruSaveCrypto::FBaruSaveHeader));
     FileData.Append(RawBytes);
 
-    // 디스크 파일 쓰기
     const FString FilePath = GetSaveFilePath(SlotName);
     const bool bSuccess = FFileHelper::SaveArrayToFile(FileData, *FilePath);
 
@@ -160,74 +169,56 @@ UBaruSaveGame* UBaruSaveGameSubsystem::LoadEncryptedSlotInternal(const FString& 
         BARU_LOG(LogBaruSession, Warning, TEXT("LoadEncrypted Failed: Cannot read file '%s'."), *FilePath);
         return nullptr;
     }
-
-    // 최소 헤더 크기 검사 [Magic(4) + Version(4) + Size(4) + Checksum(32) = 44 bytes]
-    constexpr int32 HeaderSize = sizeof(uint32) + sizeof(int32) + sizeof(int32) + 32;
+    
+    constexpr int32 HeaderSize = sizeof(BaruSaveCrypto::FBaruSaveHeader);
     if (FileData.Num() < HeaderSize)
     {
-        BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Corrupted header or invalid file size in '%s'."), *SlotName);
+        BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Corrupted header in '%s'."), *SlotName);
         return nullptr;
     }
 
-    const uint8* Reader = FileData.GetData();
+    // 1. 헤더 파싱
+    BaruSaveCrypto::FBaruSaveHeader Header;
+    FMemory::Memcpy(&Header, FileData.GetData(), HeaderSize);
 
-    // 매직 넘버 검증
-    uint32 Magic = 0;
-    FMemory::Memcpy(&Magic, Reader, sizeof(uint32));
-    Reader += sizeof(uint32);
-    if (Magic != BaruSaveCrypto::SAVE_MAGIC)
+    if (Header.Magic != BaruSaveCrypto::SAVE_MAGIC)
     {
-        BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Invalid magic code in '%s'. Not an encrypted save file."), *SlotName);
+        BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Invalid magic code in '%s'."), *SlotName);
         return nullptr;
     }
-
-    // 버전 및 원본 크기 읽기
-    int32 Version = 0;
-    FMemory::Memcpy(&Version, Reader, sizeof(int32));
-    Reader += sizeof(int32);
-
-    int32 OriginalSize = 0;
-    FMemory::Memcpy(&OriginalSize, Reader, sizeof(int32));
-    Reader += sizeof(int32);
-
-    // 기록된 SHA-256 체크섬 읽기
-    FSHAHash StoredChecksum;
-    FMemory::Memcpy(StoredChecksum.Hash, Reader, sizeof(StoredChecksum.Hash));
-    Reader += sizeof(StoredChecksum.Hash);
-
-    // 암호화된 본문 추출 및 해시 무결성 검증
+    
     const int32 EncryptedPayloadSize = FileData.Num() - HeaderSize;
     if (EncryptedPayloadSize <= 0 || EncryptedPayloadSize % 16 != 0)
     {
-        BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Payload size is not aligned to 16 bytes in '%s'."), *SlotName);
+        BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Payload not aligned to 16 bytes in '%s'."), *SlotName);
         return nullptr;
     }
 
+    // 2. 암호문 복사 및 체크섬 검증
+    const uint8* PayloadPtr = FileData.GetData() + HeaderSize;
     TArray<uint8> EncryptedBytes;
     EncryptedBytes.SetNumUninitialized(EncryptedPayloadSize);
-    FMemory::Memcpy(EncryptedBytes.GetData(), Reader, EncryptedPayloadSize);
+    FMemory::Memcpy(EncryptedBytes.GetData(), PayloadPtr, EncryptedPayloadSize);
 
-    // 무결성 검증: 파일의 암호화 데이터로 해시를 재계산하여 비교
     FSHAHash CalculatedChecksum;
     FSHA1::HashBuffer(EncryptedBytes.GetData(), static_cast<uint64>(EncryptedPayloadSize), CalculatedChecksum.Hash);
 
-    if (FMemory::Memcmp(StoredChecksum.Hash, CalculatedChecksum.Hash, sizeof(StoredChecksum.Hash)) != 0)
+    if (FMemory::Memcmp(Header.Checksum, CalculatedChecksum.Hash, sizeof(Header.Checksum)) != 0)
     {
         BARU_LOG(LogBaruSession, Error, 
             TEXT("CRITICAL: Save file tampering detected in slot '%s'! Checksum mismatch. Load aborted."), *SlotName);
         return nullptr;
     }
 
-    // AES-256 복호화
-    FAES::DecryptData(EncryptedBytes.GetData(), static_cast<uint64>(EncryptedPayloadSize), BaruSaveCrypto::AES_KEY, 32);
+    // 3. 복호화 및 패딩 제거
+    FAES::DecryptData(EncryptedBytes.GetData(), static_cast<uint32>(EncryptedPayloadSize), BaruSaveCrypto::AES_KEY, 32);
 
-    // 16바이트 패딩을 잘라내고 원래 크기로 자르기
-    if (OriginalSize > 0 && OriginalSize <= EncryptedPayloadSize)
+    if (Header.OriginalSize > 0 && Header.OriginalSize <= EncryptedPayloadSize)
     {
-        EncryptedBytes.SetNum(OriginalSize);
+        EncryptedBytes.SetNum(Header.OriginalSize);
     }
 
-    // 메모리로부터 UBaruSaveGame 객체 역직렬화
+    // 4. 역직렬화
     USaveGame* LoadedObject = UGameplayStatics::LoadGameFromMemory(EncryptedBytes);
     UBaruSaveGame* LoadedSaveGame = Cast<UBaruSaveGame>(LoadedObject);
 
@@ -269,14 +260,19 @@ void UBaruSaveGameSubsystem::SaveGameBySlotAsync(const FString& InSlotName)
     UBaruSaveGame* SaveSnapshot = DuplicateObject<UBaruSaveGame>(FoundSave->Get(), this);
 
     // ThreadPool 비동기 실행 (메인 스레드 렌더링 히치 제거)
-    Async(EAsyncExecution::ThreadPool, [this, SaveSnapshot, InSlotName]()
-    {
-        const bool bSuccess = SaveEncryptedSlotInternal(SaveSnapshot, InSlotName);
+    TWeakObjectPtr<UBaruSaveGameSubsystem> WeakThis(this);
 
-        // 결과 통지는 메인 게임 스레드로 복귀하여 브로드캐스트
-        Async(EAsyncExecution::TaskGraphMainThread, [this, InSlotName, bSuccess]()
+    Async(EAsyncExecution::ThreadPool, [WeakThis, SaveSnapshot, InSlotName]()
+    {
+        UBaruSaveGameSubsystem* StrongThis = WeakThis.Get();
+        const bool bSuccess = StrongThis ? StrongThis->SaveEncryptedSlotInternal(SaveSnapshot, InSlotName) : false;
+
+        Async(EAsyncExecution::TaskGraphMainThread, [WeakThis, InSlotName, bSuccess]()
         {
-            OnSaveCompletedEvent.Broadcast(InSlotName, bSuccess);
+            if (UBaruSaveGameSubsystem* Subsystem = WeakThis.Get())
+            {
+                Subsystem->OnSaveCompletedEvent.Broadcast(InSlotName, bSuccess);
+            }
         });
     });
 }

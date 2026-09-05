@@ -4,10 +4,10 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "OnlineSessionSettings.h"
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "Interfaces/OnlineExternalUIInterface.h"
-#include "OnlineSessionSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/PackageName.h"
 #include "BaruLog.h"
@@ -132,6 +132,9 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 	LastSessionSettings->NumPublicConnections = NumPublicConnections;
 	LastSessionSettings->bAllowJoinInProgress = true;
 	LastSessionSettings->bAllowJoinViaPresence = true;
+	
+	LastSessionSettings->bAllowJoinViaPresenceFriendsOnly = false;
+
 	LastSessionSettings->bShouldAdvertise = true;
 	LastSessionSettings->bUsesPresence = true;
 	LastSessionSettings->bUseLobbiesIfAvailable = true;
@@ -155,6 +158,8 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 
 	const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
 	FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
+
+	BARU_LOG(LogBaruSession, Log, TEXT("CreateSession: Creating Steam Lobby Session (Presence=1, Lobbies=1, ServerName='%s')"), *ServerName);
 
 	if (!NetId.IsValid() || !NetId.GetUniqueNetId().IsValid() || !SessionInterface->CreateSession(*NetId.GetUniqueNetId(), NAME_GameSession, *LastSessionSettings))
 	{
@@ -210,23 +215,11 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 	const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
 	FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
 
-	BARU_LOG(
-		LogBaruSession,
-		Log,
-		TEXT("FindSessions Requested. MaxResults=%d, IsLAN=%d"),
-		MaxSearchResults,
-		bIsLANMatch);
+	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions Requested. MaxResults=%d, IsLAN=%d"), MaxSearchResults, bIsLANMatch);
 
 	if (!SessionInterface.IsValid() || !NetId.IsValid() || !NetId.GetUniqueNetId().IsValid())
 	{
-		BARU_LOG(
-			LogBaruSession,
-			Error,
-			TEXT("FindSessions Failed: SessionInterface=%d, LocalPlayer=%d, NetId=%d"),
-			SessionInterface.IsValid(),
-			IsValid(LocalPlayer),
-			NetId.IsValid() && NetId.GetUniqueNetId().IsValid());
-
+		BARU_LOG(LogBaruSession, Error, TEXT("FindSessions Failed: Invalid SessionInterface or NetId."));
 		OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
 		return;
 	}
@@ -234,7 +227,6 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 	FindSessionsCompleteDelegateHandle = SessionInterface->AddOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegate);
 
 	LastSessionSearch = MakeShareable(new FOnlineSessionSearch());
-	
 	LastSessionSearch->MaxSearchResults = FMath::Clamp(MaxSearchResults, 50, 100);
 	LastSessionSearch->bIsLanQuery = bIsLANMatch;
 	
@@ -245,16 +237,13 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 		BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE,
 		EOnlineComparisonOp::Equals
 	);
-	
+
+	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Executing Search with PRESENCESEARCH & MATCH_KEY filter..."));
+
 	if (!SessionInterface->FindSessions(*NetId.GetUniqueNetId(), LastSessionSearch.ToSharedRef()))
 	{
 		SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegateHandle);
-
-		BARU_LOG(
-			LogBaruSession,
-			Error,
-			TEXT("FindSessions request was rejected by the Online Subsystem."));
-
+		BARU_LOG(LogBaruSession, Error, TEXT("FindSessions request was rejected by Online Subsystem."));
 		OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
 	}
 }
@@ -267,17 +256,25 @@ void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 	}
 
 	TArray<FBaruSessionSearchResultInfo> FilteredResults;
+	const int32 RawResultCount = LastSessionSearch.IsValid() ? LastSessionSearch->SearchResults.Num() : 0;
 
+	BARU_LOG(LogBaruSession, Log, TEXT("OnFindSessionsComplete: Success=%d, Total Raw Results Found=%d"), bWasSuccessful, RawResultCount);
+	
 	if (bWasSuccessful && LastSessionSearch.IsValid())
 	{
 		for (int32 i = 0; i < LastSessionSearch->SearchResults.Num(); ++i)
 		{
 			const FOnlineSessionSearchResult& SearchResult = LastSessionSearch->SearchResults[i];
 
-			// MATCH KEY 검사
 			FString MatchKey;
 			SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_MATCH_KEY, MatchKey);
 
+			FString FoundServerName;
+			SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_SERVER_NAME, FoundServerName);
+			
+			BARU_LOG(LogBaruSession, Verbose, TEXT(" - Raw Room [%d]: ID=%s, Presence=%d, MatchKey='%s', ServerName='%s'"),
+			   i, *SearchResult.GetSessionIdStr(), SearchResult.Session.SessionSettings.bUsesPresence, *MatchKey, *FoundServerName);
+			
 			if (MatchKey != BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE)
 			{
 				continue;
@@ -288,8 +285,8 @@ void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 			Info.CurrentPlayers = SearchResult.Session.SessionSettings.NumPublicConnections - SearchResult.Session.NumOpenPublicConnections;
 			Info.MaxPlayers = SearchResult.Session.SessionSettings.NumPublicConnections;
 			Info.PingInMs = SearchResult.PingInMs;
+			Info.ServerName = FoundServerName;
 
-			SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_SERVER_NAME, Info.ServerName);
 			SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_MAP_NAME, Info.SelectedMapName);
 			SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_HOST_NAME, Info.HostPlayerName);
 
@@ -297,19 +294,7 @@ void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 		}
 	}
 
-	const int32 RawResultCount =
-		LastSessionSearch.IsValid()
-		? LastSessionSearch->SearchResults.Num()
-		: 0;
-
-	BARU_LOG(
-		LogBaruSession,
-		Log,
-		TEXT("FindSessions Complete. Success=%d, RawResults=%d, ValidBARURooms=%d"),
-		bWasSuccessful,
-		RawResultCount,
-		FilteredResults.Num());
-
+	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions Finished. Filtered BARU Rooms: %d / %d"), FilteredResults.Num(), RawResultCount);
 	OnFindSessionsCompleteEvent.Broadcast(FilteredResults, bWasSuccessful);
 }
 
