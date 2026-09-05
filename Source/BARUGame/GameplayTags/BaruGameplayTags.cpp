@@ -4,9 +4,16 @@
 
 FBaruGameplayTags FBaruGameplayTags::GameplayTags;
 
+bool FBaruGameplayTags::bIsInitialized = false;
+
 void FBaruGameplayTags::InitializeNativeGameplayTags()
 {
-    UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
+	if (bIsInitialized)
+	{
+		return;
+	}
+	
+	UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
 
     // =========================================================================
 	// Input Tags
@@ -112,6 +119,6 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
     GameplayTags.GameplayCue_Weapon_Grenade_Explode = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Weapon.Grenade.Explode"), TEXT("Grenade Explosion VFX and SFX"));
 	
 	
-
+	bIsInitialized = true;
 	BARU_LOG(LogBaruGAS, Log, TEXT("FBaruGameplayTags initialized with Extended Native Tags."));
 }

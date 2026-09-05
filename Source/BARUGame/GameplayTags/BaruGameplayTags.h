@@ -6,7 +6,15 @@
 struct BARUGAME_API FBaruGameplayTags
 {
 public:
-	static const FBaruGameplayTags& Get() { return GameplayTags; }
+	static const FBaruGameplayTags& Get()
+	{
+		if (!bIsInitialized)
+		{
+			InitializeNativeGameplayTags();
+		}
+		return GameplayTags;
+	}
+	
 	static void InitializeNativeGameplayTags();
 
 	// =========================================================================
@@ -120,4 +128,5 @@ public:
 
 private:
 	static FBaruGameplayTags GameplayTags;
+	static bool bIsInitialized;
 };

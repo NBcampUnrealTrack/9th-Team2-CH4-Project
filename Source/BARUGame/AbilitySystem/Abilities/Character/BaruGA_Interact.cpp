@@ -4,6 +4,7 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "BaruLog.h"
+#include "GameplayTags/BaruGameplayTags.h"
 
 UBaruGA_Interact::UBaruGA_Interact()
 {
@@ -11,8 +12,8 @@ UBaruGA_Interact::UBaruGA_Interact()
     NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
     ActivationPolicy = EBaruAbilityActivationPolicy::OnInputTriggered;
 
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.Dead")));
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.DBNO")));
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_Dead);
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_DBNO);
 }
 
 void UBaruGA_Interact::ActivateAbility(
