@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 #include "BaruLog.h"
+#include "GameplayTags/BaruGameplayTags.h"
 
 UBaruGA_FireHitscan::UBaruGA_FireHitscan()
 {
@@ -14,9 +15,9 @@ UBaruGA_FireHitscan::UBaruGA_FireHitscan()
     NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
 
     // 사격 불가 State Tag (장전중, 사망, DBNO)
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.Combat.Reloading")));
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.Dead")));
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.DBNO")));
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_Combat_Reloading);
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_Dead);
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_DBNO);
 }
 
 void UBaruGA_FireHitscan::ActivateAbility(

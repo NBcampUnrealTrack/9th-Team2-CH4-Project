@@ -3,6 +3,7 @@
 #include "GameFramework/Pawn.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
+#include "GameplayTags/BaruGameplayTags.h"
 
 UBaruGA_ThrowGrenade::UBaruGA_ThrowGrenade()
 {
@@ -10,9 +11,9 @@ UBaruGA_ThrowGrenade::UBaruGA_ThrowGrenade()
     NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
     ActivationPolicy = EBaruAbilityActivationPolicy::OnInputTriggered;
 
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.Combat.Reloading")));
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.Dead")));
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.DBNO")));
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_Combat_Reloading);
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_Dead);
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_DBNO);
 }
 
 void UBaruGA_ThrowGrenade::ActivateAbility(
