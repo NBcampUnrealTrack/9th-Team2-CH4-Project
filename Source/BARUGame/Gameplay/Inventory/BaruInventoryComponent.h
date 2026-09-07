@@ -38,8 +38,7 @@ public:
 	
 		// DT_Items 할당
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Inventory")
-	UDataTable* ItemDataTable = nullptr;
-	
+	UDataTable* ItemDataTable = nullptr;	
 	
 	// 3. 슬롯 판정과 인벤 내 2D 겹침 검사. - 서버, 클라(클라는 UI 프리뷰용) 공용.
 		// (1) 지정 좌표에 해당 크기의 아이템을 놓을 수 있는지 확인.

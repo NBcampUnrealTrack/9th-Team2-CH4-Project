@@ -1,12 +1,14 @@
 #include "Player/BaruPlayerState.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "AbilitySystemComponent.h"
-#include "GameplayEffectTypes.h"                                  // [추가] FOnAttributeChangeData
-#include "AbilitySystem/BaruAbilitySystemComponent.h"             // [추가]
+#include "GameplayEffectTypes.h"                                  
+#include "AbilitySystem/BaruAbilitySystemComponent.h"             
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
-#include "Components/BaruHealthComponent.h"                       // [추가]
-#include "Gameplay/Inventory/BaruInventoryComponent.h"            // 민석님 요청 인벤 헤더 인클루드
+#include "Core/BaruLobbyGameMode.h"   // 추가 준비 상태 변경 시 로비 재평가 요청
+#include "Components/BaruHealthComponent.h"                       
+#include "Gameplay/Inventory/BaruInventoryComponent.h"          
 #include "BaruLog.h"
 
 ABaruPlayerState::ABaruPlayerState()
@@ -17,7 +19,6 @@ ABaruPlayerState::ABaruPlayerState()
     SetNetUpdateFrequency(10.0f);
 
     // GAS Components
-    // [수정] UAbilitySystemComponent → UBaruAbilitySystemComponent
     AbilitySystemComponent = CreateDefaultSubobject<UBaruAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
     AbilitySystemComponent->SetIsReplicated(true);
     AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
@@ -29,9 +30,7 @@ ABaruPlayerState::ABaruPlayerState()
     InventoryComponent = CreateDefaultSubobject<UBaruInventoryComponent>(TEXT("InventoryComponent"));       // 아이템 inven 요청
 }
 
-// [추가] HealthComponent 는 이 PlayerState 소유이므로, 폰의 빙의를 기다리지 말고
-//   여기서 직접 초기화합니다. (컴포넌트 등록이 끝난 시점이라 ASC 에 AttributeSet 이 이미 붙어 있음)
-//   Sanity 어트리뷰트 구독도 여기서 겁니다 — 서버/클라 각자 로컬 바인딩이라 RPC 불필요.
+
 void ABaruPlayerState::PostInitializeComponents()
 {
     Super::PostInitializeComponents();
@@ -79,8 +78,7 @@ void ABaruPlayerState::CopyProperties(APlayerState* PlayerState)
 
     if (ABaruPlayerState* NewPS = Cast<ABaruPlayerState>(PlayerState))
     {
-        NewPS->bIsReady = bIsReady;
-        // 사망/DBNO 는 새 레벨에서 초기화되는 게 맞으므로 일부러 복사하지 않기
+        
     }
 }
 
@@ -123,6 +121,12 @@ void ABaruPlayerState::Server_SetReadyStatus_Implementation(bool bNewReady)
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Player Ready Status Changed: %d"), bIsReady);
     
     OnReadyStatusChanged.Broadcast(bIsReady);
+    
+    //[추가]
+    if (ABaruLobbyGameMode* LobbyGM = GetWorld() ? GetWorld()->GetAuthGameMode<ABaruLobbyGameMode>() : nullptr)
+    {
+        LobbyGM->OnPlayerReadyStatusChanged();
+    }
 }
 
 bool ABaruPlayerState::Server_UpdateNickname_Validate(const FString& NewNickname)

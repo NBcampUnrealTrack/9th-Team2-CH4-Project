@@ -6,7 +6,15 @@
 struct BARUGAME_API FBaruGameplayTags
 {
 public:
-	static const FBaruGameplayTags& Get() { return GameplayTags; }
+	static const FBaruGameplayTags& Get()
+	{
+		if (!bIsInitialized)
+		{
+			InitializeNativeGameplayTags();
+		}
+		return GameplayTags;
+	}
+	
 	static void InitializeNativeGameplayTags();
 
 	// =========================================================================
@@ -28,14 +36,20 @@ public:
 	// =========================================================================
 	FGameplayTag State_Dead;
 	FGameplayTag State_DBNO;
+	
 	FGameplayTag State_Sanity_Stage1;
 	FGameplayTag State_Sanity_Stage2;
 	FGameplayTag State_Sanity_Stage3;
 	FGameplayTag State_Sanity_Frenzy;
+	
 	FGameplayTag State_Extracting;
 	FGameplayTag State_Extracted;
+	
 	FGameplayTag State_Immune;
+	
 	FGameplayTag State_Combat_Reloading;
+	FGameplayTag State_Combat_Aiming;
+	
 	FGameplayTag State_Debuff_Groggy;
 
 	// =========================================================================
@@ -79,7 +93,40 @@ public:
 	FGameplayTag Ability_ActivateFail_Cooldown;
 	FGameplayTag Ability_ActivateFail_Cost;
 	FGameplayTag Ability_ActivateFail_TagsBlocked;
+	
+	// =========================================================================
+	// Monster Ability Tags
+	// =========================================================================
+	FGameplayTag Ability_Action_Monster_Attack;
+	
+	// =========================================================================
+	// Weapon Classification Tags
+	// =========================================================================
+	FGameplayTag Weapon_Type_Rifle;
+	FGameplayTag Weapon_Type_Revolver;
+	FGameplayTag Weapon_Type_Grenade;
+
+	// =========================================================================
+	// Weapon Action Tags
+	// =========================================================================
+	FGameplayTag Ability_Action_Fire_Rifle;
+	FGameplayTag Ability_Action_Fire_Revolver;
+	FGameplayTag Ability_Action_Throw_Grenade;
+	FGameplayTag Ability_Action_Reload_Rifle;
+	FGameplayTag Ability_Action_Reload_Revolver;
+
+	// =========================================================================
+	// Damage & Feedback (Cue) Tags
+	// =========================================================================
+	// Damage Type
+	FGameplayTag Damage_Type_Explosion;
+
+	// GameplayCue Types
+	FGameplayTag GameplayCue_Weapon_Rifle_Fire;
+	FGameplayTag GameplayCue_Weapon_Revolver_Fire;
+	FGameplayTag GameplayCue_Weapon_Grenade_Explode;
 
 private:
 	static FBaruGameplayTags GameplayTags;
+	static bool bIsInitialized;
 };

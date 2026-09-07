@@ -23,7 +23,7 @@
 
 	// 포인터로만 사용하기 때문에 전방 선언
 class ABaruWeaponBase;
-
+class UGameplayEffect;	//GAS 용.
 
 
 UCLASS(BlueprintType)
@@ -44,6 +44,19 @@ public:
 		// 예: BP_Weapon_Revolver, BP_Weapon_Rifle
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Weapon")
 	TSoftClassPtr<ABaruWeaponBase> WeaponActorClass;
+	
+	//-----하단 두 함수 : 비활성 무기 장착 슬롯 부분. 허리랑 등짝.
+		// 이 무기가 비활성 상태일 때 붙을 Character Mesh 소켓 이름.
+		// 예: Weapon_BackSocket, Weapon_HipSocket
+		// 나중에 부착할 부분의 이름을 그렇게 정하면 됨.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "BARU|Weapon|Attachment")
+	FName HolsterSocketName = NAME_None;
+	
+		// 홀스터 소켓에 붙은 뒤 적용할 무기별 위치·회전 보정값.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "BARU|Weapon|Attachment")
+	FTransform HolsterRelativeTransform = FTransform::Identity;
 
 
 		// 무기의 기본 피해량
@@ -69,4 +82,14 @@ public:
 	UPROPERTY(EditDefaultsOnly,	BlueprintReadOnly,	Category = "BARU|Weapon|Combat",
 		meta = (ClampMin = "0.01", Units = "s"))
 	float FireInterval = 0.25f;
+	
+	
+	// GAS.
+		// 이 무기가 명중했을 때 적용할 GAS GameplayEffect.
+		// 실제 피해량은 BaseDamage를 Data.Damage로 전달.
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "BARU|Weapon|GAS")
+	TSoftClassPtr<UGameplayEffect> DamageEffectClass;
 };

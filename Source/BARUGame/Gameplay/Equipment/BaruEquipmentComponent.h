@@ -29,6 +29,24 @@ public:
 		// 지정한 무기 슬롯의 Weapon Actor를 제거.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
 	void UnequipWeapon(EBaruEquipmentSlot WeaponSlot);
+	
+		// GAS.
+	// ActiveWeaponSlot에 따라 현재 손에 든 무기를 반환.
+	UFUNCTION(BlueprintPure, Category = "BARU|Equipment")
+	ABaruWeaponBase* GetActiveWeapon() const;
+
+		// GAS.
+	// Character 입력을 현재 장착 무기에 전달.
+	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
+	void RequestFireActiveWeapon();
+	
+	// 서버 RPC를 추가.
+		// 클라이언트의 발사 입력을 서버로 전달.
+	UFUNCTION(Server, Reliable, WithValidation)
+	void Server_RequestFireActiveWeapon();
+
+		// 서버가 현재 장착 무기를 검증하고 실제 Fire()를 호출.
+	void FireActiveWeaponOnServer();
 
 protected:
 		// 주무기 슬롯에 실제로 생성되어 있는 Weapon Actor
@@ -57,10 +75,38 @@ protected:
 	EBaruEquipmentSlot ActiveWeaponSlot = EBaruEquipmentSlot::None;
 	
 		// 3인칭 Character Mesh에서 무기를 붙일 소켓 또는 본 이름
-		// 현재 Character Skeleton의 weapon_r을 기본값으로 사용.
+		// 현재 Character Skeleton의 hand_r을 기본값으로 사용.
 		// 나중에 캐릭터 변경 시, 확인 필요한, 바꿔야할 부분!!!
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Equipment|Weapon")
-	FName ThirdPersonWeaponAttachPoint = TEXT("weapon_r");
+	FName ThirdPersonWeaponAttachPoint = TEXT("hand_r");
 	
+		// Character가 실제로 제거될 때, 장착 무기 Actor도 서버에서 정리.
+		// 안 쓰면 캐릭터 사망 후에도 무기가 레벨에 남게됨.
+	virtual void EndPlay(
+		const EEndPlayReason::Type EndPlayReason) override;
 	
+	// 비활성 무기 장착 부분.
+public:
+	UFUNCTION(BlueprintPure, Category = "BARU|Equipment")
+	EBaruEquipmentSlot GetActiveWeaponSlot() const
+	{
+		return ActiveWeaponSlot;
+	}
+
+		// 입력 또는 UI가 호출하는 무기 전환 요청 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment|Weapon")
+	void RequestSetActiveWeaponSlot(EBaruEquipmentSlot NewWeaponSlot);
+
+protected:
+	UFUNCTION(Server, Reliable)
+	void Server_SetActiveWeaponSlot(EBaruEquipmentSlot NewWeaponSlot);
+
+		// 서버에서 실제 무기 전환을 처리
+	void SetActiveWeaponSlotOnServer(EBaruEquipmentSlot NewWeaponSlot);
+
+		// 활성 무기: 손에 부착
+	void AttachWeaponToHand(ABaruWeaponBase* Weapon);
+
+		// 비활성 무기: DataAsset에 지정된 등/허리 소켓에 부착
+	void AttachWeaponToHolster(ABaruWeaponBase* Weapon);
 };

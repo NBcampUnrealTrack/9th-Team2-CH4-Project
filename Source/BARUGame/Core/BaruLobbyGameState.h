@@ -6,6 +6,9 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruAllPlayersReadyChanged, bool, bAllReady);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruTargetMapChanged, const FString&, NewMapURL);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBaruLobbyPlayerArrayUpdated);
+
+class APlayerState;
 
 UCLASS()
 class BARUGAME_API ABaruLobbyGameState : public ABaruGameState
@@ -16,6 +19,8 @@ public:
 	ABaruLobbyGameState();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void AddPlayerState(APlayerState* PlayerState) override;
+	virtual void RemovePlayerState(APlayerState* PlayerState) override;
 
 	// =========================================================================
 	// Getters [Client & Host]
@@ -42,6 +47,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "BARU|Lobby|GameState|Events")
 	FOnBaruTargetMapChanged OnTargetMapChanged;
+	
+	UPROPERTY(BlueprintAssignable, Category = "BARU|Lobby|GameState|Events")
+	FOnBaruLobbyPlayerArrayUpdated OnLobbyPlayerArrayUpdated;
 
 protected:
 	// 전원 레디 상태
