@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "CollisionQueryParams.h"
 #include "BaruLog.h"
+#include "GameplayTags/BaruGameplayTags.h"
 
 UBaruGA_MonsterAttack::UBaruGA_MonsterAttack()
 {
@@ -12,8 +13,8 @@ UBaruGA_MonsterAttack::UBaruGA_MonsterAttack()
     NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::ServerOnly;
     ActivationPolicy = EBaruAbilityActivationPolicy::OnInputTriggered;
 
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.Dead")));
-    ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(TEXT("State.Debuff.Groggy")));
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_Dead);
+    ActivationBlockedTags.AddTag(FBaruGameplayTags::Get().State_Debuff_Groggy);
 }
 
 void UBaruGA_MonsterAttack::ActivateAbility(

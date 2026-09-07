@@ -9,7 +9,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruSaveCompleted, const FString
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruLoadCompleted, const FString&, SlotName, bool, bSuccess);
 
 /**
- * 세이브 파일 입출력 및 메모리 캐싱을 총괄하는 GameInstance 서브시스템 ( AES-256 암호화, SHA-256 무결성 검증 적용)
+ * 세이브 파일 입출력 및 메모리 캐싱을 총괄하는 GameInstance 서브시스템 ( AES-256 암호화 및 SHA-1 무결성 검증 적용 )
  */
 UCLASS()
 class BARUGAME_API UBaruSaveGameSubsystem : public UGameInstanceSubsystem
