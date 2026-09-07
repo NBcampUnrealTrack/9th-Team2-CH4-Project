@@ -57,9 +57,12 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Input")
 	void Server_RequestDropItem(int32 SlotIndex, int32 Count);
 	
-	//추가
+	
 	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Lobby")
 	void Server_RequestStartRaid();
+	
+	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "BARU|Lobby")
+	void Server_RequestSetTargetRaidMap(const FString& TargetMapURL);
 	
 	// Client RPC
 	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
@@ -98,6 +101,9 @@ protected:
 
 	// [추가] 살아있는 팀원 폰 목록 수집 
 	void GatherSpectatablePawns(TArray<APawn*>& OutPawns) const;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Lobby")
+	TArray<FString> AllowedRaidMapURLs;
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Ping")
 	float MaxPingDistance = 10000.0f;
