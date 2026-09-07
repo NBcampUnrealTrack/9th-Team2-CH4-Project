@@ -299,3 +299,54 @@ void ABaruPlayerController::Server_RequestStartRaid_Implementation()
     
     LobbyGM->StartGameRaid();
 }
+
+//  탐사 목표 맵 선택
+bool ABaruPlayerController::Server_RequestSetTargetRaidMap_Validate(const FString& TargetMapURL)
+{
+    return !TargetMapURL.IsEmpty() && TargetMapURL.Len() <= 260;
+}
+
+void ABaruPlayerController::Server_RequestSetTargetRaidMap_Implementation(const FString& TargetMapURL)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    // [1] 방장 확인
+    if (!IsLocalController())
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("SetTargetRaidMap rejected: requester is not the host."));
+        return;
+    }
+
+    // [2] 지금이 로비인지
+    ABaruLobbyGameMode* LobbyGM = Cast<ABaruLobbyGameMode>(World->GetAuthGameMode());
+    if (!LobbyGM)
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("SetTargetRaidMap rejected: current GameMode is not a lobby."));
+        return;
+    }
+
+    // [3] 허용된 맵인지 검사
+    //   클라이언트가 보낸 문자열을 그대로 믿으면 임의의 레벨로 팀 전체를 끌고 갈 수 있습니다.
+    //   목록이 비어 있으면 아직 설정 전이므로, 조용히 통과시키지 않고 거부합니다.
+    if (AllowedRaidMapURLs.Num() == 0)
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning,
+            TEXT("SetTargetRaidMap rejected: AllowedRaidMapURLs is empty. BP_BaruPlayerController 에 맵 목록을 설정하세요."));
+        return;
+    }
+
+    if (!AllowedRaidMapURLs.Contains(TargetMapURL))
+    {
+        BARU_NET_LOG(this, LogBaruSession, Warning,
+            TEXT("SetTargetRaidMap rejected: '%s' is not in the allowed list."), *TargetMapURL);
+        return;
+    }
+
+    // [4] 확정. GameState 복제와 UI 갱신은 GameMode 가 처리합니다.
+    LobbyGM->SetTargetRaidMap(TargetMapURL);
+
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Target raid map set to: %s"), *TargetMapURL);
+}
