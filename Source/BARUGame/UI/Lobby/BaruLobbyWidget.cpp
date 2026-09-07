@@ -7,8 +7,10 @@
 #include "Components/WidgetSwitcher.h"
 #include "Components/ListView.h"
 #include "Components/TextBlock.h"
+#include "Components/Image.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 
 #include "GameFramework/PlayerController.h"
@@ -20,6 +22,7 @@
 #include "Player/BaruPlayerState.h"
 #include "UI/Lobby/BaruSessionListItemData.h"
 #include "UI/Lobby/BaruLobbyPlayerListItemData.h"
+#include "UI/Lobby/BaruContractListItemData.h"
 
 UBaruLobbyWidget::UBaruLobbyWidget(
 	const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
@@ -51,6 +54,16 @@ void UBaruLobbyWidget::NativeOnInitialized()
 			this,
 			&UBaruLobbyWidget::HandleCloseContractClicked
 			);
+	}
+	
+	if (IsValid(Button_ConfirmContract))
+	{
+		Button_ConfirmContract->OnClicked.AddDynamic(
+			this,
+			&ThisClass::HandleConfirmContractClicked
+			);
+		
+		Button_ConfirmContract->SetIsEnabled(false);
 	}
 	
 	if (IsValid(Button_FindSession))
@@ -164,6 +177,208 @@ void UBaruLobbyWidget::HandleOpenContractClicked()
 
 void UBaruLobbyWidget::HandleCloseContractClicked()
 {
+	ShowLobbyView(EBaruLobbyView::Home);
+}
+
+void UBaruLobbyWidget::RebuildContractList()
+{
+	if (!IsValid(ListView_Contracts))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Error,
+			TEXT("계약 목록 ListView가 유효하지 않습니다.")
+			);
+		
+		return;
+	}
+	
+	ListView_Contracts->ClearListItems();
+	ContractListItems.Reset();
+	
+	auto AddContractItem =
+		[this](
+			const TCHAR* ContractName,
+			const TCHAR* MapName,
+			const TCHAR* Difficulty,
+			const TCHAR* RewardText,
+			const TCHAR* TargetMapURL)
+		{
+			UBaruContractListItemData* NewItem =
+				NewObject<UBaruContractListItemData>(this);
+			
+			if (!IsValid(NewItem))
+			{
+				return;
+			}
+			
+			NewItem->Initialize(
+				FText::FromString(FString(ContractName)),
+				FText::FromString(FString(MapName)),
+				FText::FromString(FString(Difficulty)),
+				FText::FromString(FString(RewardText)),
+				FString(TargetMapURL),
+				nullptr
+				);
+			
+			NewItem->OnSelected.AddDynamic(
+				this,
+				&ThisClass::HandleContractSelected
+				);
+			
+			ContractListItems.Add(NewItem);
+			ListView_Contracts->AddItem(NewItem);
+		};
+	
+	AddContractItem(
+		TEXT("계약 테스트 1"),
+		TEXT("Company 01 Lobby"),
+		TEXT("난이도: 쉬움"),
+		TEXT("보상: 1,000"),
+		TEXT("/Game/BARUGame/Maps/Company01/Company01_Lobby.Company01_Lobby")
+		);
+	
+	AddContractItem(
+		TEXT("계약 테스트 2"),
+		TEXT("Company 01 Basement"),
+		TEXT("난이도: 보통"),
+		TEXT("보상: 2,000"),
+		TEXT("/Game/BARUGame/Maps/Company01/Company01_Basement.Company01_Basement")
+		);
+	
+	AddContractItem(
+		TEXT("계약 테스트 3"),
+		TEXT("Test Gym"),
+		TEXT("난이도: 어려움"),
+		TEXT("보상: 3,000"),
+		TEXT("/Game/BARUGame/Maps/TestGym.TestGym")
+		);
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("계약 목록을 구성했습니다. Count=%d"),
+		ContractListItems.Num()
+		);
+}
+
+void UBaruLobbyWidget::HandleContractSelected(
+	UBaruContractListItemData* SelectedContract)
+{
+	if (!IsValid(SelectedContract))
+	{
+		return;
+	}
+	
+	SelectedContractItem = SelectedContract;
+	
+	if (IsValid(Text_ContractDetailName))
+	{
+		Text_ContractDetailName->SetText(
+			SelectedContract->ContractName
+			);
+	}
+	
+	if (IsValid(Text_ContractDetailMapName))
+	{
+		Text_ContractDetailMapName->SetText(
+			SelectedContract->MapName
+			);
+	}
+	
+	if (IsValid(Text_ContractDetailDifficulty))
+	{
+		Text_ContractDetailDifficulty->SetText(
+			SelectedContract->Difficulty
+			);
+	}
+	
+	if (IsValid(Text_ContractDetailReward))
+	{
+		Text_ContractDetailReward->SetText(
+			SelectedContract->RewardText
+			);
+	}
+	
+	if (IsValid(Image_ContractDetailThumbnail))
+	{
+		if (IsValid(SelectedContract->Thumbnail.Get()))
+		{
+			Image_ContractDetailThumbnail->SetBrushFromTexture(
+				SelectedContract->Thumbnail.Get()
+				);
+			
+			Image_ContractDetailThumbnail->SetVisibility(
+				ESlateVisibility::Visible
+				);
+		}
+		else
+		{
+			Image_ContractDetailThumbnail->SetVisibility(
+				ESlateVisibility::Collapsed
+				);
+		}
+	}
+	
+	if (IsValid(Button_ConfirmContract))
+	{
+		Button_ConfirmContract->SetIsEnabled(
+			bIsLobbyHost
+			);
+	}
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("계약 상세 정보를 갱신했습니다. Contract=%s, map=%s"),
+		*SelectedContract->ContractName.ToString(),
+		*SelectedContract->TargetMapURL
+		);
+}
+
+void UBaruLobbyWidget::HandleConfirmContractClicked()
+{
+	if (!bIsLobbyHost)
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("방장만 계약을 확정할 수 있습니다.")
+			);
+		
+		return;
+	}
+	
+	if (!IsValid(SelectedContractItem))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("확정할 계약이 선택되지 않았습니다.")
+			);
+		
+		return;
+	}
+	
+	BP_OnContractConfirmedRequested(
+		SelectedContractItem->TargetMapURL
+		);
+	
+	if (IsValid(Text_SelectedContractName))
+	{
+		Text_SelectedContractName->SetText(
+			SelectedContractItem->ContractName
+			);
+	}
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("계약 선택을 확정했습니다. Contract=%s, Map=%s"),
+		*SelectedContractItem->ContractName.ToString(),
+		*SelectedContractItem->TargetMapURL
+		);
+	
 	ShowLobbyView(EBaruLobbyView::Home);
 }
 
@@ -735,6 +950,7 @@ void UBaruLobbyWidget::NativeOnActivated()
 	
 	RefreshLobbyActionButton();
 	RefreshLobbyPlayerList();
+	RebuildContractList();
 
 	if (UWorld* World = GetWorld())
 	{
@@ -767,6 +983,14 @@ void UBaruLobbyWidget::NativeOnDeactivated()
 
 	LastLobbyPlayerListSignature.Reset();
 	LobbyPlayerListItems.Reset();
+	
+	if (IsValid(ListView_Contracts))
+	{
+		ListView_Contracts->ClearListItems();
+	}
+	
+	ContractListItems.Reset();
+	SelectedContractItem = nullptr;
 
 	if (IsValid(SessionSubsystem))
 	{
