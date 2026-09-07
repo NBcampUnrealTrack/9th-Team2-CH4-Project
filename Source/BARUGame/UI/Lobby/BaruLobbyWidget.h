@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UI/Foundation/BaruActivatableWidget.h"
 #include "Subsystems/BaruSessionSubsystem.h"
+#include "UI/Lobby/BaruContractListItemData.h"
 
 #include "BaruLobbyWidget.generated.h"
 
@@ -184,6 +185,12 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
 	TObjectPtr<UTextBlock> Text_SelectedContractName;
 	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTextBlock> Text_SelectedMapName;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTextBlock> Text_SelectedDifficulty;
+	
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UTextBlock> Text_LobbyAction;
 
@@ -204,6 +211,11 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBaruLobbyPlayerListItemData>>
 	LobbyPlayerListItems;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI|Lobby|Contract",
+		meta = (TitleProperty = "ContractName")
+		)
+	TArray<FBaruContractDefinition> ContractDefinitions;
 	
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBaruContractListItemData>>
