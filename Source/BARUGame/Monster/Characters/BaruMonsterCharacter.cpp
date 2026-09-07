@@ -10,6 +10,7 @@
 #include "AbilitySystem/Attributes/BaruMonsterAttributeSet.h"
 
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Net/UnrealNetwork.h"
 #include "BaruLog.h"
 
 
@@ -44,6 +45,20 @@ ABaruMonsterCharacter::ABaruMonsterCharacter()
 	
 }
 
+void ABaruMonsterCharacter::GetLifetimeReplicatedProps(
+	TArray<FLifetimeProperty>& OutLifetimeProps
+) const
+{
+	// 부모 Character가 사용하는 복제 설정도 함께 등록
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	// 서버의 bIsDead 값이 변경되면 클라이언트로 복제
+	// 클라이언트에서는 값이 도착한 뒤 OnRep_IsDead가 자동 호출됨
+	DOREPLIFETIME(
+		ABaruMonsterCharacter,
+		bIsDead
+	);
+}
 
 void ABaruMonsterCharacter::BeginPlay()
 {
@@ -92,7 +107,9 @@ void ABaruMonsterCharacter::BeginPlay()
 		this
 		);
 	
-	
+	// ASC 초기화가 끝난 뒤 몬스터의 초기 Ability를 등록
+	GrantInitialAbilities();
+		
 	// 생성한 AttributeSet이 ASC에 등록됐는지 확인
 	const UBaruCoreAttributeSet* RegisteredCoreAttributeSet =
 		AbilitySystemComponent->GetSet<UBaruCoreAttributeSet>();
@@ -208,4 +225,83 @@ void ABaruMonsterCharacter::
 	);
 }
 
+void ABaruMonsterCharacter::GrantInitialAbilities()
+{
+	// Ability 부여는 서버에서만 실행
+	if (!HasAuthority() ||
+		!IsValid(AbilitySystemComponent) ||
+		!IsValid(MonsterDataAsset) ||
+		!MonsterDataAsset->AttackAbilityClass)
+	{
+		return;
+	}
 
+	// DataAsset에 지정된 공격 Ability를 ASC에 등록
+	AbilitySystemComponent->GiveAbility(
+		FGameplayAbilitySpec(
+			MonsterDataAsset->AttackAbilityClass,
+			1
+		)
+	);
+}
+
+//---------
+//Dead 관련
+//---------
+
+void ABaruMonsterCharacter::Die_Implementation(AActor* Killer)
+{
+	// 사망 판정은 서버에서만 처리하며 중복 실행을 막음
+	if (!HasAuthority() || bIsDead)
+	{
+		return;
+	}
+
+	bIsDead = true;
+
+	// 서버 화면에도 즉시 사망 상태를 적용
+	// 클라이언트에서는 bIsDead가 복제될 때 자동 호출됨
+	OnRep_IsDead();
+
+	BARU_NET_LOG(
+		this,
+		LogBaruCombat,
+		Log,
+		TEXT("Monster died. Killer=%s"),
+		*GetNameSafe(Killer)
+	);
+}
+
+bool ABaruMonsterCharacter::IsDead_Implementation() const
+{
+	return bIsDead;
+}
+
+void ABaruMonsterCharacter::OnRep_IsDead()
+{
+	if (!bIsDead)
+	{
+		return;
+	}
+
+	// 진행 중인 이동을 멈추고 이후 이동도 차단
+	if (UCharacterMovementComponent* MovementComponent =
+		GetCharacterMovement())
+	{
+		MovementComponent->StopMovementImmediately();
+		MovementComponent->DisableMovement();
+	}
+
+	// 실행 중인 공격 Ability를 모두 중단
+	if (IsValid(AbilitySystemComponent))
+	{
+		AbilitySystemComponent->CancelAllAbilities();
+	}
+
+	// AI가 요청한 이동도 중단
+	if (AController* MonsterController = GetController())
+	{
+		MonsterController->StopMovement();
+	}
+	
+}

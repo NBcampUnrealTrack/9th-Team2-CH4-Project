@@ -8,6 +8,8 @@
 
 
 class UBehaviorTree;
+class UGameplayAbility;
+
 /**
  * 몬스터마다 다른 설정값을 보관하는 데이터 에셋
  */
@@ -91,6 +93,14 @@ public:
 		meta = (ClampMin = "0.0")
 	)
 	float MoveAcceptanceRadius = 0.0f;
+	
+	// 이 몬스터가 사용할 공격 Gameplay Ability
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Combat"
+	)
+	TSubclassOf<UGameplayAbility> AttackAbilityClass;
 
 	// 이 거리 안에 플레이어가 들어오면 공격
 	UPROPERTY(
