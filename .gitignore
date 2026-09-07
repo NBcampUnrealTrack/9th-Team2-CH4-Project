@@ -316,3 +316,7 @@ FodyWeavers.xsd
 /Content/External/
 BARUGame.slnx
 Automation_BARUGame.slnx
+
+# 언리얼 레벨(맵) 파일 추적 제외
+*.umap
+*_BuiltData.uasset
