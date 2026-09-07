@@ -92,7 +92,9 @@ void ABaruMonsterCharacter::BeginPlay()
 		this
 		);
 	
-	
+	// ASC 초기화가 끝난 뒤 몬스터의 초기 Ability를 등록
+	GrantInitialAbilities();
+		
 	// 생성한 AttributeSet이 ASC에 등록됐는지 확인
 	const UBaruCoreAttributeSet* RegisteredCoreAttributeSet =
 		AbilitySystemComponent->GetSet<UBaruCoreAttributeSet>();
@@ -208,4 +210,22 @@ void ABaruMonsterCharacter::
 	);
 }
 
+void ABaruMonsterCharacter::GrantInitialAbilities()
+{
+	// Ability 부여는 서버에서만 실행
+	if (!HasAuthority() ||
+		!IsValid(AbilitySystemComponent) ||
+		!IsValid(MonsterDataAsset) ||
+		!MonsterDataAsset->AttackAbilityClass)
+	{
+		return;
+	}
 
+	// DataAsset에 지정된 공격 Ability를 ASC에 등록
+	AbilitySystemComponent->GiveAbility(
+		FGameplayAbilitySpec(
+			MonsterDataAsset->AttackAbilityClass,
+			1
+		)
+	);
+}

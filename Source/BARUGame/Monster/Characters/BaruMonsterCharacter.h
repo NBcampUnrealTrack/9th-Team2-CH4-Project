@@ -59,6 +59,9 @@ protected:
 	void HandleMoveSpeedAttributeChanged(
 		const FOnAttributeChangeData& AttributeChangeData
 	);
+	
+	// DataAsset에 지정된 몬스터 Ability를 서버에서 ASC에 등록
+	void GrantInitialAbilities();
 
 public:
 	
