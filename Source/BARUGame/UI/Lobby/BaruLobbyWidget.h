@@ -10,11 +10,13 @@
 
 class UButton;
 class UCanvasPanel;
+class UImage;
 class UListView;
 class UTextBlock;
 class UWidgetSwitcher;
 class UBaruSessionListItemData;
 class UBaruLobbyPlayerListItemData;
+class UBaruContractListItemData;
 class ABaruLobbyGameState;
 class ABaruPlayerState;
 
@@ -58,6 +60,14 @@ protected:
 	void HandleCloseContractClicked();
 	
 	UFUNCTION()
+	void HandleContractSelected(UBaruContractListItemData* SelectedContract);
+	
+	UFUNCTION()
+	void HandleConfirmContractClicked();
+	
+	void RebuildContractList();
+	
+	UFUNCTION()
 	void HandleFindSessionClicked();
 	
 	UFUNCTION()
@@ -78,6 +88,18 @@ protected:
 		Category = "BARU|UI|Lobby"
 		)
 	void BP_OnHostStartGameRequested();
+
+	/**
+	 * 방장이 선택한 계약의 맵 적용을 요청한다.
+	 *  실제 서버 반영은 PlayerController/GameMode 담당 시스템에서 처리한다.
+	 */
+	UFUNCTION(
+		BlueprintImplementableEvent,
+		Category = "BARU|UI|Lobby|Contract"
+		)
+	void BP_OnContractConfirmedRequested(
+		const FString& TargetMapURL
+		);
 	
 	UFUNCTION()
 	void HandleFindSessionsComplete(
@@ -135,6 +157,24 @@ protected:
 	TObjectPtr<UCanvasPanel> Panel_SearchResults;
 	
 	// BindWidget
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UListView> ListView_Contracts;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTextBlock> Text_ContractDetailName;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UImage> Image_ContractDetailThumbnail;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTextBlock> Text_ContractDetailMapName;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTextBlock> Text_ContractDetailDifficulty;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTextBlock> Text_ContractDetailReward;
+	
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Session")
 	TObjectPtr<UListView> ListView_SearchResults;
 	
@@ -165,6 +205,13 @@ protected:
 	TArray<TObjectPtr<UBaruLobbyPlayerListItemData>>
 	LobbyPlayerListItems;
 	
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBaruContractListItemData>>
+	ContractListItems;
+	
+	UPROPERTY(Transient)
+	TObjectPtr<UBaruContractListItemData> SelectedContractItem;
+	
 	// 버튼
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UButton> Button_OpenContract;
@@ -186,6 +233,9 @@ protected:
 	
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
 	TObjectPtr<UButton> Button_LobbyAction;
+	
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UButton> Button_ConfirmContract;
 
 
 	// 외부 시스템과 검색 데이터
