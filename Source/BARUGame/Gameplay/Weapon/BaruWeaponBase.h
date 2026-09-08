@@ -42,6 +42,12 @@ public:
 	{
 		return HolsterRelativeTransform;
 	}
+	
+		//위치, 방향 등.
+	const FTransform& GetHandRelativeTransform() const
+	{
+		return HandRelativeTransform;
+	}
 
 		// DataAsset에서 받은 실제 런타임 피해량
 	UPROPERTY(
@@ -88,6 +94,15 @@ public:
 		BlueprintReadOnly, Category = "BARU|Weapon|Attachment")
 	FTransform HolsterRelativeTransform = FTransform::Identity;
 	
+	// DataAsset에서 복사된 손 장착 보정값.
+	UPROPERTY(
+		Transient,
+		VisibleInstanceOnly,
+		BlueprintReadOnly,
+		Category = "BARU|Weapon|Attachment")
+	FTransform HandRelativeTransform = FTransform::Identity;
+	
+	
 		//GAS 부분.
 		// DataAsset에서 불러온 피해 GameplayEffect 클래스.
 		// 서버 발사 처리에서만 사용하므로 복제하지 않음.
@@ -106,4 +121,6 @@ private:
 		// 서버가 허용하는 다음 발사 시각.(연속 발사 요청 간격을 검사하기 위해.)
 	double NextAllowedFireTime = 0.0;
 	
+protected:
+	virtual void BeginPlay() override;
 };

@@ -15,6 +15,8 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
 #include "GameFramework/PlayerState.h" // PlayerState를 Cast할 때 전체 클래스 정의 필요(안 하면 cast.h 오류 발생)
+	// 무기 비활성 시 위치.
+#include "Components/PrimitiveComponent.h"
 
 ABaruWeaponBase::ABaruWeaponBase()
 {
@@ -38,6 +40,29 @@ ABaruWeaponBase::ABaruWeaponBase()
 	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	WeaponMesh->SetGenerateOverlapEvents(false);
 }
+
+	// 무기를 다른 사람한테도 보이도록.
+void ABaruWeaponBase::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// 무기 Actor를 소유한 플레이어에게는 숨기고,
+	// 다른 플레이어의 화면에는 표시합니다.
+	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents;
+	GetComponents(PrimitiveComponents);
+
+	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+	{
+		if (!IsValid(PrimitiveComponent))
+		{
+			continue;
+		}
+
+		PrimitiveComponent->SetOwnerNoSee(true);
+		PrimitiveComponent->SetOnlyOwnerSee(false);
+	}
+}
+
 
 	// 서버가 검증된 무기로 실제 발사 판정을 수행.
 void ABaruWeaponBase::Fire(AActor* WeaponInstigator)
@@ -191,6 +216,7 @@ void ABaruWeaponBase::InitializeFromData(
 		// 무기별 비활성 보관 위치 정보도 런타임 Weapon Actor에 복사.
 	HolsterSocketName = WeaponData->HolsterSocketName;
 	HolsterRelativeTransform = WeaponData->HolsterRelativeTransform;
+	HandRelativeTransform = WeaponData->HandRelativeTransform;
 	
 		// Soft Class는 발사할 때마다 에셋을 로드하지 않기 위해, 장착할 때 한 번만 실제 클래스로 불러옴.
 	DamageEffectClass = WeaponData->DamageEffectClass.LoadSynchronous();
