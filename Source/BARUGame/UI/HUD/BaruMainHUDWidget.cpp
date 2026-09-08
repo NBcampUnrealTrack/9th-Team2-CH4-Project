@@ -1,14 +1,20 @@
 // BaruMainHUDWidget.cpp
 
 #include "UI/HUD/BaruMainHUDWidget.h"
-#include "Components/BaruHealthComponent.h"
-#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 
+#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
+#include "Components/BaruHealthComponent.h"
+#include "Player/BaruPlayerState.h"
+
+#include "Components/Border.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 
+#include "Engine/World.h"
+#include "TimerManager.h"
+
 #include "BaruLog.h"
-#include "Player/BaruPlayerState.h"
+
 
 UBaruMainHUDWidget::UBaruMainHUDWidget(
 	const FObjectInitializer& ObjectInitializer)
@@ -28,10 +34,140 @@ UBaruMainHUDWidget::UBaruMainHUDWidget(
 		EMouseCaptureMode::CapturePermanently;
 }
 
+void UBaruMainHUDWidget::ShowInteractionPrompt(
+	const FText& PromptText)
+{
+	if (PromptText.IsEmpty())
+	{
+		HideInteractionPrompt();
+		return;
+	}
+	
+	if (IsValid(Text_InteractionPrompt))
+	{
+		Text_InteractionPrompt->SetText(PromptText);
+	}
+	
+	if (IsValid(Border_InteractionPrompt))
+	{
+		Border_InteractionPrompt->SetVisibility(
+			ESlateVisibility::HitTestInvisible);
+	}
+}
+
+void UBaruMainHUDWidget::HideInteractionPrompt()
+{
+	if (IsValid(Border_InteractionPrompt))
+	{
+		Border_InteractionPrompt->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+}
+
+void UBaruMainHUDWidget::ShowGuideMessage(
+	const FText& Message,
+	float Duration)
+{
+	if (Message.IsEmpty())
+	{
+		HideGuideMessage();
+		return;
+	}
+	
+	if (IsValid(Text_GuideMessage))
+	{
+		Text_GuideMessage->SetText(Message);
+	}
+	
+	if (IsValid(Border_GuideMessage))
+	{
+		Border_GuideMessage->SetVisibility(
+			ESlateVisibility::HitTestInvisible);
+	}
+	
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			GuideMessageTimerHandle);
+		
+		if (Duration > 0.0f)
+		{
+			World->GetTimerManager().SetTimer(
+				GuideMessageTimerHandle,
+				this,
+				&ThisClass::HideGuideMessage,
+				Duration,
+				false);
+		}
+	}
+}
+
+void UBaruMainHUDWidget::HideGuideMessage()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			GuideMessageTimerHandle);
+	}
+	
+	if (IsValid(Border_GuideMessage))
+	{
+		Border_GuideMessage->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+}
+
+void UBaruMainHUDWidget::ShowWeaponDisplay(
+	const FText& WeaponName,
+	int32 CurrentAmmo,
+	int32 ReserveAmmo)
+{
+	if (WeaponName.IsEmpty())
+	{
+		HideWeaponDisplay();
+		return;
+	}
+	
+	if (IsValid(Text_WeaponName))
+	{
+		Text_WeaponName->SetText(WeaponName);
+	}
+	
+	if (IsValid(Text_CurrentAmmo))
+	{
+		Text_CurrentAmmo->SetText(
+			FText::AsNumber(FMath::Max(0, CurrentAmmo)));
+	}
+	
+	if (IsValid(Text_ReserveAmmo))
+	{
+		Text_ReserveAmmo->SetText(
+			FText::AsNumber(FMath::Max(0, ReserveAmmo)));
+	}
+	
+	if (IsValid(Border_WeaponStatus))
+	{
+		Border_WeaponStatus->SetVisibility(
+			ESlateVisibility::HitTestInvisible);
+	}
+}
+
+void UBaruMainHUDWidget::HideWeaponDisplay()
+{
+	if (IsValid(Border_WeaponStatus))
+	{
+		Border_WeaponStatus->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+}
+
 void UBaruMainHUDWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 	
+	HideInteractionPrompt();
+	HideGuideMessage();
+	HideWeaponDisplay();
 	BindToPlayerState();
 
 	BARU_LOG(
@@ -43,6 +179,9 @@ void UBaruMainHUDWidget::NativeOnActivated()
 
 void UBaruMainHUDWidget::NativeOnDeactivated()
 {
+	HideInteractionPrompt();
+	HideGuideMessage();
+	HideWeaponDisplay();
 	UnbindFromPlayerState();
 	
 	BARU_LOG(
@@ -146,7 +285,7 @@ void UBaruMainHUDWidget::UpdateHealthDisplay()
 		Text_HealthValue->SetText(
 			FText::FromString(
 				FString::Printf(
-					TEXT("%0.f / %0.f"),
+					TEXT("%.0f / %.0f"),
 					Health,
 					MaxHealth)));
 	}
