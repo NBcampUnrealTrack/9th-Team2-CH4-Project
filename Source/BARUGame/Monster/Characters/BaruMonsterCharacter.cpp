@@ -10,7 +10,10 @@
 #include "AbilitySystem/Attributes/BaruMonsterAttributeSet.h"
 
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameplayTags/BaruGameplayTags.h"
+#include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "BrainComponent.h"
 #include "BaruLog.h"
 
 
@@ -293,15 +296,44 @@ void ABaruMonsterCharacter::OnRep_IsDead()
 	}
 
 	// 실행 중인 공격 Ability를 모두 중단
+	// 이후 State.Dead에 의해 공격이 다시 실행되지 않도록 함
 	if (IsValid(AbilitySystemComponent))
 	{
 		AbilitySystemComponent->CancelAllAbilities();
+		
+		const FGameplayTag DeadTag =
+	   FBaruGameplayTags::Get().State_Dead;
+
+		if (DeadTag.IsValid() &&
+			!AbilitySystemComponent->HasMatchingGameplayTag(DeadTag))
+		{
+			AbilitySystemComponent->AddLooseGameplayTag(DeadTag);
+		}
 	}
 
-	// AI가 요청한 이동도 중단
-	if (AController* MonsterController = GetController())
+	// AIController가 요청한 현재 이동을 멈춤
+	if (ABaruMonsterAIController* MonsterController =
+		Cast<ABaruMonsterAIController>(GetController()))
 	{
 		MonsterController->StopMovement();
+
+		// Behavior Tree의 판단과 Task 실행도 완전히 정지
+		if (UBrainComponent* BrainComponent =
+			MonsterController->GetBrainComponent())
+		{
+			BrainComponent->StopLogic(TEXT("Monster died"));
+		}
 	}
+	
+	// 사망한 몬스터의 캡슐 충돌을 꺼서
+	// 플레이어와 AI의 이동을 막지 않도록 함
+	if (UCapsuleComponent* MonsterCapsule = GetCapsuleComponent())
+	{
+		MonsterCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+	
+	// 각 몬스터 블루프린트에 구현된 사망 연출 실행
+	// 래그돌을 켜더라도 액터를 삭제하지 않으므로 시체는 유지됨
+	OnDeathCosmetic();
 	
 }

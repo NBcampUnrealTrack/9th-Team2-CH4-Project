@@ -77,6 +77,11 @@ protected:
 	
 	UFUNCTION()
 	void OnRep_IsDead();
+	
+	// 몬스터별 사망 애니메이션이나 래그돌 연출을
+	// 자식 블루프린트에서 구현할 수 있도록 제공
+	UFUNCTION(BlueprintImplementableEvent, Category = "Monster|Combat")
+	void OnDeathCosmetic();
 
 public:
 	
