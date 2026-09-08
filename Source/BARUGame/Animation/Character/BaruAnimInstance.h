@@ -29,6 +29,18 @@ protected:
 	// -180 ~ 180. 옆걸음(스트레이프) 블렌드용.
 	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
 	float Direction = 0.f;
+	
+	// [추가] 앉은 상태. ABP 에서 크라우치 애니메이션 분기에 사용
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
+	bool bIsCrouching = false;
+
+	// [추가] 달리는 중인지. 걷기/달리기 블렌드 구분용.
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
+	bool bIsSprinting = false;
+
+	// [추가] 무기를 들고 있는지. 권총 자세로 블렌드할 때 사용
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Weapon")
+	bool bHasWeapon = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
 	bool bIsInAir = false;

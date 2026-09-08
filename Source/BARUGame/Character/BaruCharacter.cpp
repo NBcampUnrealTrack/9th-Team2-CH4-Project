@@ -51,6 +51,11 @@ ABaruCharacter::ABaruCharacter()
    
    // [추가] 무기 장착 컴포넌트 생성
    EquipmentComponent = CreateDefaultSubobject<UBaruEquipmentComponent>(TEXT("EquipmentComponent"));
+   
+   // [추가] 크라우치 활성화.
+   //   언리얼은 기본적으로 크라우치가 꺼져 있어서, 이게 없으면 Crouch() 를 불러와도 무시됨
+   GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
+   GetCharacterMovement()->SetCrouchedHalfHeight(60.0f);
 }
 
 // [추가] bIsDead 복제 등록. 없으면 클라이언트에서 시체 연출이 안 나옴
@@ -58,6 +63,7 @@ void ABaruCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 {
    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
    DOREPLIFETIME(ABaruCharacter, bIsDead);
+   DOREPLIFETIME(ABaruCharacter, bIsSprinting);   // [추가]
 }
 
 void ABaruCharacter::PossessedBy(AController* NewController)
@@ -65,12 +71,7 @@ void ABaruCharacter::PossessedBy(AController* NewController)
    Super::PossessedBy(NewController);
 
    InitAbilityActorInfo();
-
-   // [추가] 리스폰 대응.
-   //   ABaruTestGameMode::RespawnPlayer 는 SetDBNOState(false) 만 호출하고
-   //   사망 상태는 초기화해주지 않습니다(제 권한 밖 파일).
-   //   "새 폰에 빙의됐다 = 살아있는 몸을 새로 받았다" 이므로 여기서 풀어줍니다.
-   //   ※ Super::PossessedBy 안에서 SetPlayerState() 가 먼저 수행되므로 이 시점엔 PS가 유효합니다.
+   
    if (HasAuthority())
    {
       if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
@@ -80,19 +81,16 @@ void ABaruCharacter::PossessedBy(AController* NewController)
    }
 }
 
-// [클라이언트 전용] 서버로부터 PlayerState가 복제되어 로컬에 도착했을 때 호출됨
+
 void ABaruCharacter::OnRep_PlayerState()
 {
     Super::OnRep_PlayerState();
-
-    // 클라이언트 측 GAS ActorInfo 초기화
     InitAbilityActorInfo();
 }
 
-// GAS 초기화 공통 헬퍼 함수 (멀티플레이 대응)
+
 void ABaruCharacter::InitAbilityActorInfo()
 {
-   // [수정] 중첩 if 를 early return 으로 펴고, 아래 "1회성 초기화" 구간을 분리
    ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
    if (!BaruPS)
    {
@@ -104,32 +102,27 @@ void ABaruCharacter::InitAbilityActorInfo()
    {
       return;
    }
-
-   // 캐릭터와 PlayerState를 GAS에 연결 (여러 번 호출돼도 안전)
+   
    ASC->InitAbilityActorInfo(BaruPS, this);
 
    if (UBaruHealthComponent* PSHealthComp = BaruPS->GetHealthComponent())
    {
-      // PlayerState 쪽 PostInitializeComponents 에서도 초기화하도록 바꿨지만,
-      //  InitializeWithAbilitySystem은 같은 ASC면 즉시 return 하므로 중복 호출이 안전
-      PSHealthComp->InitializeWithAbilitySystem(ASC);
+      // ★[수정] 초기 속도도 같은 경로로 적용
+      BaseWalkSpeed = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
+      UpdateMaxWalkSpeed();
    }
 
-   // [추가] --- 여기서부터는 반드시 "한 번만" 실행되어야 하는 구간 ---
+   
    if (CachedASC.Get() == ASC)
    {
       return;
    }
    CachedASC = ASC;
-
-   // [추가] MoveSpeed 어트리뷰트 → CharacterMovement 연결.
-   //   CoreAttributeSet 에 MoveSpeed(450)가 정의되고 복제까지 되는데
-   //   MaxWalkSpeed 로 꽂아주는 코드가 프로젝트 전체에 한 줄도 없었음
-   //   (= 버프/디버프로 이동속도를 바꿔도 실제로는 아무 일도 안 일어남)
+   
    MoveSpeedChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
        UBaruCoreAttributeSet::GetMoveSpeedAttribute()).AddUObject(this, &ABaruCharacter::HandleMoveSpeedChanged);
 
-   // [08.30] 속도가 0.0f로 덮어써져 멈추는 현상을 방어하기 위한 코드.
+  
    const float InitialMoveSpeed = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
    if (InitialMoveSpeed > 0.0f)
    {
@@ -144,20 +137,15 @@ void ABaruCharacter::InitAbilityActorInfo()
    //     ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
 }
 
-// [추가] 어트리뷰트가 서버에서 바뀌면 각 클라에도 복제되어 동일하게 호출됨(RPC 불필요)
 void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& ChangeData)
 {
-   if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-   {
-      if (ChangeData.NewValue > 0.0f)
-      {
-         MoveComp->MaxWalkSpeed = ChangeData.NewValue;
-      }
-   }
+   // [수정] 어트리뷰트 값을 기준 속도로 저장하고, 스프린트/크라우치를 반영해 최종 적용
+   BaseWalkSpeed = ChangeData.NewValue;
+   UpdateMaxWalkSpeed();
 }
 
 
-// [추가] 델리게이트 정리. 없으면 폰 파괴 후 죽은 포인터로 콜백이 갈 수 있음
+
 void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
    if (UAbilitySystemComponent* ASC = CachedASC.Get())
@@ -174,19 +162,19 @@ void ABaruCharacter::BeginPlay()
 {
    Super::BeginPlay();
 
-   // [추가] 생성자 값은 C++ 기본값일 뿐이고 BP에서 CameraEyeHeight 를 바꾼 경우는
-   // 생성자 이후에 반영되므로 여기서 다시 적용합니다.
+
    if (FollowCamera)
    {
       FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, CameraEyeHeight));
    }
+   UpdateMaxWalkSpeed();
 }
 
 void ABaruCharacter::PawnClientRestart()
 {
    Super::PawnClientRestart();
 
-   // 로컬 클라이언트 컨트롤러 방어 코드
+   
    APlayerController* PC = Cast<APlayerController>(GetController());
    if (!PC && GetWorld())
    {
@@ -244,12 +232,30 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
       {
          EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Interact);
       }
+      // [추가] 발사
+      if (FireAction)
+      {
+         EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Fire);
+      }
+
+      // [추가] 달리기 — 누르는 동안만 (Started/Completed 쌍)
+      if (SprintAction)
+      {
+         EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_SprintStart);
+         EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_SprintStop);
+      }
+
+      // [추가] 앉기 — 누를 때마다 토글
+      if (CrouchAction)
+      {
+         EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_ToggleCrouch);
+      }
    }
 }
 
 void ABaruCharacter::Move(const FInputActionValue& Value)
 {
-   if (bIsDead)   // [추가] 사망 후 조작 차단
+   if (bIsDead)   // 사망 후 조작 차단
    {
       return;
    }
@@ -318,6 +324,91 @@ void ABaruCharacter::Input_Interact()
    Server_ProcessInteraction(HitResult);
 }
 
+// ★[추가] 발사 요청.
+//   캐릭터는 "쐈다"는 사실만 전달합니다.
+//   호스트/클라 분기, 서버 라인트레이스, GE 적용은 전부 EquipmentComponent 와 WeaponBase 담당입니다.
+void ABaruCharacter::Input_Fire()
+{
+   if (bIsDead || !EquipmentComponent)
+   {
+      return;
+   }
+
+   EquipmentComponent->RequestFireActiveWeapon();
+}
+
+// ★[추가] 달리기 시작/종료.
+//   속도는 서버가 확정해야 위치 보정이 안 생기므로 RPC 로 요청만 합니다.
+void ABaruCharacter::Input_SprintStart()
+{
+   if (bIsDead)
+   {
+      return;
+   }
+   Server_SetSprinting(true);
+}
+
+void ABaruCharacter::Input_SprintStop()
+{
+   Server_SetSprinting(false);
+}
+
+bool ABaruCharacter::Server_SetSprinting_Validate(bool bNewSprinting)
+{
+   return true;   // bool 하나뿐이라 조작 가능한 값이 없습니다.
+}
+
+void ABaruCharacter::Server_SetSprinting_Implementation(bool bNewSprinting)
+{
+   if (bIsSprinting == bNewSprinting)
+   {
+      return;
+   }
+
+   bIsSprinting = bNewSprinting;
+   OnRep_IsSprinting();   // 서버는 OnRep 이 자동 호출되지 않으므로 직접 호출
+}
+
+// ★[추가] 스프린트 상태가 복제되어 도착했을 때 각 클라에서 속도 갱신
+void ABaruCharacter::OnRep_IsSprinting()
+{
+   UpdateMaxWalkSpeed();
+}
+
+// ★[추가] 앉기 토글.
+//   Crouch() / UnCrouch() 는 언리얼이 서버·클라 예측까지 알아서 처리하므로
+//   별도 RPC 가 필요 없습니다. (생성자의 bCanCrouch = true 가 전제)
+void ABaruCharacter::Input_ToggleCrouch()
+{
+   if (bIsDead)
+   {
+      return;
+   }
+
+   if (bIsCrouched)
+   {
+      UnCrouch();
+   }
+   else
+   {
+      Crouch();
+   }
+}
+
+// ★[추가] 현재 상태(앉기/달리기)에 맞는 이동 속도를 계산해 적용합니다.
+//   서버와 클라 양쪽에서 같은 계산을 하므로 값이 어긋나지 않습니다.
+void ABaruCharacter::UpdateMaxWalkSpeed()
+{
+   UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+   if (!MoveComp)
+   {
+      return;
+   }
+
+   MoveComp->MaxWalkSpeedCrouched = CrouchedWalkSpeed;
+   MoveComp->MaxWalkSpeed = bIsSprinting ? (BaseWalkSpeed * SprintSpeedMultiplier) : BaseWalkSpeed;
+}
+
 void ABaruCharacter::OnRep_Controller()
 {
    Super::OnRep_Controller();
@@ -375,18 +466,13 @@ void ABaruCharacter::Die_Implementation(AActor* Killer)
    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s has died. Killer: %s"),
        *GetName(), Killer ? *Killer->GetName() : TEXT("None"));
 
-   // ★ GameMode 통지는 "다음 틱"으로 미룸
-   //   GAS 콜백 도중에 폰을 떼거나 파괴하는 건 위험하므로 한 틱 미룸
+  
    if (UWorld* World = GetWorld())
    {
       World->GetTimerManager().SetTimerForNextTick(this, &ABaruCharacter::NotifyGameModeOfDeath);
    }
 }
 
-// [추가] 두 게임모드를 반드시 분기해야함
-//   ABaruGameMode 와 ABaruTestGameMode 는 상속 관계가 전혀 없고(둘 다 AGameModeBase 직속),
-//   OnPlayerDied() 는 이름만 같은 별개의 함수입니다.
-//   한쪽으로만 Cast 하면 다른 맵에서는 사망 처리가 통째로 무시됨
 void ABaruCharacter::NotifyGameModeOfDeath()
 {
    if (!HasAuthority() || !GetWorld())
@@ -416,9 +502,6 @@ void ABaruCharacter::NotifyGameModeOfDeath()
        TEXT("Death not reported: unknown GameMode class %s"), *AuthGM->GetClass()->GetName());
 }
 
-// [추가] 클라이언트에서 사망이 복제되어 도착했을 때의 연출 진입
-//   Multicast RPC 대신 복제 변수 + OnRep 을 쓰는 이유:
-//   나중에 접속한 클라이언트도 올바른 상태를 받고, RPC 트래픽이 늘지 않기 때문입
 void ABaruCharacter::OnRep_IsDead()
 {
    if (!bIsDead)
@@ -514,11 +597,7 @@ void ABaruCharacter::BreakBodyPart_Implementation(FName BoneName, float Damage)
    // 부위 파괴는 몬스터 전용 사양. 플레이어는 미사용.
 }
 
-// ==============================================================================
 // 트레이스 / RPC
-// ==============================================================================
-
-// [수정] 트레이스 채널과 디버그 표시 방식 변경
 bool ABaruCharacter::PerformLineTrace(FHitResult& OutHitResult, float TraceDistance, bool bDrawDebug)
 {
    AController* PC = GetController();
