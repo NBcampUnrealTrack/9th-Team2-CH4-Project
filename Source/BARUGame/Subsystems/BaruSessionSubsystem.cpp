@@ -6,6 +6,7 @@
 #include "GameFramework/PlayerState.h"
 #include "OnlineSessionSettings.h"
 #include "OnlineSubsystem.h"
+#include "OnlineSubsystemUtils.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "Interfaces/OnlineExternalUIInterface.h"
 #include "Kismet/GameplayStatics.h"
@@ -77,7 +78,7 @@ void UBaruSessionSubsystem::Deinitialize()
 
 IOnlineSessionPtr UBaruSessionSubsystem::GetSessionInterface() const
 {
-	if (IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get())
+	if (IOnlineSubsystem* Subsystem = Online::GetSubsystem(GetWorld()))
 	{
 		return Subsystem->GetSessionInterface();
 	}
@@ -230,14 +231,15 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 	LastSessionSearch->MaxSearchResults = FMath::Clamp(MaxSearchResults, 50, 100);
 	LastSessionSearch->bIsLanQuery = bIsLANMatch;
 	
+	LastSessionSearch->QuerySettings.Set(FName(TEXT("LOBBIESSEARCH")), true, EOnlineComparisonOp::Equals);
 	LastSessionSearch->QuerySettings.Set(FName(TEXT("PRESENCESEARCH")), true, EOnlineComparisonOp::Equals);
-
+	
 	LastSessionSearch->QuerySettings.Set(
-		BaruMatchmakingConstants::SETTING_MATCH_KEY,
-		BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE,
-		EOnlineComparisonOp::Equals
+	   BaruMatchmakingConstants::SETTING_MATCH_KEY,
+	   BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE,
+	   EOnlineComparisonOp::Equals
 	);
-
+	
 	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Executing Search with PRESENCESEARCH & MATCH_KEY filter..."));
 
 	if (!SessionInterface->FindSessions(*NetId.GetUniqueNetId(), LastSessionSearch.ToSharedRef()))
@@ -393,7 +395,7 @@ void UBaruSessionSubsystem::OnDestroySessionComplete(FName SessionName, bool bWa
 
 void UBaruSessionSubsystem::OpenFriendInviteUI()
 {
-	if (IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get())
+	if (IOnlineSubsystem* Subsystem = Online::GetSubsystem(GetWorld()))
 	{
 		if (IOnlineExternalUIPtr ExternalUI = Subsystem->GetExternalUIInterface())
 		{

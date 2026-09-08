@@ -195,64 +195,53 @@ void UBaruLobbyWidget::RebuildContractList()
 	
 	ListView_Contracts->ClearListItems();
 	ContractListItems.Reset();
+	SelectedContractItem = nullptr;
 	
-	auto AddContractItem =
-		[this](
-			const TCHAR* ContractName,
-			const TCHAR* MapName,
-			const TCHAR* Difficulty,
-			const TCHAR* RewardText,
-			const TCHAR* TargetMapURL)
+	if (IsValid(Button_ConfirmContract))
+	{
+		Button_ConfirmContract->SetIsEnabled(false);
+	}
+	
+	for (const FBaruContractDefinition& Definition
+		: ContractDefinitions)
+	{
+		if (Definition.ContractName.IsEmpty()
+			|| Definition.TargetMapURL.IsEmpty())
 		{
-			UBaruContractListItemData* NewItem =
-				NewObject<UBaruContractListItemData>(this);
-			
-			if (!IsValid(NewItem))
-			{
-				return;
-			}
-			
-			NewItem->Initialize(
-				FText::FromString(FString(ContractName)),
-				FText::FromString(FString(MapName)),
-				FText::FromString(FString(Difficulty)),
-				FText::FromString(FString(RewardText)),
-				FString(TargetMapURL),
-				nullptr
+			BARU_LOG(
+				LogBaruUI,
+				Warning,
+				TEXT("이름 또는 맵 URL이 비어 있는 계약을 건너뜁니다.")
 				);
 			
-			NewItem->OnSelected.AddDynamic(
-				this,
-				&ThisClass::HandleContractSelected
-				);
-			
-			ContractListItems.Add(NewItem);
-			ListView_Contracts->AddItem(NewItem);
-		};
-	
-	AddContractItem(
-		TEXT("계약 테스트 1"),
-		TEXT("Company 01 Lobby"),
-		TEXT("난이도: 쉬움"),
-		TEXT("보상: 1,000"),
-		TEXT("/Game/BARUGame/Maps/Company01/Company01_Lobby.Company01_Lobby")
-		);
-	
-	AddContractItem(
-		TEXT("계약 테스트 2"),
-		TEXT("Company 01 Basement"),
-		TEXT("난이도: 보통"),
-		TEXT("보상: 2,000"),
-		TEXT("/Game/BARUGame/Maps/Company01/Company01_Basement.Company01_Basement")
-		);
-	
-	AddContractItem(
-		TEXT("계약 테스트 3"),
-		TEXT("Test Gym"),
-		TEXT("난이도: 어려움"),
-		TEXT("보상: 3,000"),
-		TEXT("/Game/BARUGame/Maps/TestGym.TestGym")
-		);
+			continue;
+		}
+		
+		UBaruContractListItemData* NewItem =
+			NewObject<UBaruContractListItemData>(this);
+		
+		if (!IsValid(NewItem))
+		{
+			continue;
+		}
+		
+		NewItem->Initialize(
+			Definition.ContractName,
+			Definition.MapName,
+			Definition.Difficulty,
+			Definition.RewardText,
+			Definition.TargetMapURL,
+			Definition.Thumbnail.Get()
+			);
+		
+		NewItem->OnSelected.AddDynamic(
+			this,
+			&ThisClass::HandleContractSelected
+			);
+		
+		ContractListItems.Add(NewItem);
+		ListView_Contracts->AddItem(NewItem);
+	}
 	
 	BARU_LOG(
 		LogBaruUI,
@@ -271,6 +260,13 @@ void UBaruLobbyWidget::HandleContractSelected(
 	}
 	
 	SelectedContractItem = SelectedContract;
+	
+	if (IsValid(ListView_Contracts))
+	{
+		ListView_Contracts->SetSelectedItem(
+			SelectedContract
+			);
+	}
 	
 	if (IsValid(Text_ContractDetailName))
 	{
@@ -368,6 +364,20 @@ void UBaruLobbyWidget::HandleConfirmContractClicked()
 	{
 		Text_SelectedContractName->SetText(
 			SelectedContractItem->ContractName
+			);
+	}
+	
+	if (IsValid(Text_SelectedMapName))
+	{
+		Text_SelectedMapName->SetText(
+			SelectedContractItem->MapName
+			);
+	}
+	
+	if (IsValid(Text_SelectedDifficulty))
+	{
+		Text_SelectedDifficulty->SetText(
+			SelectedContractItem->Difficulty
 			);
 	}
 	
@@ -528,50 +538,150 @@ void UBaruLobbyWidget::HandleCreateSessionComplete(
 void UBaruLobbyWidget::HandleTargetMapChanged(
 	const FString& NewMapURL)
 {
-	if (!IsValid(Text_SelectedContractName))
+	// 같은 맵을 서로 다른 URL 형식으로 받아도 비교할 수 있게 정리한다.
+	const auto NormalizeMapURL =
+		[](FString MapURL)
+		{
+			int32 OptionIndex = INDEX_NONE;
+			
+			if (MapURL.FindChar(
+				TEXT('?'),
+				OptionIndex))
+			{
+				MapURL.LeftInline(OptionIndex);
+			}
+			
+			int32 DotIndex = INDEX_NONE;
+			
+			if (MapURL.FindChar(
+				TEXT('.'),
+				DotIndex))
+			{
+				MapURL.LeftInline(DotIndex);
+			}
+			
+			return MapURL;
+		};
+	
+	const FString NormalizedMapURL =
+		NormalizeMapURL(NewMapURL);
+	
+	// 아직 선택된 맵이 없는 상태
+	if (NormalizedMapURL.IsEmpty())
 	{
+		if (IsValid(Text_SelectedContractName))
+		{
+			Text_SelectedContractName->SetText(
+				FText::FromString(
+					TEXT("선택된 계약 없음"))
+					);
+		}
+		
+		if (IsValid(Text_SelectedMapName))
+		{
+			Text_SelectedMapName->SetText(
+				FText::GetEmpty()
+				);
+		}
+		
+		if (IsValid(Text_SelectedDifficulty))
+		{
+			Text_SelectedDifficulty->SetText(
+				FText::GetEmpty()
+				);
+		}
+		
 		return;
 	}
 	
-	FString ContractName = NewMapURL;
+	// 수신한 맵 URL과 일치하는 계약 데이터를 찾는다.
+	const FBaruContractDefinition* MatchedDefinition =
+		ContractDefinitions.FindByPredicate(
+			[&NormalizeMapURL, &NormalizedMapURL](
+				const FBaruContractDefinition& Definition)
+			{
+				return NormalizeMapURL(
+					Definition.TargetMapURL
+					).Equals(
+						NormalizedMapURL,
+						ESearchCase::IgnoreCase
+						);
+			});
 	
-	/**
-	 * "/Game/BaruGame/Maps.Targym"에서
-	 * 마지막 부분인 "TextGym"만 꺼낸다
-	 */
+	if (MatchedDefinition != nullptr)
+	{
+		if (IsValid(Text_SelectedContractName))
+		{
+			Text_SelectedContractName->SetText(
+				MatchedDefinition->ContractName
+				);
+		}
+		
+		if (IsValid(Text_SelectedMapName))
+		{
+			Text_SelectedMapName->SetText(
+				MatchedDefinition->MapName
+				);
+		}
+		
+		if (IsValid(Text_SelectedDifficulty))
+		{
+			Text_SelectedDifficulty->SetText(
+				MatchedDefinition->Difficulty
+				);
+		}
+		
+		BARU_LOG(
+			LogBaruUI,
+			Log,
+			TEXT("서버의 맵 선택을 계약 UI에 반영했습니다. Contract=%s, Map=%s"),
+			*MatchedDefinition->ContractName.ToString(),
+			*NormalizedMapURL
+			);
+		
+		return;
+	}
+	
+	// 계약 목록에 없는 맵이 전달된 경우 URL 마지막 이름을 임시 표시한다.
+	FString FallbackName = NormalizedMapURL;
 	int32 LastSlashIndex = INDEX_NONE;
 	
-	if (ContractName.FindLastChar(
+	if (FallbackName.FindLastChar(
 		TEXT('/'),
 		LastSlashIndex))
 	{
-		ContractName.RightChopInline(
-			LastSlashIndex + 1);
+		FallbackName.RightChopInline(
+			LastSlashIndex + 1
+			);
 	}
 	
-	// 오브젝트 경로에 ".TestGym" 같은 부분이 붙어 있다면 제거한다.
-	int32 DotIndex = INDEX_NONE;
-	
-	if (ContractName.FindChar(
-		TEXT('.'),
-		DotIndex))
+	if (IsValid(Text_SelectedContractName))
 	{
-		ContractName.LeftInline(DotIndex);
+		Text_SelectedContractName->SetText(
+			FText::FromString(FallbackName)
+			);
 	}
 	
-	if (ContractName.IsEmpty())
+	if (IsValid(Text_SelectedMapName))
 	{
-		ContractName = TEXT("선택된 계약 없음");
+		Text_SelectedMapName->SetText(
+			FText::GetEmpty()
+			);
 	}
 	
-	Text_SelectedContractName->SetText(
-		FText::FromString(ContractName));
+	if (IsValid(Text_SelectedDifficulty))
+	{
+		Text_SelectedDifficulty->SetText(
+			FText::GetEmpty()
+			);
+	}
 	
 	BARU_LOG(
 		LogBaruUI,
-		Log,
-		TEXT("선택된 계약 UI를 갱신했습니다. Map=%s"),
-		*NewMapURL);
+		Warning,
+		TEXT("맵 URL과 일치하는 계약 데이터를 찾지 못했습니다. Map=%s"),
+		*NormalizedMapURL
+		);
 }
 
 void UBaruLobbyWidget::HandleAllPlayersReadyChanged(

@@ -10,6 +10,33 @@
 class UTexture2D;
 class UBaruContractListItemData;
 
+/**
+ * 블루프린트에서 설정할 수 있는 계약 원본 데이터
+ */
+USTRUCT(BlueprintType)
+struct BARUGAME_API FBaruContractDefinition
+{
+	GENERATED_BODY()
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|UI|Lobby|Contract")
+	FText ContractName;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|UI|Lobby|Contract")
+	FText MapName;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|UI|Lobby|Contract")
+	FText Difficulty;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|UI|Lobby|Contract")
+	FText RewardText;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|UI|Lobby|Contract")
+	FString TargetMapURL;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|UI|Lobby|Contract")
+	TObjectPtr<UTexture2D> Thumbnail = nullptr;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnBaruContractSelected,
 	UBaruContractListItemData*,
