@@ -12,6 +12,11 @@ class ABaruWeaponBase;
 class UBaruWeaponDataAsset;
 class UGameplayAbility;
 class UBaruAbilitySystemComponent;
+class UBaruItemInstance;
+class UBaruInventoryComponent;
+
+
+DECLARE_MULTICAST_DELEGATE(FOnBaruEquipmentUpdated);
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class BARUGAME_API UBaruEquipmentComponent : public UActorComponent
@@ -27,8 +32,10 @@ public:
 	
 		// 서버에서 Weapon DataAsset을 받아 실제 Weapon Actor를 생성·장착.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
-	bool EquipWeapon(UBaruWeaponDataAsset* WeaponData);
-
+	bool EquipWeapon(
+		UBaruWeaponDataAsset* WeaponData,
+		UBaruItemInstance* SourceItem);
+	
 		// 지정한 무기 슬롯의 Weapon Actor를 제거.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
 	void UnequipWeapon(EBaruEquipmentSlot WeaponSlot);
@@ -58,8 +65,20 @@ public:
 
 		// 서버가 현재 장착 무기를 검증하고 실제 Fire()를 호출.
 	void FireActiveWeaponOnServer();
+	
+		// 지정한 무기 슬롯에 장착된 인벤토리 아이템을 반환.
+		// UI 아이콘과 이름 조회에 사용.
+	UFUNCTION(BlueprintPure, Category = "BARU|Equipment|Weapon")
+	UBaruItemInstance* GetEquippedWeaponItem(
+		EBaruEquipmentSlot WeaponSlot) const;
+
+		// 장착·해제·활성 무기 전환 시 UI에 변경을 알ㄹla.
+	FOnBaruEquipmentUpdated OnEquipmentUpdated;
 
 protected:
+	UBaruInventoryComponent*
+	GetOwnerInventoryComponent() const;
+	
 	// 서버가 현재 부여한 무기 발사 GA를 추적합니다.
 	// 무기 전환 시 기존 GA를 제거하기 위해 필요합니다.
 	// 이 장비 컴포넌트가 부여한 발사 GA만 제거합니다.
@@ -83,6 +102,13 @@ protected:
 		Category = "BARU|Equipment|Weapon")
 	TObjectPtr<ABaruWeaponBase> PrimaryWeapon;
 	
+	// 주무기 Actor를 생성할 때 사용한 인벤토리 아이템입니다.
+	UPROPERTY(
+		Transient,
+		ReplicatedUsing = OnRep_EquipmentState)
+	TObjectPtr<UBaruItemInstance> PrimaryWeaponItem;
+	
+	
 		// 각 무기가 사용할 Fire GA. 서버에서 장착 시 DA로부터 기록.
 	UPROPERTY(Transient)
 	TSubclassOf<UGameplayAbility> PrimaryFireAbilityClass;
@@ -95,6 +121,12 @@ protected:
 		Category = "BARU|Equipment|Weapon")
 	TObjectPtr<ABaruWeaponBase> SecondaryWeapon;
 	
+	// 보조무기 Actor를 생성할 때 사용한 인벤토리 아이템입니다.
+	UPROPERTY(
+		Transient,
+		ReplicatedUsing = OnRep_EquipmentState)
+	TObjectPtr<UBaruItemInstance> SecondaryWeaponItem;
+	
 		// 각 무기가 사용할 Fire GA. 서버에서 장착 시 DA로부터 기록 - 2.
 	UPROPERTY(Transient)
 	TSubclassOf<UGameplayAbility> SecondaryFireAbilityClass;
@@ -102,7 +134,7 @@ protected:
 		// 현재 손에 들고 사용 중인 무기 슬롯
 		// 지금은 None이며, 다음 단계에서 PrimaryWeapon 또는 SecondaryWeapon으로 변경.
 	UPROPERTY(
-		Replicated,
+		ReplicatedUsing = OnRep_EquipmentState,
 		BlueprintReadOnly,
 		Category = "BARU|Equipment|Weapon")
 	EBaruEquipmentSlot ActiveWeaponSlot = EBaruEquipmentSlot::None;
@@ -145,5 +177,6 @@ protected:
 
 	TSubclassOf<UGameplayAbility> GetActiveWeaponFireAbilityClass() const;
 	
-	
+	UFUNCTION()
+	void OnRep_EquipmentState();
 };

@@ -129,6 +129,11 @@ struct FInventorySlot : public FFastArraySerializerItem
 	// 아이템이 점유한 좌상단 격자의 좌표(시작점 좌표)
 	UPROPERTY()
 	FIntPoint TopLeft = FIntPoint::ZeroValue;		
+	
+	// true면 아이템은 보유 중이지만 인벤토리 격자는 점유하지 않음.
+	// 장비 UI에서 표시하고 인벤토리 그리드에서는 제외.
+	UPROPERTY()
+	bool bEquipped = false;
 };
 
 	// 인벤 컴포넌트의 4. [복제]에 해당하는 부분.
