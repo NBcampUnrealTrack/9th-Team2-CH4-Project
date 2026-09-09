@@ -31,10 +31,10 @@ public:
 	
 	//2. 인벤토리 설정. 5x5였나.
 	UPROPERTY(EditAnywhere, Category = "Grid", meta = (ClampMin = "1"))
-	int32 GridWidth = 5;
+	int32 GridWidth = 7;
 
 	UPROPERTY(EditAnywhere, Category = "Grid", meta = (ClampMin = "1"))
-	int32 GridHeight = 5;
+	int32 GridHeight = 10;
 	
 		// DT_Items 할당
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Inventory")
@@ -65,13 +65,30 @@ public:
 	bool MoveItem(UBaruItemInstance* Item, FIntPoint NewTopLeft, bool bNewRotated);
 	bool RemoveItem(UBaruItemInstance* Item, int32 Count);
 	void UseItem(UBaruItemInstance* Item);
+	
+	// 장착 시 격자 점유를 해제하고,
+	// 해제 시 첫 빈 위치에 다시 배치.
+	// ItemInstance와 복제 등록은 유지.
+	bool SetItemEquipped(
+		UBaruItemInstance* Item,
+		bool bNewEquipped);
+
+	bool IsItemEquipped(
+		const UBaruItemInstance* Item) const;
+	
+		// 로컬 플레이어의 아이템 사용 요청을
+		// 서버 권한 UseItem으로 전달합니다.
+	UFUNCTION(BlueprintCallable, Category = "BARU|Inventory")
+	void RequestUseItem(UBaruItemInstance* Item);
 
 		// (4) 클라 호출(서버로 요청) -> 서버에서 실행되는 RPC 함수.
 	UFUNCTION(Server, Reliable, WithValidation)
 	void Server_MoveItem(UBaruItemInstance* Item, FIntPoint NewTopLeft); //아이템 방향 전환이 된다면 여기에 bool bNewRotated 넣을것.
 
 	UFUNCTION(Server, Reliable, WithValidation)
-	void Server_UseItem(UBaruItemInstance* Item);
+	void Server_UseItemAtCell(
+		FIntPoint ItemCell,
+		FName ExpectedItemID);
 
 	UFUNCTION(Server, Reliable, WithValidation)
 	void Server_DropItem(UBaruItemInstance* Item, int32 Count);

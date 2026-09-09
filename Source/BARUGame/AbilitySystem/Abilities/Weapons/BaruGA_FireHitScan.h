@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AbilitySystem/Abilities/BaruGameplayAbility.h"
+#include "Character/BaruCharacter.h"
 #include "BaruGA_FireHitscan.generated.h"
 
 class UGameplayEffect;
@@ -50,6 +51,16 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Cosmetics")
 	FGameplayTag FireCueTag;
+	
+	UPROPERTY(EditDefaultsOnly, Category = "BARU|Cosmetics")
+	FGameplayTag ImpactCueTag;
+	
+	// 총기 탄 퍼짐 및 반동 (FBaruRecoilData가 BaruCharacter에 추가되면 주석 해제)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat|Recoil", meta = (ClampMin = "0.0"))
+	float SpreadAngle = 1.0f;
+	
+	// UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat|Recoil")
+	// FBaruRecoilData RecoilData; 
 
 private:
 	FTimerHandle FireTimerHandle;

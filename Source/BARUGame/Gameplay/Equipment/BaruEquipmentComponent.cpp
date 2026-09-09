@@ -19,7 +19,9 @@
 #include "GameplayTags/BaruGameplayTags.h"
 #include "Abilities/GameplayAbility.h"
 #include "GameplayAbilitySpec.h"
+#include "Gameplay/Items/BaruItemInstance.h"
 
+#include "Gameplay/Inventory/BaruInventoryComponent.h"
 
 #include "BaruLog.h"
 
@@ -30,6 +32,21 @@ UBaruEquipmentComponent::UBaruEquipmentComponent()
 
 		// 이 컴포넌트의 장착 상태를 네트워크 복제 대상으로 설정
 	SetIsReplicatedByDefault(true);
+}
+
+UBaruInventoryComponent*
+UBaruEquipmentComponent::GetOwnerInventoryComponent() const
+{
+    const ACharacter* OwnerCharacter =
+        Cast<ACharacter>(GetOwner());
+
+    ABaruPlayerState* BaruPS = OwnerCharacter
+        ? OwnerCharacter->GetPlayerState<ABaruPlayerState>()
+        : nullptr;
+
+    return IsValid(BaruPS)
+        ? BaruPS->GetInventoryComponent()
+        : nullptr;
 }
 
 // 플레이어 캐릭터 사망 시 액터도 사라지게 하는 내용.
@@ -56,22 +73,35 @@ void UBaruEquipmentComponent::EndPlay(
 
 	// 위에서 Replicated로 선언한 변수들을 실제 복제 목록에 등록.
 void UBaruEquipmentComponent::GetLifetimeReplicatedProps(
-	TArray<FLifetimeProperty>& OutLifetimeProps) const
+    TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(UBaruEquipmentComponent, PrimaryWeapon);
-	DOREPLIFETIME(UBaruEquipmentComponent, SecondaryWeapon);
-	DOREPLIFETIME(UBaruEquipmentComponent, ActiveWeaponSlot);
+    DOREPLIFETIME(UBaruEquipmentComponent, PrimaryWeapon);
+    DOREPLIFETIME(UBaruEquipmentComponent, SecondaryWeapon);
+
+    DOREPLIFETIME(
+        UBaruEquipmentComponent,
+        PrimaryWeaponItem);
+
+    DOREPLIFETIME(
+        UBaruEquipmentComponent,
+        SecondaryWeaponItem);
+
+    DOREPLIFETIME(
+        UBaruEquipmentComponent,
+        ActiveWeaponSlot);
 }
 
     // 서버가 무기 DataAsset을 기준으로 Weapon Actor를 생성.
     // Character의 3인칭 Mesh에 부착.
 bool UBaruEquipmentComponent::EquipWeapon(
-    UBaruWeaponDataAsset* WeaponData)
+    UBaruWeaponDataAsset* WeaponData,
+    UBaruItemInstance* SourceItem)
 {
        // 장착 판정은 서버.
-    if (!GetOwner() || !GetOwner()->HasAuthority() || !WeaponData)
+        // 인벤토리 ItemInstance가 없는 장착 요청은 받지 않음.
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !WeaponData || !IsValid(SourceItem))
     {
         return false;
     }
@@ -92,6 +122,31 @@ bool UBaruEquipmentComponent::EquipWeapon(
         return false;
     }
 
+    UBaruItemInstance* EquippedItem =
+    TargetSlot == EBaruEquipmentSlot::PrimaryWeapon
+    ? PrimaryWeaponItem.Get()
+    : SecondaryWeaponItem.Get();
+
+    if (IsValid(SourceItem) && EquippedItem == SourceItem)
+    {
+        if (ActiveWeaponSlot != TargetSlot)
+        {
+            SetActiveWeaponSlotOnServer(TargetSlot);
+        }
+
+        return true;
+    }
+    
+    UBaruInventoryComponent* InventoryComponent =
+    GetOwnerInventoryComponent();
+
+    if (!IsValid(InventoryComponent)
+        || InventoryComponent->IsItemEquipped(SourceItem))
+    {
+        return false;
+    }
+    
+    
         // DataAsset에 지정된 BP_Weapon_Revolver / BP_Weapon_Rifle 클래스를 부름.
     TSubclassOf<ABaruWeaponBase> WeaponClass =
         WeaponData->WeaponActorClass.LoadSynchronous();
@@ -164,6 +219,30 @@ bool UBaruEquipmentComponent::EquipWeapon(
         // WeaponBase의 런타임 값에 DataAsset의 피해량·사거리·탄창 수 등 정적 설정을 새 Actor에 복사.
         // 무기별 수치의 기준을 DataAsset 한 곳으로 유지하기 위함.
     NewWeapon->InitializeFromData(WeaponData);
+    
+    // 새 무기 액터 생성까지 성공한 뒤 격자를 비움.
+    if (!InventoryComponent->SetItemEquipped(
+            SourceItem,
+            true))
+    {
+        NewWeapon->Destroy();
+        return false;
+    }
+
+    // 같은 슬롯에 기존 무기가 있다면 인벤토리로 반환.
+    if (IsValid(EquippedItem)
+        && !InventoryComponent->SetItemEquipped(
+            EquippedItem,
+            false))
+    {
+        // 기존 무기를 반환할 공간이 없으면 새 장착 취소.
+        InventoryComponent->SetItemEquipped(
+            SourceItem,
+            false);
+
+        NewWeapon->Destroy();
+        return false;
+    }
 
     /* 비활성 무기를 캐릭터 메시에 붙이기로 한 다음 주석처리한 부분.
      * 만약 비활성 무기를 안 할 거라면 다시 복구할 것.
@@ -206,11 +285,13 @@ bool UBaruEquipmentComponent::EquipWeapon(
     if (TargetSlot == EBaruEquipmentSlot::PrimaryWeapon)
     {
         PrimaryWeapon = NewWeapon;
+        PrimaryWeaponItem = SourceItem;
         PrimaryFireAbilityClass = WeaponData->FireAbilityClass;
     }
     else
     {
         SecondaryWeapon = NewWeapon;
+        SecondaryWeaponItem = SourceItem;
         SecondaryFireAbilityClass = WeaponData->FireAbilityClass;
     }
     
@@ -237,6 +318,10 @@ bool UBaruEquipmentComponent::EquipWeapon(
     }
 
     GetOwner()->ForceNetUpdate();
+    
+        // Listen Server의 로컬 UI는 서버에서 직접 갱신합니다.
+        // 일반 클라이언트는 OnRep_EquipmentState에서 갱신됩니다.
+    OnEquipmentUpdated.Broadcast();
     //-------여기까지 비활성 무기 장착 부분.
 
     BARU_NET_LOG(
@@ -258,6 +343,32 @@ void UBaruEquipmentComponent::UnequipWeapon(
     {
         return;
     }
+    
+    UBaruItemInstance* EquippedItem =
+    GetEquippedWeaponItem(WeaponSlot);
+
+    if (IsValid(EquippedItem))
+    {
+        UBaruInventoryComponent* InventoryComponent =
+            GetOwnerInventoryComponent();
+
+        if (!IsValid(InventoryComponent)
+            || !InventoryComponent->SetItemEquipped(
+                EquippedItem,
+                false))
+        {
+            BARU_NET_LOG(
+                GetOwner(),
+                LogBaruItem,
+                Warning,
+                TEXT(
+                    "무기 장착 해제 실패: "
+                    "인벤토리에 반환할 공간이 없습니다. Slot=%d"),
+                static_cast<int32>(WeaponSlot));
+
+            return;
+        }
+    }
 
     if (WeaponSlot == EBaruEquipmentSlot::PrimaryWeapon)
     {
@@ -267,6 +378,7 @@ void UBaruEquipmentComponent::UnequipWeapon(
         }
 
         PrimaryWeapon = nullptr;
+        PrimaryWeaponItem = nullptr;
         PrimaryFireAbilityClass = nullptr;
     }
     else if (WeaponSlot == EBaruEquipmentSlot::SecondaryWeapon)
@@ -277,6 +389,7 @@ void UBaruEquipmentComponent::UnequipWeapon(
         }
 
         SecondaryWeapon = nullptr;
+        SecondaryWeaponItem = nullptr;
         SecondaryFireAbilityClass = nullptr;
     }
     else
@@ -293,6 +406,7 @@ void UBaruEquipmentComponent::UnequipWeapon(
     }
 
     GetOwner()->ForceNetUpdate();
+    OnEquipmentUpdated.Broadcast();
 }
 
     //GAS
@@ -311,6 +425,29 @@ ABaruWeaponBase* UBaruEquipmentComponent::GetActiveWeapon() const
     }
 }
     //GAS
+
+UBaruItemInstance*
+UBaruEquipmentComponent::GetEquippedWeaponItem(
+    EBaruEquipmentSlot WeaponSlot) const
+{
+    switch (WeaponSlot)
+    {
+    case EBaruEquipmentSlot::PrimaryWeapon:
+        return PrimaryWeaponItem;
+
+    case EBaruEquipmentSlot::SecondaryWeapon:
+        return SecondaryWeaponItem;
+
+    default:
+        return nullptr;
+    }
+}
+
+void UBaruEquipmentComponent::OnRep_EquipmentState()
+{
+    OnEquipmentUpdated.Broadcast();
+}
+
 
 /*GA 연결로 인하여 해당 부분 수정.
     //Character가 발사 입력을 받았을 때 호출. 진입점.
@@ -504,6 +641,7 @@ void UBaruEquipmentComponent::SetActiveWeaponSlotOnServer(
     SyncActiveWeaponFireAbilityOnServer();
 
     GetOwner()->ForceNetUpdate();
+    OnEquipmentUpdated.Broadcast();
 }
 
     //무기를 손에 붙이기.
@@ -528,16 +666,29 @@ void UBaruEquipmentComponent::AttachWeaponToHand(
 
     if (!bHasAttachPoint)
     {
+        BARU_NET_LOG(
+            GetOwner(), LogBaruItem, Warning,
+            TEXT("손 부착 실패: 전신 메시에서 '%s'를 찾지 못했습니다."),
+            *ThirdPersonWeaponAttachPoint.ToString());
         return;
     }
 
-    Weapon->AttachToComponent(
+    const bool bAttached = Weapon->AttachToComponent(
         CharacterMesh,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale,
         ThirdPersonWeaponAttachPoint);
 
+    if (!bAttached)
+    {
+        return;
+    }
+
     Weapon->SetActorRelativeTransform(
         Weapon->GetHandRelativeTransform());
+
+    // 같은 무기의 본인용 외형도 팔에 표시.
+    Weapon->SetFirstPersonWeaponActive(true);
+    Weapon->ForceNetUpdate();
 }
 
     // 홀스터에 무기 붙이기.
@@ -550,6 +701,10 @@ void UBaruEquipmentComponent::AttachWeaponToHolster(
         return;
     }
 
+    
+        // 비활성 무기의 본인용 외형은 숨김.
+    Weapon->SetFirstPersonWeaponActive(false);  // 기존 무기의 본인용 외형은 숨겨지고, 새 무기의 본인용 외형만 나타남.
+    
     const FName HolsterSocketName = Weapon->GetHolsterSocketName();    
     if (HolsterSocketName.IsNone())
     {

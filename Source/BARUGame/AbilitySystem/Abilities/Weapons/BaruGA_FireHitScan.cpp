@@ -1,5 +1,6 @@
 #include "AbilitySystem/Abilities/Weapons/BaruGA_FireHitscan.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
+#include "Character/BaruCharacter.h"
 #include "Interfaces/CombatInterface.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -78,8 +79,21 @@ void UBaruGA_FireHitscan::PerformFire()
     FRotator ViewRot;
     Controller->GetPlayerViewPoint(ViewLoc, ViewRot);
 
-    const FVector TraceEnd = ViewLoc + (ViewRot.Vector() * MaxRange);
+    // 탄 퍼짐 연산
+    const float SpreadHalfAngleRad = FMath::DegreesToRadians(SpreadAngle * 0.5f);
+    const FVector FireDir = FMath::VRandCone(ViewRot.Vector(), SpreadHalfAngleRad);
+    const FVector TraceEnd = ViewLoc + (FireDir * MaxRange);
 
+    // 로컬 화면 반동(FBaruRecoilData 만들어지면 주석 해제)
+    // if (ABaruCharacter* BaruChar = GetBaruCharacterFromActorInfo())
+    // {
+    //     if (BaruChar->IsLocallyControlled())
+    //     {
+    //         BaruChar->ApplyRecoil(RecoilData);
+    //     }
+    // }
+    
+    // 라인트레이스 및 충돌 연산
     FCollisionQueryParams Params(TEXT("FireHitscanTrace"), true, AvatarPawn);
     Params.bReturnPhysicalMaterial = true;
 
@@ -91,10 +105,21 @@ void UBaruGA_FireHitscan::PerformFire()
     // GameplayCue : Fire 연출
     if (SourceASC && FireCueTag.IsValid())
     {
-        FGameplayCueParameters CueParams;
-        CueParams.Location = HitResult.bBlockingHit ? HitResult.ImpactPoint : TraceEnd;
-        CueParams.Normal = HitResult.ImpactNormal;
-        SourceASC->ExecuteGameplayCue(FireCueTag, CueParams);
+        FGameplayCueParameters FireParams;
+        FireParams.Location = ViewLoc;
+        FireParams.Normal = ViewRot.Vector();
+        FireParams.EffectCauser = GetAvatarActorFromActorInfo();
+        SourceASC->ExecuteGameplayCue(FireCueTag, FireParams);
+    }
+    
+    // GameplayCue : Hit 연출
+    if (SourceASC && ImpactCueTag.IsValid() && bHit)
+    {
+        FGameplayCueParameters ImpactParams;
+        ImpactParams.Location = HitResult.ImpactPoint;
+        ImpactParams.Normal = HitResult.ImpactNormal;
+        ImpactParams.PhysicalMaterial = HitResult.PhysMaterial;
+        SourceASC->ExecuteGameplayCue(ImpactCueTag, ImpactParams);
     }
 
     // 피격 판정 및 데미지 (Server)
