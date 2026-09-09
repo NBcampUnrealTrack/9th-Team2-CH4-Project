@@ -33,6 +33,10 @@ protected:
 	
 	virtual void BeginPlay() override;
 	
+	// 사망 이외의 이유로 몬스터가 제거되면
+	// GameMode의 몬스터 목록에서도 제거
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	
 	//몬스터 블루프린트에서 DataAsset을 선택
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Monster|Data")
 	TObjectPtr<UBaruMonsterDataAsset> MonsterDataAsset;

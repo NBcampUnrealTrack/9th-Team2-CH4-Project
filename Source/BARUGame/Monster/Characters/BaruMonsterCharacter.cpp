@@ -11,9 +11,11 @@
 
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayTags/BaruGameplayTags.h"
+#include "Core/BaruGameMode.h"
 #include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "BrainComponent.h"
+#include "Engine/World.h"
 #include "BaruLog.h"
 
 
@@ -66,6 +68,17 @@ void ABaruMonsterCharacter::GetLifetimeReplicatedProps(
 void ABaruMonsterCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	
+	// 서버에서 생성되거나 맵에 배치된 몬스터를
+	// GameMode의 생존 몬스터 목록에 등록
+	if (HasAuthority())
+	{
+		if (ABaruGameMode* BaruGameMode =
+			GetWorld()->GetAuthGameMode<ABaruGameMode>())
+		{
+			BaruGameMode->RegisterMonster(this);
+		}
+	}
 	
 	// 몬스터가 실제 게임 월드에 들어왔는지 확인하기 위한 로그
 	BARU_NET_LOG(
@@ -181,6 +194,24 @@ void ABaruMonsterCharacter::BeginPlay()
 		RegisteredMonsterAttributeSet->GetSuppression()
 	);
 	
+}
+
+void ABaruMonsterCharacter::EndPlay(
+	const EEndPlayReason::Type EndPlayReason
+)
+{
+	// 정상적인 사망이 아닌 맵 이탈, 강제 삭제 등의 이유로
+	// 몬스터가 사라진 경우 GameMode 목록에서도 제거
+	if (HasAuthority() && !bIsDead)
+	{
+		if (ABaruGameMode* BaruGameMode =
+			GetWorld()->GetAuthGameMode<ABaruGameMode>())
+		{
+			BaruGameMode->UnregisterMonster(this);
+		}
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 //몬스터 블루프린트에서 지정한 DataAsset을 읽을 때 사용
@@ -353,6 +384,14 @@ void ABaruMonsterCharacter::Die_Implementation(AActor* Killer)
 	// 서버 화면에도 즉시 사망 상태를 적용
 	// 클라이언트에서는 bIsDead가 복제될 때 자동 호출됨
 	OnRep_IsDead();
+	
+	// GameMode에 죽은 몬스터와 Killer를 전달
+	// GameMode는 몬스터 수와 플레이어의 킬 정보를 갱신
+	if (ABaruGameMode* BaruGameMode =
+		GetWorld()->GetAuthGameMode<ABaruGameMode>())
+	{
+		BaruGameMode->OnMonsterDied(this, Killer);
+	}
 
 	BARU_NET_LOG(
 		this,
