@@ -9,11 +9,14 @@
 
 #include "BaruMainHUDWidget.generated.h"
 
+class ABaruGameState;
 class ABaruPlayerState;
+
 class UBaruHealthComponent;
+class UBorder;
+class UListView;
 class UProgressBar;
 class UTextBlock;
-class UBorder;
 
 /**
  * 플레이 중 항상 표시되는 Main HUD의 C++ 기반 클래스,
@@ -40,6 +43,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BARU|UI|HUD")
 	void ShowInteractionPrompt(const FText& PromptText);
 	
+	/**
+	 * 현재 표시 중인 상호작용 안내를 숨긴다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "BARU|UI|HUD")
+	void HideInteractionPrompt();
+	
 	// 화면 상단에 안내 메시지를 표시한다.
 	UFUNCTION(BlueprintCallable, Category = "BARU|UI|HUD")
 	void ShowGuideMessage(
@@ -64,12 +73,6 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "BARU|UI|HUD")
 	void HideWeaponDisplay();
-	
-	/**
-	 * 현재 표시 중인 상호작용 안내를 숨긴다.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "BARU|UI|HUD")
-	void HideInteractionPrompt();
 	
 	// [08.30] CommonUI가 포커스를 요구하지 않도록 비활성화, 무조건 1인칭 Game 전용 모드 반환
 	virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override
@@ -116,6 +119,15 @@ protected:
 	// 정신력 ProgressBar와 수치 Text를 갱신한다.
 	void UpdateSanityDisplay();
 	
+	// GameState의 참가자 정보와 HUD를 연결한다.
+	void BindToGameState();
+	
+	// GameState 델리게이트 연결을 해제한다.
+	void UnbindFromGameState();
+	
+	// PlayerArray를 읽어 아군 목록을 다시 만든다.
+	void RebuildAllyStatusList();
+	
 	// 현재 체력이 변경됐을 때 호출된다.
 	UFUNCTION()
 	void HandleHealthChanged(
@@ -133,6 +145,10 @@ protected:
 	// 정신력이 변경됐을 때 호출된다.
 	UFUNCTION()
 	void HandleSanityChanged(float NewSanity);
+	
+	// 참가,퇴장,사망 등 생존 인원 변화가 발생했을 때 호출된다.
+	UFUNCTION()
+	void HandleAlivePlayerCountChanged(int32 NewAliveCount);
 	
 protected:
 	// 체력 게이지
@@ -159,9 +175,11 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> Text_InteractionPrompt;
 	
+	// 게임 진행 안내 메시지 영역
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UBorder> Border_GuideMessage;
 	
+	// 게임 진행 안내 문구
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> Text_GuideMessage;
 	
@@ -181,6 +199,10 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> Text_ReserveAmmo;
 	
+	// 본인을 제외한 아군 상태 목록
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UListView> ListView_AllyStatus;
+	
 private:
 	// 현재 HUD가 관찰하고있는 로컬 PlayerState
 	UPROPERTY(Transient)
@@ -190,5 +212,15 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UBaruHealthComponent> BoundHealthComponent;
 	
+	// 현재 HUD가 관찰하고 있는 GameState
+	UPROPERTY(Transient)
+	TObjectPtr<ABaruGameState> BoundGameState;
+	
 	FTimerHandle GuideMessageTimerHandle;
+	
+	// 클라이언트 PlayerState 연결 재시도용 타이머
+	FTimerHandle PlayerStateBindRetryTimerHandle;
+	
+	// 현재까지 시도한 횟수
+	int32 PlayerStateBindRetryCount = 0;
 };

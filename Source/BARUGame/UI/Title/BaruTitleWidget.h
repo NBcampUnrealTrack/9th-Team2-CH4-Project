@@ -36,6 +36,12 @@ protected:
 	 */
 	UFUNCTION()
 	void HandleStartGameClicked();
+	
+	/**
+	 *	게임 종료 버튼이 클릭되었을 때 호출된다.
+	 */
+	UFUNCTION()
+	void HandleQuitGameClicked();
 
 	/**
 	 * 타이틀에서 로비로 이동해 달라고 요청한다.
@@ -47,4 +53,8 @@ protected:
 	
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Button_StartGame;
+	
+	// 게임 종료 버튼
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Button_QuitGame;
 };
