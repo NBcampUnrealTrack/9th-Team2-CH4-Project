@@ -6,6 +6,7 @@
 #include "InputActionValue.h"
 #include "Engine/EngineTypes.h"     
 #include "Interfaces/CombatInterface.h" 
+#include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "BaruCharacter.generated.h"     
 
 // 전방 선언 
@@ -15,7 +16,8 @@ class UInputAction;
 class USkeletalMeshComponent; 
 class UAbilitySystemComponent;
 class UBaruCharacterAnimSet;           
-class UBaruEquipmentComponent;  //[추가] 무기장착 컴포넌트
+class UBaruEquipmentComponent; 
+class UBaruItemInstance;   
 struct FOnAttributeChangeData;               
 
 UCLASS()
@@ -80,10 +82,23 @@ protected:
     void Input_StopJumping();   
     void Input_Interact();      
     
-    void Input_Fire();              // [추가] 발사
-    void Input_SprintStart();       // [추가] 달리기 시작
-    void Input_SprintStop();        // [추가] 달리기 종료
-    void Input_ToggleCrouch();      // [추가] 앉기 토글
+    void Input_Fire();            
+    void Input_SprintStart();       
+    void Input_SprintStop();       
+    void Input_ToggleCrouch();   
+    void Input_StopFire();              // [추가] 연사 중지
+    void Input_SelectPrimaryWeapon();   // [추가] 주무기 전환
+    void Input_SelectSecondaryWeapon(); // [추가] 보조무기 전환
+    
+    void HandleWeaponSlotInput(EBaruEquipmentSlot DesiredSlot);
+    
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_RequestSelectWeaponSlot(EBaruEquipmentSlot DesiredSlot);
+
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_RequestUnequipWeapon(EBaruEquipmentSlot WeaponSlot);
+    
+    UBaruItemInstance* FindInventoryWeaponForSlot(EBaruEquipmentSlot DesiredSlot) const;
 
     // [추가] 스프린트 상태가 복제되면 각 클라에서 이동 속도를 갱신
     UFUNCTION()
@@ -146,6 +161,13 @@ protected:
     // [추가] 발사 (좌클릭)
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
     TObjectPtr<UInputAction> FireAction;
+    
+    // [추가] 무기 슬롯 전환 (1번 / 2번 키)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+    TObjectPtr<UInputAction> SelectPrimaryWeaponAction;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+    TObjectPtr<UInputAction> SelectSecondaryWeaponAction;
 
     // [추가] 달리기 (Shift, Hold)
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")

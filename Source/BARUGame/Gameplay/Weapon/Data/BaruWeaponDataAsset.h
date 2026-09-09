@@ -69,6 +69,18 @@ public:
 		BlueprintReadOnly,
 		Category = "BARU|Weapon|Attachment")
 	FTransform HandRelativeTransform = FTransform::Identity;
+	
+		//팔ㅇㅔ 무기 부착(09.09.)
+	// 본인용 팔 메시에서 무기를 붙일 본 또는 소켓 이름.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "BARU|Weapon|FirstPerson")
+	FName FirstPersonHandSocketName = TEXT("hand_r");
+
+	// 본인용 팔에 붙은 무기의 위치·회전·크기 보정값.
+	// 기존 HandRelativeTransform은 타인에게 보이는 전신용.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "BARU|Weapon|FirstPerson")
+	FTransform FirstPersonHandRelativeTransform = FTransform::Identity;
 
 
 		// 무기의 기본 피해량
