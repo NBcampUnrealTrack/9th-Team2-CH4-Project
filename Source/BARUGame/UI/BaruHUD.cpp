@@ -8,6 +8,8 @@
 #include "GameFramework/PlayerController.h"
 #include "UI/Foundation/BaruPrimaryGameLayout.h"
 #include "UI/Subsystem/BaruUIManagerSubsystem.h"
+#include "UI/BaruUITags.h"
+#include "UI/Result/BaruSettlementResultWidget.h"
 
 ABaruHUD::ABaruHUD()
 {
@@ -58,6 +60,24 @@ void ABaruHUD::BeginPlay()
 	}
 
 	UIManager->RegisterPrimaryLayout(PrimaryGameLayout);
+	
+	BoundPlayerController =
+		Cast<ABaruPlayerController>(OwningPlayerController);
+	
+	if (IsValid(BoundPlayerController))
+	{
+		BoundPlayerController->OnSettlementReceived.AddUniqueDynamic(
+			this,
+			&ThisClass::HandleSettlementReceived);
+	}
+	else
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruUI,
+			Warning,
+			TEXT("정산 결과를 연결할 BaruPlayerController를 찾지 못했습니다."));
+	}
 
 	if (!InitialWidgetClass)
 	{
@@ -126,6 +146,15 @@ void ABaruHUD::BeginPlay()
 void ABaruHUD::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	if (IsValid(BoundPlayerController))
+	{
+		BoundPlayerController->OnSettlementReceived.RemoveDynamic(
+			this,
+			&ThisClass::HandleSettlementReceived);
+		
+		BoundPlayerController = nullptr;
+	}
+	
 	if (IsValid(PrimaryGameLayout))
 	{
 		ULocalPlayer* LocalPlayer =
@@ -152,4 +181,72 @@ void ABaruHUD::EndPlay(
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void ABaruHUD::HandleSettlementReceived(
+	const FBaruSettlementReport& Report)
+{
+	if (!SettlementResultWidgetClass)
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruUI,
+			Warning,
+			TEXT("SettlementResultWidgetClass가 설정되지 않았습니다."));
+		
+		return;
+	}
+	
+	if (!IsValid(BoundPlayerController))
+	{
+		return;
+	}
+	
+	ULocalPlayer* LocalPlayer =
+		BoundPlayerController->GetLocalPlayer();
+	
+	if (!IsValid(LocalPlayer))
+	{
+		return;
+	}
+	
+	UBaruUIManagerSubsystem* UIManager =
+		LocalPlayer->GetSubsystem<UBaruUIManagerSubsystem>();
+	
+	if (!IsValid(UIManager))
+	{
+		return;
+	}
+	
+	UCommonActivatableWidget* AddedWidget =
+		UIManager->PushWidgetToLayer(
+			BaruUITags::UI_Layer_Modal.GetTag(),
+			SettlementResultWidgetClass);
+	
+	UBaruSettlementResultWidget* ResultWidget =
+		Cast<UBaruSettlementResultWidget>(AddedWidget);
+	
+	if (!IsValid(ResultWidget))
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruUI,
+			Error,
+			TEXT("정산 결과가 Widget 생성에 실패했습니다."));
+		
+		return;
+	}
+	
+	// MonsterKillCount는 아직 결과 구조체에 없으므로 임시로 0을 전달한다.
+	ResultWidget->SetResultData(
+		Report.bSurvived,
+		0,
+		Report.ExtractedItemCount,
+		Report.AcquiredCurrency);
+	
+	BARU_NET_LOG(
+		this,
+		LogBaruUI,
+		Log,
+		TEXT("정산 결과 Widget을 Modal Layer에 표시했습니다."));
 }

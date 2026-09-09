@@ -5,13 +5,16 @@
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "Components/BaruHealthComponent.h"
 #include "Player/BaruPlayerState.h"
+#include "Core/BaruGameState.h"
 
 #include "Components/Border.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+#include "Components/ListView.h"
 
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "GameFramework/PlayerState.h"
 
 #include "BaruLog.h"
 
@@ -168,7 +171,11 @@ void UBaruMainHUDWidget::NativeOnActivated()
 	HideInteractionPrompt();
 	HideGuideMessage();
 	HideWeaponDisplay();
+	
+	PlayerStateBindRetryCount = 0;
+	
 	BindToPlayerState();
+	BindToGameState();
 
 	BARU_LOG(
 		LogBaruUI,
@@ -182,6 +189,8 @@ void UBaruMainHUDWidget::NativeOnDeactivated()
 	HideInteractionPrompt();
 	HideGuideMessage();
 	HideWeaponDisplay();
+	
+	UnbindFromGameState();
 	UnbindFromPlayerState();
 	
 	BARU_LOG(
@@ -202,12 +211,39 @@ void UBaruMainHUDWidget::BindToPlayerState()
 	
 	if (!IsValid(BoundPlayerState))
 	{
-		BARU_LOG(
-			LogBaruUI,
-			Warning,
-			TEXT("Main HUD에서 BaruPlayerState를 찾지 못했습니다."));
+		// 클라이언트에서는 PlayerState 복제가 HUD 생성보다
+		// 조금 늦을 수 있으므로 최대 20회 재시도한다.
+		if (PlayerStateBindRetryCount < 20)
+		{
+			++PlayerStateBindRetryCount;
+			
+			if (UWorld* World = GetWorld())
+			{
+				World->GetTimerManager().SetTimer(
+					PlayerStateBindRetryTimerHandle,
+					this,
+					&ThisClass::BindToPlayerState,
+					0.1f,
+					false);
+			}
+		}
+		else
+		{
+			BARU_LOG(
+				LogBaruUI,
+				Warning,
+				TEXT("Main HUD에서 BaruPlayerState 연결에 실패했습니다."));
+		}
 		
 		return;
+	}
+	
+	PlayerStateBindRetryCount = 0;
+	
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			PlayerStateBindRetryTimerHandle);
 	}
 	
 	BoundHealthComponent =
@@ -222,6 +258,7 @@ void UBaruMainHUDWidget::BindToPlayerState()
 		BoundHealthComponent->OnMaxHealthChanged.AddUniqueDynamic(
 			this,
 			&ThisClass::HandleMaxHealthChanged);
+		
 	}
 	
 	BoundPlayerState->OnSanityChanged.AddUniqueDynamic(
@@ -229,10 +266,19 @@ void UBaruMainHUDWidget::BindToPlayerState()
 		&ThisClass::HandleSanityChanged);
 	
 	RefreshPlayerStatus();
+	
+	// 클라이언트 PlayerState가 준비된 후 아군 목록도 다시 갱신
+	RebuildAllyStatusList();
 }
 
 void UBaruMainHUDWidget::UnbindFromPlayerState()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			PlayerStateBindRetryTimerHandle);
+	}
+	
 	if (IsValid(BoundHealthComponent))
 	{
 		BoundHealthComponent->OnHealthChanged.RemoveDynamic(
@@ -253,6 +299,100 @@ void UBaruMainHUDWidget::UnbindFromPlayerState()
 	
 	BoundHealthComponent = nullptr;
 	BoundPlayerState = nullptr;
+}
+
+void UBaruMainHUDWidget::BindToGameState()
+{
+	UnbindFromGameState();
+	
+	UWorld* World = GetWorld();
+	if (!IsValid(World))
+	{
+		return;
+	}
+	
+	BoundGameState =
+		World->GetGameState<ABaruGameState>();
+	
+	if (!IsValid(BoundGameState))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("Main HUD에서 BaruGameState를 찾지 못했습니다."));
+		
+		return;
+	}
+	
+	BoundGameState->OnAlivePlayerCountChanged.AddUniqueDynamic(
+		this,
+		&ThisClass::HandleAlivePlayerCountChanged);
+	
+	// 서버에서 전달된 전역 알림을 안내 메시지로 표시한다.
+	BoundGameState->OnGlobalNotificationReceived.AddUniqueDynamic(
+		this,
+		&ThisClass::ShowGuideMessage);
+	
+	RebuildAllyStatusList();
+}
+
+void UBaruMainHUDWidget::UnbindFromGameState()
+{
+	if (IsValid(BoundGameState))
+	{
+		BoundGameState->OnAlivePlayerCountChanged.RemoveDynamic(
+			this,
+			&ThisClass::HandleAlivePlayerCountChanged);
+		
+		BoundGameState->OnGlobalNotificationReceived.RemoveDynamic(
+			this,
+			&ThisClass::ShowGuideMessage);
+	}
+	
+	if (IsValid(ListView_AllyStatus))
+	{
+		ListView_AllyStatus->ClearListItems();
+	}
+	
+	BoundGameState = nullptr;
+}
+
+void UBaruMainHUDWidget::RebuildAllyStatusList()
+{
+	if (!IsValid(ListView_AllyStatus) ||
+		!IsValid(BoundGameState))
+	{
+		return;
+	}
+	
+	ListView_AllyStatus->ClearListItems();
+	
+	for (APlayerState* PlayerState :
+		BoundGameState->PlayerArray)
+	{
+		ABaruPlayerState* AllyPlayerState =
+			Cast<ABaruPlayerState>(PlayerState);
+		
+		if (!IsValid(AllyPlayerState))
+		{
+			continue;
+		}
+		
+		// 자신의 체력, 정신력은 기존 개인 상태 UI에 표시되므로 제외한다.
+		if (AllyPlayerState == BoundPlayerState)
+		{
+			continue;
+		}
+		
+		ListView_AllyStatus->AddItem(
+			AllyPlayerState);
+	}
+}
+
+void UBaruMainHUDWidget::HandleAlivePlayerCountChanged(
+	int32 NewAliveCount)
+{
+	RebuildAllyStatusList();
 }
 
 void UBaruMainHUDWidget::RefreshPlayerStatus()
