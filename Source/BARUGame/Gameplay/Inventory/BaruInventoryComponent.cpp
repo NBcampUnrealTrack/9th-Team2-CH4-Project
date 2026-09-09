@@ -156,13 +156,16 @@ void UBaruInventoryComponent::ClearCells(UBaruItemInstance* Item, FIntPoint TopL
 void UBaruInventoryComponent::RebuildCellCache()
 {
 	Cells.Reset();
-	Cells.SetNum(GridWidth * GridHeight);   // 전부 nullptr로 초기화.
+	Cells.SetNum(GridWidth * GridHeight);
 
-	for (const FInventorySlot& Slot : SlotList.Slots)
+	for (const FInventorySlot& InventorySlot : SlotList.Slots)
 	{
-		if (IsValid(Slot.Item))
+		if (IsValid(InventorySlot.Item)
+			&& !InventorySlot.bEquipped)
 		{
-			OccupyCells(Slot.Item, Slot.TopLeft);
+			OccupyCells(
+				InventorySlot.Item,
+				InventorySlot.TopLeft);
 		}
 	}
 }
@@ -172,6 +175,86 @@ FInventorySlot* UBaruInventoryComponent::FindSlot(const UBaruItemInstance* Item)
 {
 	return SlotList.Slots.FindByPredicate(
 		[Item](const FInventorySlot& S) { return S.Item == Item; });
+}
+
+
+bool UBaruInventoryComponent::IsItemEquipped(
+	const UBaruItemInstance* Item) const
+{
+	if (!IsValid(Item))
+	{
+		return false;
+	}
+
+	const FInventorySlot* InventorySlot =
+		SlotList.Slots.FindByPredicate(
+			[Item](const FInventorySlot& Candidate)
+			{
+				return Candidate.Item == Item;
+			});
+
+	return InventorySlot && InventorySlot->bEquipped;
+}
+
+bool UBaruInventoryComponent::SetItemEquipped(
+	UBaruItemInstance* Item,
+	bool bNewEquipped)
+{
+	if (!GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !IsValid(Item))
+	{
+		return false;
+	}
+
+	FInventorySlot* InventorySlot = FindSlot(Item);
+
+	if (!InventorySlot)
+	{
+		return false;
+	}
+
+	if (InventorySlot->bEquipped == bNewEquipped)
+	{
+		return true;
+	}
+
+	if (bNewEquipped)
+	{
+		// 장착: 사용 중이던 격자를 비움.
+		ClearCells(Item, InventorySlot->TopLeft);
+		InventorySlot->bEquipped = true;
+	}
+	else
+	{
+		// 장착 해제: 현재 인벤토리의 첫 빈 위치를 탐색.
+		const FItemData* ItemData =
+			FindItemData(Item->ItemID);
+
+		if (!ItemData)
+		{
+			return false;
+		}
+
+		FIntPoint NewTopLeft;
+
+		if (!FindFirstFit(
+				ItemData->GridSize,
+				NewTopLeft))
+		{
+			return false;
+		}
+
+		InventorySlot->TopLeft = NewTopLeft;
+		InventorySlot->bEquipped = false;
+
+		OccupyCells(Item, NewTopLeft);
+	}
+
+	SlotList.MarkItemDirty(*InventorySlot);
+	OnInventoryUpdated.Broadcast();
+
+	return true;
 }
 
 // 4. 변경 - 서버 전용 (첫 줄에서 HasAuthority 체크)
@@ -198,8 +281,17 @@ int32 UBaruInventoryComponent::AddItem(FName ItemID, int32 Count)
 	{
 		for (FInventorySlot& Slot : SlotList.Slots)
 		{
-			if (Remaining <= 0) break;
-			if (!IsValid(Slot.Item) || Slot.Item->ItemID != ItemID) continue;
+			if (Remaining <= 0)
+			{
+				break;
+			}
+
+			if (Slot.bEquipped
+				|| !IsValid(Slot.Item)
+				|| Slot.Item->ItemID != ItemID)
+			{
+				continue;
+			}
 
 			const int32 Space = Data->MaxStackSize - Slot.Item->Quantity;
 			if (Space <= 0) continue;   // 이미 꽉 찬 스택.
@@ -253,10 +345,14 @@ bool UBaruInventoryComponent::MoveItem(UBaruItemInstance* Item, FIntPoint NewTop
 {
 	if (!GetOwner()->HasAuthority() || !IsValid(Item)) return false;
 
-	FInventorySlot* Slot = FindSlot(Item);
-	if (!Slot) return false;
+	FInventorySlot* InventorySlot = FindSlot(Item);
 
-	const FIntPoint OldTopLeft = Slot->TopLeft;
+	if (!InventorySlot || InventorySlot->bEquipped)
+	{
+		return false;
+	}
+
+	const FIntPoint OldTopLeft = InventorySlot->TopLeft;
 
 		// 자기 자신을 먼저 비워야 겹침 오판이 없음.
 	ClearCells(Item, OldTopLeft);
@@ -271,9 +367,9 @@ bool UBaruInventoryComponent::MoveItem(UBaruItemInstance* Item, FIntPoint NewTop
 		return false;
 	}
 
-	Slot->TopLeft = NewTopLeft;
+	InventorySlot->TopLeft = NewTopLeft;
 	OccupyCells(Item, NewTopLeft);
-	SlotList.MarkItemDirty(*Slot);
+	SlotList.MarkItemDirty(*InventorySlot);
 
 	OnInventoryUpdated.Broadcast();
 	return true;
@@ -289,6 +385,10 @@ bool UBaruInventoryComponent::RemoveItem(UBaruItemInstance* Item, int32 Count)
 	if (Index == INDEX_NONE) return false;
 
 	FInventorySlot& Slot = SlotList.Slots[Index];
+	if (Slot.bEquipped)
+	{
+		return false;
+	}
 
 		// 부분 차감 - 요청량보다 많이 갖고 있으면 수량만 줄임.
 	if (Item->Quantity > Count)
@@ -392,20 +492,72 @@ bool UBaruInventoryComponent::EquipWeaponItem(
 	}
 
 		// 실제 무기 Actor 생성·부착은 EquipmentComponent가 담당.
-	return EquipmentComponent->EquipWeapon(WeaponData);
+	return EquipmentComponent->EquipWeapon(
+		WeaponData,
+		Item);
 }
 
+	// 서버에 아이템 사용 요청.
+void UBaruInventoryComponent::RequestUseItem(
+	UBaruItemInstance* Item)
+{
+	if (!IsValid(Item) || !IsValid(GetOwner()))
+	{
+		return;
+	}
 
+	FInventorySlot* InventorySlot = FindSlot(Item);
 
+	if (!InventorySlot || InventorySlot->bEquipped)
+	{
+		BARU_NET_LOG(
+			GetOwner(),
+			LogBaruItem,
+			Warning,
+			TEXT("아이템 사용 요청 실패: 인벤토리 슬롯에 없거나 이미 장착된 아이템입니다. Item=%s"),
+			*GetNameSafe(Item));
+
+		return;
+	}
+
+	if (GetOwner()->HasAuthority())
+	{
+		UseItem(Item);
+		return;
+	}
+
+	BARU_NET_LOG(
+		GetOwner(),
+		LogBaruItem,
+		Log,
+		TEXT("[CLIENT TEST] 아이템 사용 요청 전송: ItemID=%s Cell=(%d,%d)"),
+		*Item->ItemID.ToString(),
+		InventorySlot->TopLeft.X,
+		InventorySlot->TopLeft.Y);
+
+	Server_UseItemAtCell(
+		InventorySlot->TopLeft,
+		Item->ItemID);
+}
 
 	// 아이템 사용 요청에 대한 고용ㅇ 처리 함수.
 	// 타입에 따라서 다르게 행동함.
 	// Weapon(장비) : 장착만. 수량은 소모 안 함.
 	// Consumable(소비템) : 타입별로 분기 (회복 등). 사용 후 1개 소모.
 	// 다른 타입이 있다면 여기 추가할 것.
-void UBaruInventoryComponent::UseItem(UBaruItemInstance* Item)
+void UBaruInventoryComponent::UseItem(
+	UBaruItemInstance* Item)
 {
-	if (!GetOwner()->HasAuthority() || !IsValid(Item)) return;
+	if (!GetOwner()->HasAuthority()
+		|| !IsValid(Item))
+	{
+		return;
+	}
+
+	if (IsItemEquipped(Item))
+	{
+		return;
+	}
 
 	const FItemData* Data = FindItemData(Item->ItemID);
 	if (!Data) return;
@@ -458,22 +610,63 @@ bool UBaruInventoryComponent::Server_MoveItem_Validate(UBaruItemInstance* Item, 
 		&& NewTopLeft.X < GridWidth && NewTopLeft.Y < GridHeight;
 }
 
-void UBaruInventoryComponent::Server_UseItem_Implementation(UBaruItemInstance* Item)
+void UBaruInventoryComponent::Server_UseItemAtCell_Implementation(
+	FIntPoint ItemCell,
+	FName ExpectedItemID)
 {
-		// 남의 아이템을 조작하는 요청 차단 - 내 슬롯에 있는 것만 허용.
-	if (!IsValid(Item) || !FindSlot(Item)) return;
-	UseItem(Item);
+	UBaruItemInstance* ServerItem =
+		GetItemAt(ItemCell);
+
+	if (!IsValid(ServerItem)
+		|| ServerItem->ItemID != ExpectedItemID
+		|| !FindSlot(ServerItem)
+		|| IsItemEquipped(ServerItem))
+	{
+		BARU_NET_LOG(
+			GetOwner(),
+			LogBaruItem,
+			Warning,
+			TEXT("클라이언트 아이템 사용 요청 거부: ItemID=%s Cell=(%d,%d)"),
+			*ExpectedItemID.ToString(),
+			ItemCell.X,
+			ItemCell.Y);
+
+		return;
+	}
+
+	BARU_NET_LOG(
+		GetOwner(),
+		LogBaruItem,
+		Log,
+		TEXT("[SERVER TEST] 클라이언트 아이템 사용 요청 수신: ItemID=%s Cell=(%d,%d)"),
+		*ExpectedItemID.ToString(),
+		ItemCell.X,
+		ItemCell.Y);
+
+	UseItem(ServerItem);
 }
 
-bool UBaruInventoryComponent::Server_UseItem_Validate(UBaruItemInstance* Item)
+bool UBaruInventoryComponent::Server_UseItemAtCell_Validate(
+	FIntPoint ItemCell,
+	FName ExpectedItemID)
 {
-	return true;
+	return !ExpectedItemID.IsNone()
+		&& ItemCell.X >= 0
+		&& ItemCell.Y >= 0
+		&& ItemCell.X < GridWidth
+		&& ItemCell.Y < GridHeight;
 }
 
 void UBaruInventoryComponent::Server_DropItem_Implementation(UBaruItemInstance* Item, int32 Count)
 {
-	if (!IsValid(Item) || !FindSlot(Item)) return;
-
+	if (!IsValid(Item)
+		|| !FindSlot(Item)
+		|| IsItemEquipped(Item))
+	{
+		return;
+	}
+	
+	
 	const FItemData* Data = FindItemData(Item->ItemID);
 	if (!Data || !Data->ItemActorClass) return;
 
