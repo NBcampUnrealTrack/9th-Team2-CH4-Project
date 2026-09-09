@@ -58,7 +58,8 @@ public:
 	void Server_RequestDropItem(int32 SlotIndex, int32 Count);
 	
 	
-	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Lobby")
+	// [수정 09.08] BlueprintCallable 추가 — 로비 UI 위젯에서 직접 호출하기 위함
+	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "BARU|Lobby")
 	void Server_RequestStartRaid();
 	
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "BARU|Lobby")
@@ -86,7 +87,6 @@ protected:
 	
 	virtual void SetupInputComponent() override;
 	
-	// [추가] 관전 전환 입력 액션. BP_BaruPlayerController에서 할당하기
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Spectate")
 	TObjectPtr<UInputAction> SpectateNextAction;
 
@@ -99,7 +99,7 @@ protected:
 	UPROPERTY(Transient)
 	TWeakObjectPtr<APawn> CurrentSpectatingPawn;
 
-	// [추가] 살아있는 팀원 폰 목록 수집 
+	
 	void GatherSpectatablePawns(TArray<APawn*>& OutPawns) const;
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Lobby")
@@ -107,8 +107,7 @@ protected:
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Ping")
 	float MaxPingDistance = 10000.0f;
-
-	// ★[추가] 인벤토리 슬롯 상한. 기존 _Validate 의 매직넘버 100 을 대체.
+	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Inventory")
 	int32 MaxInventorySlotIndex = 100;
 };

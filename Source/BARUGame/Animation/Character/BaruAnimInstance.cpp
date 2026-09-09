@@ -12,6 +12,8 @@ void UBaruAnimInstance::NativeInitializeAnimation()
 	if (OwnerCharacter)
 	{
 		OwnerMovement = OwnerCharacter->GetCharacterMovement();
+		
+		bIsFirstPersonMesh = (GetOwningComponent() != OwnerCharacter->GetMesh());
 	}
 }
 
@@ -55,12 +57,17 @@ void UBaruAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	// ★[추가] 앉기 상태. ACharacter 가 관리하는 복제 변수라 클라에서도 정확합니다.
 	bIsCrouching = OwnerCharacter->bIsCrouched;
 	bIsSprinting = OwnerCharacter->IsSprinting();
-
-	// ★[추가] 무기 소지 여부.
-	//   캐릭터가 EquipmentComponent 를 protected 로 들고 있으므로 컴포넌트를 직접 찾습니다.
+	
 	if (const UBaruEquipmentComponent* Equip = OwnerCharacter->FindComponentByClass<UBaruEquipmentComponent>())
 	{
 		bHasWeapon = (Equip->GetActiveWeapon() != nullptr);
+		
+		ActiveWeaponSlot = Equip->GetActiveWeaponSlot();
+	}
+	else
+	{
+		bHasWeapon = false;
+		ActiveWeaponSlot = EBaruEquipmentSlot::None;
 	}
 	
 	AimPitch = FRotator::NormalizeAxis(OwnerCharacter->GetBaseAimRotation().Pitch);
