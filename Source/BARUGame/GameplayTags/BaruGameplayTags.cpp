@@ -118,6 +118,10 @@ void FBaruGameplayTags::InitializeNativeGameplayTags()
     GameplayTags.GameplayCue_Weapon_Revolver_Fire = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Weapon.Revolver.Fire"), TEXT("Revolver Muzzle and Sound"));
     GameplayTags.GameplayCue_Weapon_Grenade_Explode = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Weapon.Grenade.Explode"), TEXT("Grenade Explosion VFX and SFX"));
 	
+	GameplayTags.GameplayCue_Combat_HitImpact = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Combat.HitImpact"), TEXT("Hit Impact VFX & SFX"));
+	GameplayTags.GameplayCue_Character_Moan = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Character.Moan"), TEXT("Player Pain Moan SFX"));
+	GameplayTags.GameplayCue_Monster_Aggro = Manager.AddNativeGameplayTag(TEXT("GameplayCue.Monster.Aggro"), TEXT("Monster Aggro Roar SFX"));
+	
 	
 	bIsInitialized = true;
 	BARU_LOG(LogBaruGAS, Log, TEXT("FBaruGameplayTags initialized with Extended Native Tags."));

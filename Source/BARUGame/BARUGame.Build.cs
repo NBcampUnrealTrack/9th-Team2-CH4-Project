@@ -37,7 +37,8 @@ public class BARUGame : ModuleRules
 			"SQLiteCore",
 			"SQLiteSupport",
 			"AIModule",
-			"Niagara"
+			"Niagara",
+			"AnimGraphRuntime"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
