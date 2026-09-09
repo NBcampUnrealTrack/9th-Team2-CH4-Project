@@ -15,10 +15,15 @@
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"        
 #include "Interfaces/InteractableInterface.h"   
 #include "GameplayTags/BaruGameplayTags.h"    
-#include "Gameplay/Equipment/BaruEquipmentComponent.h"   // ★[추가] 무기 장착
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"   
+#include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   // [추가] EBaruEquipmentSlot
 #include "Core/BaruGameMode.h"                                    
 #include "Core/BaruTestGameMode.h"                                
 #include "Components/BaruHealthComponent.h"
+#include "Gameplay/Inventory/BaruInventoryComponent.h"   // [추가] Server_UseItem 호출용
+#include "Gameplay/Items/BaruItemInstance.h"             // [추가] 슬롯 아이템 유효성 검사
+#include "Gameplay/Items/DataTypes/BaruItemData.h"       // [추가] FInventorySlot
+#include "Gameplay/Weapon/Data/BaruWeaponDataAsset.h" 
 #include "DrawDebugHelpers.h"
 #include "BaruLog.h"
 
@@ -34,26 +39,23 @@ ABaruCharacter::ABaruCharacter()
     FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, CameraEyeHeight)); // [수정] 60.0f 하드코딩제거
     FollowCamera->bUsePawnControlRotation = true; // 마우스 회전에 따라 카메라 회전
 
-    //  생성 및 카메라 하위로 배치
     Mesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Mesh1P"));
-    Mesh1P->SetupAttachment(FollowCamera);
-    Mesh1P->SetOnlyOwnerSee(true);          // 나에게만 보임
-    Mesh1P->SetCastShadow(false);           // 팔 메쉬 그림자 비활성화
-    Mesh1P->bCastDynamicShadow = false;
 
-    // [추가] 3인칭 기본 메쉬 설정 (내 눈에는 안 보이지만 그림자는 생성)
-    GetMesh()->SetOwnerNoSee(true);         // 머리 내부 클리핑/점프 버그 방지
-    GetMesh()->bCastHiddenShadow = true;    // 바닥에 내 몸통 그림자 형성
+   
+    Mesh1P->SetupAttachment(GetMesh());
+    Mesh1P->SetOnlyOwnerSee(true);          
+    Mesh1P->SetCastShadow(false);           
+    Mesh1P->bCastDynamicShadow = false;
+   
+    GetMesh()->SetOwnerNoSee(true);        
+    GetMesh()->bCastHiddenShadow = true;    
 
     // 1인칭 캐릭터 회전 제어 
     bUseControllerRotationYaw = true; // 마우스 좌우 회전 시 캐릭터 몸통도 함께 회전
     GetCharacterMovement()->bOrientRotationToMovement = false; 
    
-   // [추가] 무기 장착 컴포넌트 생성
    EquipmentComponent = CreateDefaultSubobject<UBaruEquipmentComponent>(TEXT("EquipmentComponent"));
    
-   // [추가] 크라우치 활성화.
-   //   언리얼은 기본적으로 크라우치가 꺼져 있어서, 이게 없으면 Crouch() 를 불러와도 무시됨
    GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
    GetCharacterMovement()->SetCrouchedHalfHeight(60.0f);
 }
@@ -132,19 +134,13 @@ void ABaruCharacter::InitAbilityActorInfo()
    {
       GetCharacterMovement()->MaxWalkSpeed = 450.0f;
    } 
-   
-   // GetCharacterMovement()->MaxWalkSpeed =
-   //     ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
 }
 
 void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& ChangeData)
 {
-   // [수정] 어트리뷰트 값을 기준 속도로 저장하고, 스프린트/크라우치를 반영해 최종 적용
    BaseWalkSpeed = ChangeData.NewValue;
    UpdateMaxWalkSpeed();
 }
-
-
 
 void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
@@ -161,13 +157,26 @@ void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ABaruCharacter::BeginPlay()
 {
    Super::BeginPlay();
-
-
-   if (FollowCamera)
+   
+   if (USkeletalMeshComponent* BodyMesh = GetMesh())
    {
-      FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, CameraEyeHeight));
+      TArray<USceneComponent*> ChildComponents;
+      BodyMesh->GetChildrenComponents(false, ChildComponents);
+
+      for (USceneComponent* Child : ChildComponents)
+      {
+         if (USkeletalMeshComponent* PartMesh = Cast<USkeletalMeshComponent>(Child))
+         {
+            if (PartMesh == Mesh1P)
+            {
+               continue;
+            }
+            PartMesh->SetLeaderPoseComponent(BodyMesh);
+         }
+      }
    }
-   UpdateMaxWalkSpeed();
+
+   UpdateMaxWalkSpeed(); 
 }
 
 void ABaruCharacter::PawnClientRestart()
@@ -232,10 +241,22 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
       {
          EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Interact);
       }
-      // [추가] 발사
+      // [수정] 발사 — 누를 때 시작, 뗄 때 중지 
       if (FireAction)
       {
-         EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Fire);
+         EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_Fire);
+         EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_StopFire);
+         EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Canceled,  this, &ABaruCharacter::Input_StopFire);
+      }
+
+      // ★[추가 09.08] 무기 슬롯 전환
+      if (SelectPrimaryWeaponAction)
+      {
+         EnhancedInputComponent->BindAction(SelectPrimaryWeaponAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_SelectPrimaryWeapon);
+      }
+      if (SelectSecondaryWeaponAction)
+      {
+         EnhancedInputComponent->BindAction(SelectSecondaryWeaponAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_SelectSecondaryWeapon);
       }
 
       // [추가] 달리기 — 누르는 동안만 (Started/Completed 쌍)
@@ -324,9 +345,7 @@ void ABaruCharacter::Input_Interact()
    Server_ProcessInteraction(HitResult);
 }
 
-// ★[추가] 발사 요청.
-//   캐릭터는 "쐈다"는 사실만 전달합니다.
-//   호스트/클라 분기, 서버 라인트레이스, GE 적용은 전부 EquipmentComponent 와 WeaponBase 담당입니다.
+
 void ABaruCharacter::Input_Fire()
 {
    if (bIsDead || !EquipmentComponent)
@@ -337,8 +356,138 @@ void ABaruCharacter::Input_Fire()
    EquipmentComponent->RequestFireActiveWeapon();
 }
 
-// ★[추가] 달리기 시작/종료.
-//   속도는 서버가 확정해야 위치 보정이 안 생기므로 RPC 로 요청만 합니다.
+// [추가] 연사 중지.
+//   사망 체크를 안 하는 이유: 죽는 순간에도 반드시 발사가 멈춰야해서
+void ABaruCharacter::Input_StopFire()
+{
+   if (EquipmentComponent)
+   {
+      EquipmentComponent->RequestStopFireActiveWeapon();
+   }
+}
+
+void ABaruCharacter::Input_SelectPrimaryWeapon()
+{
+   HandleWeaponSlotInput(EBaruEquipmentSlot::PrimaryWeapon);
+}
+
+void ABaruCharacter::Input_SelectSecondaryWeapon()
+{
+   HandleWeaponSlotInput(EBaruEquipmentSlot::SecondaryWeapon);
+}
+
+void ABaruCharacter::HandleWeaponSlotInput(EBaruEquipmentSlot DesiredSlot)
+{
+   if (bIsDead || !EquipmentComponent)
+   {
+      return;
+   }
+
+   if (EquipmentComponent->GetActiveWeaponSlot() == DesiredSlot)
+   {
+      Server_RequestUnequipWeapon(DesiredSlot);
+      return;
+   }
+
+   Server_RequestSelectWeaponSlot(DesiredSlot);
+}
+
+// [추가 ] 서버에서 실제 슬롯 선택 수행.
+bool ABaruCharacter::Server_RequestSelectWeaponSlot_Validate(EBaruEquipmentSlot DesiredSlot)
+{
+   return DesiredSlot == EBaruEquipmentSlot::PrimaryWeapon
+       || DesiredSlot == EBaruEquipmentSlot::SecondaryWeapon;
+}
+
+void ABaruCharacter::Server_RequestSelectWeaponSlot_Implementation(EBaruEquipmentSlot DesiredSlot)
+{
+   if (!EquipmentComponent)
+   {
+      return;
+   }
+
+   ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
+   UBaruInventoryComponent* Inventory = BaruPS ? BaruPS->GetInventoryComponent() : nullptr;
+   if (!Inventory)
+   {
+      return;
+   }
+   
+   UBaruItemInstance* TargetItem = FindInventoryWeaponForSlot(DesiredSlot);
+   if (!TargetItem)
+   {
+      BARU_NET_LOG(this, LogBaruItem, Log,
+         TEXT("슬롯 %d 에 맞는 무기가 인벤토리에 없습니다."), static_cast<int32>(DesiredSlot));
+      return;
+   }
+   
+   const EBaruEquipmentSlot CurrentSlot = EquipmentComponent->GetActiveWeaponSlot();
+   if (CurrentSlot != EBaruEquipmentSlot::None)
+   {
+      EquipmentComponent->UnequipWeapon(CurrentSlot);
+   }
+
+   // UseItem() 이 아이템 타입을 보고 EquipWeapon() 까지 이어줍니다.
+   Inventory->UseItem(TargetItem);
+}
+
+// [추가] 무기 해제
+bool ABaruCharacter::Server_RequestUnequipWeapon_Validate(EBaruEquipmentSlot WeaponSlot)
+{
+   return WeaponSlot == EBaruEquipmentSlot::PrimaryWeapon
+       || WeaponSlot == EBaruEquipmentSlot::SecondaryWeapon;
+}
+
+void ABaruCharacter::Server_RequestUnequipWeapon_Implementation(EBaruEquipmentSlot WeaponSlot)
+{
+   if (!EquipmentComponent)
+   {
+      return;
+   }
+
+   EquipmentComponent->UnequipWeapon(WeaponSlot);
+   BARU_NET_LOG(this, LogBaruItem, Log, TEXT("무기 해제: Slot=%d"), static_cast<int32>(WeaponSlot));
+}
+
+UBaruItemInstance* ABaruCharacter::FindInventoryWeaponForSlot(EBaruEquipmentSlot DesiredSlot) const
+{
+   const ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
+   if (!BaruPS)
+   {
+      return nullptr;
+   }
+
+   UBaruInventoryComponent* Inventory = BaruPS->GetInventoryComponent();
+   if (!Inventory || !Inventory->ItemDataTable)
+   {
+      return nullptr;
+   }
+
+   for (const FInventorySlot& Slot : Inventory->GetSlots())
+   {
+      if (!IsValid(Slot.Item))
+      {
+         continue;
+      }
+
+      const FItemData* Data =
+         Inventory->ItemDataTable->FindRow<FItemData>(Slot.Item->ItemID, TEXT("FindInventoryWeaponForSlot"));
+
+      if (!Data || Data->ItemType != EItemType::Weapon)
+      {
+         continue;
+      }
+
+      const UBaruWeaponDataAsset* WeaponData = Data->WeaponDataAsset.LoadSynchronous();
+      if (WeaponData && WeaponData->EquipmentSlot == DesiredSlot)
+      {
+         return Slot.Item;
+      }
+   }
+
+   return nullptr;
+}
+
 void ABaruCharacter::Input_SprintStart()
 {
    if (bIsDead)
@@ -369,15 +518,13 @@ void ABaruCharacter::Server_SetSprinting_Implementation(bool bNewSprinting)
    OnRep_IsSprinting();   // 서버는 OnRep 이 자동 호출되지 않으므로 직접 호출
 }
 
-// ★[추가] 스프린트 상태가 복제되어 도착했을 때 각 클라에서 속도 갱신
+
 void ABaruCharacter::OnRep_IsSprinting()
 {
    UpdateMaxWalkSpeed();
 }
 
-// ★[추가] 앉기 토글.
-//   Crouch() / UnCrouch() 는 언리얼이 서버·클라 예측까지 알아서 처리하므로
-//   별도 RPC 가 필요 없습니다. (생성자의 bCanCrouch = true 가 전제)
+
 void ABaruCharacter::Input_ToggleCrouch()
 {
    if (bIsDead)
@@ -395,8 +542,6 @@ void ABaruCharacter::Input_ToggleCrouch()
    }
 }
 
-// ★[추가] 현재 상태(앉기/달리기)에 맞는 이동 속도를 계산해 적용합니다.
-//   서버와 클라 양쪽에서 같은 계산을 하므로 값이 어긋나지 않습니다.
 void ABaruCharacter::UpdateMaxWalkSpeed()
 {
    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
@@ -537,14 +682,13 @@ void ABaruCharacter::OnRep_IsDead()
    OnDeathCosmetic();   // 래그돌 / 사망 몽타주는 BP 에서
 }
 
-// [수정] 체력에서 유도하지 않고 상태 변수를 그대로 반환.
-//   이 한 줄이 캐릭터가 죽지 않는버그의 핵심 수정
+
 bool ABaruCharacter::IsDead_Implementation() const
 {
    return bIsDead;
 }
 
-// [추가] 이하 7개는 미구현이라 UHT 기본 스텁(0 / false)이 반환되고 있던 함수들
+
 bool ABaruCharacter::IsDBNO_Implementation() const
 {
    if (const ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
