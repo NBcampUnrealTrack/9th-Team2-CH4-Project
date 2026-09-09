@@ -5,10 +5,13 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"
+#include "GameplayAbilitySpec.h"
 #include "BaruEquipmentComponent.generated.h"
 
 class ABaruWeaponBase;
 class UBaruWeaponDataAsset;
+class UGameplayAbility;
+class UBaruAbilitySystemComponent;
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class BARUGAME_API UBaruEquipmentComponent : public UActorComponent
@@ -34,11 +37,19 @@ public:
 	// ActiveWeaponSlot에 따라 현재 손에 든 무기를 반환.
 	UFUNCTION(BlueprintPure, Category = "BARU|Equipment")
 	ABaruWeaponBase* GetActiveWeapon() const;
+	
+		// 장착 상태를 ASC의 발사 GA에 반영.
+		// Character의 ASC 초기화가 완료된 시점에도 호출.
+	void SyncActiveWeaponFireAbilityOnServer();
 
 		// GAS.
 	// Character 입력을 현재 장착 무기에 전달.
 	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
 	void RequestFireActiveWeapon();
+	
+		// 발사 버튼을 놓았을 때 호출. GA 연결.
+	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
+	void RequestStopFireActiveWeapon();
 	
 	// 서버 RPC를 추가.
 		// 클라이언트의 발사 입력을 서버로 전달.
@@ -49,6 +60,20 @@ public:
 	void FireActiveWeaponOnServer();
 
 protected:
+	// 서버가 현재 부여한 무기 발사 GA를 추적합니다.
+	// 무기 전환 시 기존 GA를 제거하기 위해 필요합니다.
+	// 이 장비 컴포넌트가 부여한 발사 GA만 제거합니다.
+	void ClearActiveWeaponFireAbilityOnServer();
+	
+	// 현재 부여한 발사 GA의 식별자.
+	FGameplayAbilitySpecHandle ActiveFireAbilityHandle;
+
+	// 기존 GA가 어느 ASC에 부여되었는지 추적합니다.
+	// PlayerState 교체나 캐릭터 제거 시 안전하게 정리하기 위한 약한 참조입니다.
+	// 캐릭터와 PlayerState의 연결이 끊겨도 기존 GA를 정리하기 위해 보관합니다.
+	TWeakObjectPtr<UBaruAbilitySystemComponent> ActiveFireAbilityASC;
+	
+	
 		// 주무기 슬롯에 실제로 생성되어 있는 Weapon Actor
 		// 아직 Equip 함수가 없으므로 현재는 비어 있는 상태.
 	UPROPERTY(
@@ -57,6 +82,10 @@ protected:
 		BlueprintReadOnly,
 		Category = "BARU|Equipment|Weapon")
 	TObjectPtr<ABaruWeaponBase> PrimaryWeapon;
+	
+		// 각 무기가 사용할 Fire GA. 서버에서 장착 시 DA로부터 기록.
+	UPROPERTY(Transient)
+	TSubclassOf<UGameplayAbility> PrimaryFireAbilityClass;
 
 		// 보조무기 슬롯에 실제로 생성되어 있는 Weapon Actor
 	UPROPERTY(
@@ -65,7 +94,11 @@ protected:
 		BlueprintReadOnly,
 		Category = "BARU|Equipment|Weapon")
 	TObjectPtr<ABaruWeaponBase> SecondaryWeapon;
-
+	
+		// 각 무기가 사용할 Fire GA. 서버에서 장착 시 DA로부터 기록 - 2.
+	UPROPERTY(Transient)
+	TSubclassOf<UGameplayAbility> SecondaryFireAbilityClass;
+	
 		// 현재 손에 들고 사용 중인 무기 슬롯
 		// 지금은 None이며, 다음 단계에서 PrimaryWeapon 또는 SecondaryWeapon으로 변경.
 	UPROPERTY(
@@ -109,4 +142,8 @@ protected:
 
 		// 비활성 무기: DataAsset에 지정된 등/허리 소켓에 부착
 	void AttachWeaponToHolster(ABaruWeaponBase* Weapon);
+
+	TSubclassOf<UGameplayAbility> GetActiveWeaponFireAbilityClass() const;
+	
+	
 };

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "UObject/SoftObjectPtr.h"
+#include "Interfaces/InteractableInterface.h"
 #include "BaruElevatorActor.generated.h"
 
 class UBoxComponent;
@@ -10,21 +11,38 @@ class UStaticMeshComponent;
 class ABaruGameState;
 class APawn;
 
+UENUM(BlueprintType)
+enum class EBaruElevatorTriggerType : uint8
+{
+    AutoOnAllBoarded UMETA(DisplayName = "Auto When All Alive Boarded"), // 전원 탑승 시 자동 출발
+    ManualInteract   UMETA(DisplayName = "Manual Button Interaction")    // 전원 탑승 후 콘솔 스위치 조작 필요
+};
+
 /**
- * 회사 로비 및 던전에 배치되는 레벨 전환용 엘리베이터 발판 액터
- * - 전원 탑승 시 5초 카운트다운 시작
- * - 도중 이탈 시 자동 카운트다운 취소
- * - TSoftObjectPtr<UWorld> 기반으로 목적지 맵을 에디터에서 자유롭게 지정
+ * 회사 로비 및 지하 탐사 구역 레벨 전환용 엘리베이터 액터
+ * - IInteractableInterface 구현 (수동 버튼 상호작용 지원)
+ * - 네트워크 복제(RepNotify) 기반 클라이언트 도어/사운드 연출 동기화
+ * - GameMode 이중 딜레이 방지 연동
  */
 UCLASS()
-class BARUGAME_API ABaruElevatorActor : public AActor
+class BARUGAME_API ABaruElevatorActor : public AActor, public IInteractableInterface
 {
     GENERATED_BODY()
     
 public: 
     ABaruElevatorActor();
 
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual void BeginPlay() override;
+
+    // ==============================================================================
+    // IInteractableInterface 구현부 (콘솔 스위치 수동 작동용)
+    // ==============================================================================
+    virtual bool CanInteract_Implementation(APawn* Interactor) const override;
+    virtual FText GetInteractPromptText_Implementation(APawn* Interactor) const override;
+    virtual FGameplayTag GetInteractionTag_Implementation() const override;
+    virtual float GetInteractionDuration_Implementation() const override;
+    virtual void ExecuteInteraction_Implementation(APawn* Interactor) override;
 
 protected:
     UFUNCTION()
@@ -45,19 +63,30 @@ protected:
         int32 OtherBodyIndex
     );
 
-    /** 현재 접속/생존 중인 전원 탑승 여부 검사 */
-    bool CheckAllPlayersBoarded();
+    bool CheckAllPlayersBoarded() const;
 
-    /** 카운트다운 시작/중단/완료 */
     void StartCountdown();
     void CancelCountdown();
     void UpdateCountdownTick();
     void OnCountdownCompleted();
 
+    UFUNCTION()
+    void OnRep_IsCountingDown();
+
+    UFUNCTION()
+    void OnRep_IsDeparted();
+
+    // 블루프린트 연출 훅 (클라이언트/서버 공통 호출)
+    UFUNCTION(BlueprintImplementableEvent, Category = "BARU|Elevator|Events")
+    void BP_OnCountdownStarted(float Duration);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "BARU|Elevator|Events")
+    void BP_OnCountdownCancelled();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "BARU|Elevator|Events")
+    void BP_OnDeparted();
+
 protected:
-    // ==============================================================================
-    // Components
-    // ==============================================================================
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
     TObjectPtr<USceneComponent> RootSceneComponent;
 
@@ -67,21 +96,38 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
     TObjectPtr<UBoxComponent> BoardingTriggerBox;
 
+    /** 상호작용 가능한 엘리베이터 조종 콘솔 메쉬 (선택 사항) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+    TObjectPtr<UStaticMeshComponent> ConsoleSwitchMesh;
+
     // ==============================================================================
-    // Configurable Settings (하드코딩 배제)
+    // Configurable Settings
     // ==============================================================================
-    /** 이동할 목적지 레벨 에셋 (에디터 디테일 패널에서 드래그 & 드롭 지정) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings")
+    EBaruElevatorTriggerType TriggerType = EBaruElevatorTriggerType::AutoOnAllBoarded;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Destination")
     TSoftObjectPtr<UWorld> DestinationLevel;
 
-    /** 전원 탑승 후 출발까지의 대기 시간 (기본 5초) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings", meta = (ClampMin = "1.0"))
     float CountdownDuration = 5.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings")
+    float ArrivalLockoutDuration = 5.0f;
+
     // ==============================================================================
-    // Internal State
+    // Replicated State
     // ==============================================================================
-    /** 현재 발판 위에 서 있는 유효 플레이어 목록 */
+    UPROPERTY(ReplicatedUsing = OnRep_IsCountingDown, BlueprintReadOnly, Category = "BARU|Elevator|State")
+    bool bIsCountingDown = false;
+
+    UPROPERTY(ReplicatedUsing = OnRep_IsDeparted, BlueprintReadOnly, Category = "BARU|Elevator|State")
+    bool bIsDeparted = false;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "BARU|Elevator|State")
+    float RemainingCountdown = 0.0f;
+
+private:
     UPROPERTY(Transient)
     TSet<TWeakObjectPtr<APawn>> BoardedPlayers;
 
@@ -89,16 +135,8 @@ protected:
     TObjectPtr<ABaruGameState> CachedGameState;
 
     FTimerHandle CountdownTimerHandle;
-    float RemainingCountdown = 0.0f;
-    bool bIsCountingDown = false;
-    
-    // 레벨 진입 후 엘리베이터가 재작동하기까지 필요한 대기 시간 (초)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings")
-    float ArrivalLockoutDuration = 10.0f;
-
-    // 엘리베이터 작동 가능 플래그 (레벨 시작하자마자 다음 레벨로 전환하는 것을 방지)
+    FTimerHandle LockoutTimerHandle;
     bool bIsElevatorArmed = false;
 
-    //락아웃 해제 함수
     void EnableElevatorActivation();
 };

@@ -1,0 +1,55 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Interfaces/InteractableInterface.h"
+#include "BaruCoopButtonActor.generated.h"
+
+class UStaticMeshComponent;
+class ABaruCoopDoorActor;
+
+/**
+ * 2인 협동 문에 신호를 보내는 스위치 액터
+ * IInteractableInterface를 통해 F키 상호작용을 처리합니다.
+ */
+UCLASS()
+class BARUGAME_API ABaruCoopButtonActor : public AActor, public IInteractableInterface
+{
+	GENERATED_BODY()
+    
+public: 
+	ABaruCoopButtonActor();
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	// IInteractableInterface
+	virtual bool CanInteract_Implementation(APawn* Interactor) const override;
+	virtual FText GetInteractPromptText_Implementation(APawn* Interactor) const override;
+	virtual FGameplayTag GetInteractionTag_Implementation() const override;
+	virtual float GetInteractionDuration_Implementation() const override;
+	virtual void ExecuteInteraction_Implementation(APawn* Interactor) override;
+
+	/** 서버에서 버튼 상태를 강제로 리셋하거나 설정 */
+	void SetButtonActive(bool bActive);
+
+protected:
+	UFUNCTION()
+	void OnRep_IsPressed();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "BARU|CoopButton")
+	void BP_OnButtonPressedStateChanged(bool bPressed);
+
+protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+	TObjectPtr<USceneComponent> RootScene;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+	TObjectPtr<UStaticMeshComponent> ButtonMesh;
+
+	/** 이 버튼이 연결된 협동 문 액터 (에디터 디테일 패널에서 스포이트로 지정) */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "BARU|CoopDoor")
+	TObjectPtr<ABaruCoopDoorActor> TargetDoor;
+
+	UPROPERTY(ReplicatedUsing = OnRep_IsPressed, BlueprintReadOnly, Category = "BARU|CoopDoor")
+	bool bIsPressed = false;
+};
