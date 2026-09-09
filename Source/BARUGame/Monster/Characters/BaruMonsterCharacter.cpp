@@ -110,6 +110,9 @@ void ABaruMonsterCharacter::BeginPlay()
 		this
 		);
 	
+	// ASC 초기화가 끝난 뒤 DataAsset의 초기 능력치를 적용
+	ApplyInitialAttributesFromDataAsset();
+	
 	// ASC 초기화가 끝난 뒤 몬스터의 초기 Ability를 등록
 	GrantInitialAbilities();
 		
@@ -226,6 +229,91 @@ void ABaruMonsterCharacter::
 		AttributeChangeData.OldValue,
 		NewMoveSpeed
 	);
+}
+
+void ABaruMonsterCharacter::ApplyInitialAttributesFromDataAsset()
+{
+    // 능력치의 최초 설정은 서버에서만 처리
+    if (!HasAuthority() ||
+        !IsValid(AbilitySystemComponent) ||
+        !IsValid(MonsterDataAsset))
+    {
+        return;
+    }
+
+    // DataAsset 값을 안전한 범위로 보정
+    const float InitialMaxHealth =
+        FMath::Max(1.0f, MonsterDataAsset->MaxHealth);
+
+    const float InitialPhysicalDefense =
+        FMath::Max(0.0f, MonsterDataAsset->PhysicalDefense);
+
+    const float InitialSpecialResistance =
+        FMath::Clamp(
+            MonsterDataAsset->SpecialResistance,
+            0.0f,
+            1.0f
+        );
+
+    const float InitialMaxSuppression =
+        FMath::Max(1.0f, MonsterDataAsset->MaxSuppression);
+
+    const float InitialMoveSpeed =
+        FMath::Max(0.0f, MonsterDataAsset->PatrolSpeed);
+
+    // 최대 체력을 먼저 설정한 뒤 현재 체력을 가득 채움
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruCoreAttributeSet::GetMaxHealthAttribute(),
+        InitialMaxHealth
+    );
+
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruCoreAttributeSet::GetHealthAttribute(),
+        InitialMaxHealth
+    );
+
+    // 방어 능력치 적용
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruCoreAttributeSet::GetPhysicalDefenseAttribute(),
+        InitialPhysicalDefense
+    );
+
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruCoreAttributeSet::GetSpecialResistanceAttribute(),
+        InitialSpecialResistance
+    );
+
+    // 시작 이동속도는 순찰 속도로 설정
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruCoreAttributeSet::GetMoveSpeedAttribute(),
+        InitialMoveSpeed
+    );
+
+    // 최대 제압도를 먼저 설정한 뒤 현재 제압도를 가득 채움
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruMonsterAttributeSet::GetMaxSuppressionAttribute(),
+        InitialMaxSuppression
+    );
+
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruMonsterAttributeSet::GetSuppressionAttribute(),
+        InitialMaxSuppression
+    );
+
+    BARU_NET_LOG(
+        this,
+        LogBaruGAS,
+        Log,
+        TEXT(
+            "Monster initial attributes applied. "
+            "Health=%.1f, Defense=%.1f, "
+            "Resistance=%.2f, Suppression=%.1f"
+        ),
+        InitialMaxHealth,
+        InitialPhysicalDefense,
+        InitialSpecialResistance,
+        InitialMaxSuppression
+    );
 }
 
 void ABaruMonsterCharacter::GrantInitialAbilities()
