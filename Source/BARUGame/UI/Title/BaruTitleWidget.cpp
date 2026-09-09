@@ -2,6 +2,7 @@
 
 #include "UI/Title/BaruTitleWidget.h"
 #include "Components/Button.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 #include "BaruLog.h"
 
@@ -51,6 +52,11 @@ void UBaruTitleWidget::NativeOnInitialized()
 	{
 		Button_StartGame->OnClicked.AddDynamic(this, &UBaruTitleWidget::HandleStartGameClicked);
 	}
+	
+	if (IsValid(Button_QuitGame))
+	{
+		Button_QuitGame->OnClicked.AddDynamic(this, &ThisClass::HandleQuitGameClicked);
+	}
 }
 
 void UBaruTitleWidget::HandleStartGameClicked()
@@ -59,4 +65,31 @@ void UBaruTitleWidget::HandleStartGameClicked()
 	
 	BP_OnEnterLobbyRequested();
 	
+}
+
+void UBaruTitleWidget::HandleQuitGameClicked()
+{
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("게임 종료 버튼이 클릭되었습니다."));
+	
+	APlayerController* OwningPlayerController =
+		GetOwningPlayer();
+	
+	if (!IsValid(OwningPlayerController))
+	{
+		BARU_LOG(
+		LogBaruUI,
+		Warning,
+		TEXT("게임을 종료할 PlayerController를 찾지 못했습니다."));
+	
+		return;
+	}
+	
+	UKismetSystemLibrary::QuitGame(
+		this,
+		OwningPlayerController,
+		EQuitPreference::Quit,
+		false);
 }
