@@ -67,8 +67,8 @@ void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
     DOREPLIFETIME(ABaruPlayerState, bIsReady);
     DOREPLIFETIME(ABaruPlayerState, bIsDBNO);
-    DOREPLIFETIME(ABaruPlayerState, bIsDead);   // [추가]
-    // [삭제] DOREPLIFETIME(ABaruPlayerState, Sanity);  → AttributeSet 이 대신 복제
+    DOREPLIFETIME(ABaruPlayerState, bIsDead);
+    DOREPLIFETIME(ABaruPlayerState, MonsterKillCount);
 }
 
 // [추가] 레벨 이동 시 값 인수인계
@@ -220,4 +220,18 @@ void ABaruPlayerState::OnRep_IsDead()
     OnDeadStatusChanged.Broadcast(bIsDead);
 }
 
-// [삭제] OnRep_Sanity() 구현부 삭제
+void ABaruPlayerState::AddMonsterKill()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    MonsterKillCount++;
+    OnRep_MonsterKillCount();
+}
+
+void ABaruPlayerState::OnRep_MonsterKillCount()
+{
+    OnMonsterKillCountChanged.Broadcast(MonsterKillCount);
+}
