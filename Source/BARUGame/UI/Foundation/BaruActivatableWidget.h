@@ -54,6 +54,10 @@ public:
 	GetDesiredInputConfig() const override;
 
 protected:
+	virtual void NativeOnActivated() override;
+
+	virtual void NativeOnDeactivated() override;
+
 	/**
 	 * 이 위젯이 활성화됐을 때 사용할 입력 모드
 	 */
@@ -77,4 +81,9 @@ protected:
 	EMouseCaptureMode GameMouseCaptureMode =
 		EMouseCaptureMode::CapturePermanently;
 
+	// UI 활성화 전에 표시되면 커서 상태
+	bool bPreviousMouseCursorVisible = false;
+
+	// 이전 커서 상태를 정상적으로 저장했는지 여부
+	bool bHasSavedMouseCursorState = false;
 };
