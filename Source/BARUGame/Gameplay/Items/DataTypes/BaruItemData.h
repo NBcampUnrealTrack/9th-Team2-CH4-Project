@@ -51,6 +51,17 @@ enum class EItemType : uint8
 };
 
 
+UENUM(BlueprintType)
+enum class EBaruItemRarity : uint8
+{
+	Common UMETA(DisplayName = "Common"),
+	Uncommon UMETA(DisplayName = "Uncommon"),
+	Rare UMETA(DisplayName = "Rare"),
+	Epic UMETA(DisplayName = "Epic"),
+	Legendary UMETA(DisplayName = "Legendary")
+};
+
+
 // 아이템 하나에 들어가는 정보들. 데이터 테이블의 한 줄.
 // 기존 강의와 다르게 grid-based Inventory(테트리스형 인벤)로 구현하기 때문에, 다른 구분 사항 필요할 것으로 보임.
 USTRUCT(BlueprintType)
@@ -75,6 +86,10 @@ public:
 	// 제일 상단의 Enum 참고.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data")
 	EItemType ItemType = EItemType::None;
+	
+	// 랜덤 월드 스포너가 사용할 희귀도.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spawn")
+	EBaruItemRarity Rarity = EBaruItemRarity::Common;
 
 	// 아이템의 설계도(클래스). 버리기(드롭)할 때 사용
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data")
@@ -85,6 +100,12 @@ public:
 		// Weapon이 아닌 아이템은 비워둠.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weapon")
 	TSoftObjectPtr<UBaruWeaponDataAsset> WeaponDataAsset;
+	
+	
+		// 아이템 무게.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data|Weight",
+	meta = (ClampMin = "0.0", Units = "kg"))
+	float UnitWeightKg = 0.0f;
 	
 #pragma region 그리드와 스택 부분들. 아이템 중첩하는 등.
 		// 그리드 때문에 추가하는 부분들.
@@ -129,6 +150,8 @@ struct FInventorySlot : public FFastArraySerializerItem
 	// 아이템이 점유한 좌상단 격자의 좌표(시작점 좌표)
 	UPROPERTY()
 	FIntPoint TopLeft = FIntPoint::ZeroValue;		
+	
+	
 	
 	// true면 아이템은 보유 중이지만 인벤토리 격자는 점유하지 않음.
 	// 장비 UI에서 표시하고 인벤토리 그리드에서는 제외.
@@ -180,6 +203,9 @@ struct FInventorySlotArray : public FFastArraySerializer
 	}
 	
 #pragma endregion
+	
+	void PostReplicatedReceive(
+	const FFastArraySerializer::FPostReplicatedReceiveParameters& Parameters);
 	
 	
 };

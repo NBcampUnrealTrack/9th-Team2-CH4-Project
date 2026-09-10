@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UI/Foundation/BaruCommonUserWidget.h"
+#include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"
 #include "BaruCharacterEquipmentWidget.generated.h"
 
 class UBorder;
@@ -13,6 +14,7 @@ class UBaruItemInstance;
 class UBaruEquipmentComponent;
 class UBaruInventoryComponent;
 class UButton;
+class UDragDropOperation;
 
 UCLASS(Abstract)
 class BARUGAME_API UBaruCharacterEquipmentWidget
@@ -65,6 +67,33 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Button_SecondaryWeapon;
+		//우클릭, 더블클릭 장비해제
+	virtual FReply NativeOnMouseButtonDown(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent) override;
+
+	virtual FReply NativeOnMouseButtonDoubleClick(
+		const FGeometry& InGeometry,
+		const FPointerEvent& InMouseEvent) override;
+	
+		//드래그 앤 드랍
+	virtual FReply NativeOnPreviewMouseButtonDown(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent) override;
+
+	virtual FReply NativeOnMouseButtonUp(
+		const FGeometry& InGeometry,
+		const FPointerEvent& InMouseEvent) override;
+
+	virtual void NativeOnDragDetected(
+		const FGeometry& InGeometry,
+		const FPointerEvent& InMouseEvent,
+		UDragDropOperation*& OutOperation) override;
+
+	virtual bool NativeOnDrop(
+		const FGeometry& InGeometry,
+		const FDragDropEvent& InDragDropEvent,
+		UDragDropOperation* InOperation) override;
 
 private:
 	void BindEquipment();
@@ -81,4 +110,13 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UBaruInventoryComponent> InventoryComponent;
+	
+	EBaruEquipmentSlot FindWeaponSlotUnderMouse(
+	const FVector2D& ScreenPosition) const;
+
+	bool RequestUnequipSlot(EBaruEquipmentSlot WeaponSlot);
+	
+		//[장비]드래그 앤 드랍
+	EBaruEquipmentSlot PendingWeaponDragSlot =
+	EBaruEquipmentSlot::None;
 };

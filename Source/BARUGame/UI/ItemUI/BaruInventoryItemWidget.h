@@ -48,6 +48,12 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> Text_Quantity;
 
+	virtual void NativeOnDragDetected(	const FGeometry& InGeometry,const FPointerEvent& InMouseEvent,	UDragDropOperation*& OutOperation) override;
+	
+	virtual FReply NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry,const FPointerEvent& InMouseEvent) override;
+
+	virtual FReply NativeOnMouseButtonUp(	const FGeometry& InGeometry,const FPointerEvent& InMouseEvent) override;
+
 private:
 	UPROPERTY()
 	TObjectPtr<UBaruItemInstance> ItemInstance;
@@ -57,4 +63,6 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UBaruInventoryComponent> InventoryComponent;
+	
+	bool bPendingItemClick = false;
 };

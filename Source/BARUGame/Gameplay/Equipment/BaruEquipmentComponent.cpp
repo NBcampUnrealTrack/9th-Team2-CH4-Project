@@ -127,7 +127,15 @@ bool UBaruEquipmentComponent::EquipWeapon(
     ? PrimaryWeaponItem.Get()
     : SecondaryWeaponItem.Get();
 
-    if (IsValid(SourceItem) && EquippedItem == SourceItem)
+    ABaruWeaponBase* EquippedWeapon =
+        TargetSlot == EBaruEquipmentSlot::PrimaryWeapon
+        ? PrimaryWeapon.Get()
+        : SecondaryWeapon.Get();
+
+    // 아이템과 실제 무기 Actor가 모두 존재해야 이미 장착된 것으로 인정합니다.
+    if (IsValid(SourceItem)
+        && EquippedItem == SourceItem
+        && IsValid(EquippedWeapon))
     {
         if (ActiveWeaponSlot != TargetSlot)
         {
@@ -336,26 +344,59 @@ bool UBaruEquipmentComponent::EquipWeapon(
 
     // UnequipWeapon() : 지정 슬롯의 무기 Actor를 제거하고 변수도 비우는 함수.
     // 무기 버리거나, 다른 무기 교체, 캐릭 사망, 장비 해제 등일 때 사용.
-void UBaruEquipmentComponent::UnequipWeapon(
-    EBaruEquipmentSlot WeaponSlot)
+void UBaruEquipmentComponent::UnequipWeapon(EBaruEquipmentSlot WeaponSlot)
 {
-    if (!GetOwner() || !GetOwner()->HasAuthority())
+    // 좌표를 전달하지 않으면 기존처럼 첫 빈칸에 반환합니다.
+    UnequipWeaponInternal(WeaponSlot, nullptr);
+}
+
+bool UBaruEquipmentComponent::UnequipWeaponInternal( EBaruEquipmentSlot WeaponSlot,  const FIntPoint* PreferredCell)
+{
+    if (!IsValid(GetOwner())
+        || !GetOwner()->HasAuthority())
     {
-        return;
+        return false;
     }
-    
+
+    if (WeaponSlot != EBaruEquipmentSlot::PrimaryWeapon
+        && WeaponSlot != EBaruEquipmentSlot::SecondaryWeapon)
+    {
+        return false;
+    }
+
     UBaruItemInstance* EquippedItem =
-    GetEquippedWeaponItem(WeaponSlot);
+        GetEquippedWeaponItem(WeaponSlot);
 
     if (IsValid(EquippedItem))
     {
         UBaruInventoryComponent* InventoryComponent =
             GetOwnerInventoryComponent();
 
-        if (!IsValid(InventoryComponent)
-            || !InventoryComponent->SetItemEquipped(
-                EquippedItem,
-                false))
+        if (!IsValid(InventoryComponent))
+        {
+            return false;
+        }
+
+        bool bReturnedToInventory = false;
+
+        if (PreferredCell)
+        {
+            bReturnedToInventory =
+                InventoryComponent->ReturnEquippedItemToCell(
+                    EquippedItem,
+                    *PreferredCell);
+        }
+        else
+        {
+            bReturnedToInventory =
+                InventoryComponent->SetItemEquipped(
+                    EquippedItem,
+                    false);
+        }
+
+        // 공간이 없거나 다른 아이템과 겹치면
+        // 무기 액터와 장비 상태도 그대로 유지합니다.
+        if (!bReturnedToInventory)
         {
             BARU_NET_LOG(
                 GetOwner(),
@@ -363,10 +404,11 @@ void UBaruEquipmentComponent::UnequipWeapon(
                 Warning,
                 TEXT(
                     "무기 장착 해제 실패: "
-                    "인벤토리에 반환할 공간이 없습니다. Slot=%d"),
+                    "인벤토리 반환 위치를 사용할 수 없습니다. "
+                    "Slot=%d"),
                 static_cast<int32>(WeaponSlot));
 
-            return;
+            return false;
         }
     }
 
@@ -381,7 +423,7 @@ void UBaruEquipmentComponent::UnequipWeapon(
         PrimaryWeaponItem = nullptr;
         PrimaryFireAbilityClass = nullptr;
     }
-    else if (WeaponSlot == EBaruEquipmentSlot::SecondaryWeapon)
+    else
     {
         if (IsValid(SecondaryWeapon))
         {
@@ -392,22 +434,29 @@ void UBaruEquipmentComponent::UnequipWeapon(
         SecondaryWeaponItem = nullptr;
         SecondaryFireAbilityClass = nullptr;
     }
-    else
-    {
-        return;
-    }
 
     if (ActiveWeaponSlot == WeaponSlot)
     {
         ActiveWeaponSlot = EBaruEquipmentSlot::None;
-
-        // 활성 무기를 해제했으므로 현재 발사 GA 제거 요청.
         SyncActiveWeaponFireAbilityOnServer();
     }
 
     GetOwner()->ForceNetUpdate();
     OnEquipmentUpdated.Broadcast();
+
+    BARU_NET_LOG(
+        GetOwner(),
+        LogBaruItem,
+        Log,
+        TEXT(
+            "장비 해제 처리 완료: "
+            "Slot=%d ActiveSlot=%d"),
+        static_cast<int32>(WeaponSlot),
+        static_cast<int32>(ActiveWeaponSlot));
+
+    return true;
 }
+
 
     //GAS
 ABaruWeaponBase* UBaruEquipmentComponent::GetActiveWeapon() const
@@ -515,7 +564,7 @@ void UBaruEquipmentComponent::RequestStopFireActiveWeapon()
     }
 }
 
-
+/*GA 발사로 전환하여 기존 WeaponBase 직접 발사 경로가 불필요해짐.
         //RPC 데이터에는 별도 입력값이 없음. -> 최소한 컴포넌트의 Owner가 정상인지 확인 필요.
 bool UBaruEquipmentComponent::Server_RequestFireActiveWeapon_Validate()
 {
@@ -562,7 +611,7 @@ void UBaruEquipmentComponent::FireActiveWeaponOnServer()
     ActiveWeapon -> Fire(OwnerActor);
 }
 
-
+*/
 
 
     // 비활성 무기칸.
@@ -686,8 +735,6 @@ void UBaruEquipmentComponent::AttachWeaponToHand(
     Weapon->SetActorRelativeTransform(
         Weapon->GetHandRelativeTransform());
 
-    // 같은 무기의 본인용 외형도 팔에 표시.
-    Weapon->SetFirstPersonWeaponActive(true);
     Weapon->ForceNetUpdate();
 }
 
@@ -702,8 +749,6 @@ void UBaruEquipmentComponent::AttachWeaponToHolster(
     }
 
     
-        // 비활성 무기의 본인용 외형은 숨김.
-    Weapon->SetFirstPersonWeaponActive(false);  // 기존 무기의 본인용 외형은 숨겨지고, 새 무기의 본인용 외형만 나타남.
     
     const FName HolsterSocketName = Weapon->GetHolsterSocketName();    
     if (HolsterSocketName.IsNone())
@@ -923,4 +968,158 @@ void UBaruEquipmentComponent::SyncActiveWeaponFireAbilityOnServer()
         TEXT("활성 Fire GA 변경: Weapon=%s GA=%s"),
         *GetNameSafe(ActiveWeapon),
         *GetNameSafe(FireClass.Get()));
+}
+    // 장비 해제 관련.
+void UBaruEquipmentComponent::RequestUnequipWeapon( EBaruEquipmentSlot WeaponSlot)
+{
+    if (!IsValid(GetOwner()))
+    {
+        return;
+    }
+
+    if (WeaponSlot != EBaruEquipmentSlot::PrimaryWeapon
+        && WeaponSlot != EBaruEquipmentSlot::SecondaryWeapon)
+    {
+        return;
+    }
+
+    if (GetOwner()->HasAuthority())
+    {
+        UnequipWeapon(WeaponSlot);
+        return;
+    }
+
+    const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+
+    if (IsValid(OwnerPawn) && OwnerPawn->IsLocallyControlled())
+    {
+        Server_UnequipWeapon(WeaponSlot);
+    }
+}
+
+void UBaruEquipmentComponent::RequestUnequipWeaponAtCell( EBaruEquipmentSlot WeaponSlot, FIntPoint TargetCell)
+{
+    if (!IsValid(GetOwner()))
+    {
+        return;
+    }
+
+    if (WeaponSlot != EBaruEquipmentSlot::PrimaryWeapon
+        && WeaponSlot != EBaruEquipmentSlot::SecondaryWeapon)
+    {
+        return;
+    }
+
+    if (GetOwner()->HasAuthority())
+    {
+        UnequipWeaponInternal(
+            WeaponSlot,
+            &TargetCell);
+
+        return;
+    }
+
+    const APawn* OwnerPawn =
+        Cast<APawn>(GetOwner());
+
+    if (IsValid(OwnerPawn)
+        && OwnerPawn->IsLocallyControlled())
+    {
+        Server_UnequipWeaponAtCell(
+            WeaponSlot,
+            TargetCell);
+    }
+}
+
+bool UBaruEquipmentComponent::
+Server_UnequipWeaponAtCell_Validate(
+    EBaruEquipmentSlot WeaponSlot,
+    FIntPoint TargetCell)
+{
+    const bool bValidSlot =
+        WeaponSlot == EBaruEquipmentSlot::PrimaryWeapon
+        || WeaponSlot == EBaruEquipmentSlot::SecondaryWeapon;
+
+    const UBaruInventoryComponent* InventoryComponent =
+        GetOwnerInventoryComponent();
+
+    return bValidSlot
+        && IsValid(InventoryComponent)
+        && TargetCell.X >= 0
+        && TargetCell.Y >= 0
+        && TargetCell.X < InventoryComponent->GridWidth
+        && TargetCell.Y < InventoryComponent->GridHeight;
+}
+
+void UBaruEquipmentComponent::
+Server_UnequipWeaponAtCell_Implementation(
+    EBaruEquipmentSlot WeaponSlot,
+    FIntPoint TargetCell)
+{
+    UnequipWeaponInternal(
+        WeaponSlot,
+        &TargetCell);
+}
+
+bool UBaruEquipmentComponent::Server_UnequipWeapon_Validate(
+    EBaruEquipmentSlot WeaponSlot)
+{
+    return WeaponSlot == EBaruEquipmentSlot::PrimaryWeapon
+        || WeaponSlot == EBaruEquipmentSlot::SecondaryWeapon;
+}
+
+void UBaruEquipmentComponent::Server_UnequipWeapon_Implementation(
+    EBaruEquipmentSlot WeaponSlot)
+{
+    UnequipWeapon(WeaponSlot);
+}
+
+    //드롭 추가
+bool UBaruEquipmentComponent::ReleaseWeaponForWorldDropOnServer(
+    UBaruItemInstance* SourceItem)
+{
+    if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority()
+        || !IsValid(SourceItem))
+    {
+        return false;
+    }
+
+    EBaruEquipmentSlot RemovedSlot = EBaruEquipmentSlot::None;
+    ABaruWeaponBase* RemovedWeapon = nullptr;
+
+    if (PrimaryWeaponItem.Get() == SourceItem)
+    {
+        RemovedSlot = EBaruEquipmentSlot::PrimaryWeapon;
+        RemovedWeapon = PrimaryWeapon.Get();
+        PrimaryWeapon = nullptr;
+        PrimaryWeaponItem = nullptr;
+        PrimaryFireAbilityClass = nullptr;
+    }
+    else if (SecondaryWeaponItem.Get() == SourceItem)
+    {
+        RemovedSlot = EBaruEquipmentSlot::SecondaryWeapon;
+        RemovedWeapon = SecondaryWeapon.Get();
+        SecondaryWeapon = nullptr;
+        SecondaryWeaponItem = nullptr;
+        SecondaryFireAbilityClass = nullptr;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (ActiveWeaponSlot == RemovedSlot)
+    {
+        ActiveWeaponSlot = EBaruEquipmentSlot::None;
+        SyncActiveWeaponFireAbilityOnServer();
+    }
+
+    if (IsValid(RemovedWeapon))
+    {
+        RemovedWeapon->Destroy();
+    }
+
+    GetOwner()->ForceNetUpdate();
+    // OnEquipmentUpdated는 Inventory 삭제 완료 후 호출합니다.
+    return true;
 }
