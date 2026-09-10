@@ -16,14 +16,15 @@
 #include "Interfaces/InteractableInterface.h"   
 #include "GameplayTags/BaruGameplayTags.h"    
 #include "Gameplay/Equipment/BaruEquipmentComponent.h"   
-#include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   // [추가] EBaruEquipmentSlot
+#include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "Core/BaruGameMode.h"                                    
 #include "Core/BaruTestGameMode.h"                                
 #include "Components/BaruHealthComponent.h"
-#include "Gameplay/Inventory/BaruInventoryComponent.h"   // [추가] Server_UseItem 호출용
-#include "Gameplay/Items/BaruItemInstance.h"             // [추가] 슬롯 아이템 유효성 검사
-#include "Gameplay/Items/DataTypes/BaruItemData.h"       // [추가] FInventorySlot
+#include "Gameplay/Inventory/BaruInventoryComponent.h"   
+#include "Gameplay/Items/BaruItemInstance.h"             
+#include "Gameplay/Items/DataTypes/BaruItemData.h"       
 #include "Gameplay/Weapon/Data/BaruWeaponDataAsset.h" 
+#include "Components/SpotLightComponent.h" 
 #include "DrawDebugHelpers.h"
 #include "BaruLog.h"
 
@@ -56,6 +57,22 @@ ABaruCharacter::ABaruCharacter()
    
    EquipmentComponent = CreateDefaultSubobject<UBaruEquipmentComponent>(TEXT("EquipmentComponent"));
    
+   // [추가] 헤드라이트.
+   //   카메라에 붙이면 시선 방향과 정확히 일치하고,
+   //   다른 클라에서도 RemoteViewPitch 로 위아래 각도가 대략 맞습니다.
+   Headlight = CreateDefaultSubobject<USpotLightComponent>(TEXT("Headlight"));
+   Headlight->SetupAttachment(FollowCamera);
+   Headlight->SetRelativeLocation(FVector(10.0f, 0.0f, 0.0f));   // 몸에 파묻히지 않게 살짝 앞으로
+
+   Headlight->SetIntensityUnits(ELightUnits::Lumens);
+   Headlight->SetIntensity(3000.0f);
+   Headlight->SetAttenuationRadius(2000.0f);   // 20m
+   Headlight->SetInnerConeAngle(18.0f);
+   Headlight->SetOuterConeAngle(34.0f);
+   Headlight->SetCastShadows(true);            // 프레임 떨어지면 BP 에서 끄세요
+
+   Headlight->SetVisibility(false);            // 시작은 꺼진 상태
+   
    GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
    GetCharacterMovement()->SetCrouchedHalfHeight(60.0f);
 }
@@ -65,7 +82,8 @@ void ABaruCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 {
    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
    DOREPLIFETIME(ABaruCharacter, bIsDead);
-   DOREPLIFETIME(ABaruCharacter, bIsSprinting);   // [추가]
+   DOREPLIFETIME(ABaruCharacter, bIsSprinting);  
+   DOREPLIFETIME(ABaruCharacter, bHeadlightOn);   // [추가]
 }
 
 void ABaruCharacter::PossessedBy(AController* NewController)
@@ -119,6 +137,10 @@ void ABaruCharacter::InitAbilityActorInfo()
    {
       return;
    }
+   if (!BaruPS->OnDBNOStatusChanged.IsAlreadyBound(this, &ABaruCharacter::HandleDBNOStatusChanged))
+   {
+      BaruPS->OnDBNOStatusChanged.AddDynamic(this, &ABaruCharacter::HandleDBNOStatusChanged);
+   }
    CachedASC = ASC;
    
    MoveSpeedChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
@@ -167,15 +189,12 @@ void ABaruCharacter::BeginPlay()
       {
          if (USkeletalMeshComponent* PartMesh = Cast<USkeletalMeshComponent>(Child))
          {
-            if (PartMesh == Mesh1P)
-            {
-               continue;
-            }
             PartMesh->SetLeaderPoseComponent(BodyMesh);
          }
       }
    }
-
+   
+   UpdateHeadlightVisual();
    UpdateMaxWalkSpeed(); 
 }
 
@@ -183,6 +202,12 @@ void ABaruCharacter::PawnClientRestart()
 {
    Super::PawnClientRestart();
 
+   if (IsLocallyControlled() && GetMesh())
+   {
+      GetMesh()->HideBoneByName(TEXT("head"), EPhysBodyOp::PBO_None);
+      GetMesh()->HideBoneByName(TEXT("neck_02"), EPhysBodyOp::PBO_None);
+      GetMesh()->HideBoneByName(TEXT("neck_01"), EPhysBodyOp::PBO_None);
+   }
    
    APlayerController* PC = Cast<APlayerController>(GetController());
    if (!PC && GetWorld())
@@ -240,6 +265,9 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
       if (InteractAction)
       {
          EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Interact);
+         // [추가] F 를 떼면 진행 중이던 홀드 상호작용을 취소
+         EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_StopInteract);
+         EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled,  this, &ABaruCharacter::Input_StopInteract);
       }
       // [수정] 발사 — 누를 때 시작, 뗄 때 중지 
       if (FireAction)
@@ -258,15 +286,17 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
       {
          EnhancedInputComponent->BindAction(SelectSecondaryWeaponAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_SelectSecondaryWeapon);
       }
-
-      // [추가] 달리기 — 누르는 동안만 (Started/Completed 쌍)
+      if (HeadlightAction)
+      {
+         EnhancedInputComponent->BindAction(HeadlightAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_ToggleHeadlight);
+      }
+      // [추가] 달리기 
       if (SprintAction)
       {
          EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_SprintStart);
          EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_SprintStop);
       }
-
-      // [추가] 앉기 — 누를 때마다 토글
+      // [추가] 앉기
       if (CrouchAction)
       {
          EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_ToggleCrouch);
@@ -276,7 +306,7 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 
 void ABaruCharacter::Move(const FInputActionValue& Value)
 {
-   if (bIsDead)   // 사망 후 조작 차단
+   if (bIsDead || Execute_IsDBNO(this)) 
    {
       return;
    }
@@ -310,7 +340,7 @@ void ABaruCharacter::Look(const FInputActionValue& Value)
 // [추가]
 void ABaruCharacter::Input_Jump()
 {
-   if (bIsDead)
+   if (bIsDead || Execute_IsDBNO(this))
    {
       return;
    }
@@ -326,7 +356,7 @@ void ABaruCharacter::Input_StopJumping()
 // ★[추가] 클라이언트는 예측/연출용으로 트레이스하고, 실제 판정은 서버에 요청
 void ABaruCharacter::Input_Interact()
 {
-   if (bIsDead)
+   if (bIsDead || Execute_IsDBNO(this))
    {
       return;
    }
@@ -345,17 +375,64 @@ void ABaruCharacter::Input_Interact()
    Server_ProcessInteraction(HitResult);
 }
 
+// [추가] F 를 뗐을 때
+void ABaruCharacter::Input_StopInteract()
+{
+   Server_StopInteraction();
+}
 
 void ABaruCharacter::Input_Fire()
 {
-   if (bIsDead || !EquipmentComponent)
+   if (bIsDead || Execute_IsDBNO(this) || !EquipmentComponent)
    {
       return;
    }
 
    EquipmentComponent->RequestFireActiveWeapon();
 }
+void ABaruCharacter::Input_ToggleHeadlight()
+{
+   if (bIsDead || Execute_IsDBNO(this))
+   {
+      return;
+   }
+   Server_SetHeadlightOn(!bHeadlightOn);
+}
 
+bool ABaruCharacter::Server_SetHeadlightOn_Validate(bool bNewOn)
+{
+   return true;
+}
+
+void ABaruCharacter::Server_SetHeadlightOn_Implementation(bool bNewOn)
+{
+   if (bHeadlightOn == bNewOn)
+   {
+      return;
+   }
+
+   bHeadlightOn = bNewOn;
+
+   // 서버에서는 OnRep 이 자동 호출되지 않으므로 직접 부릅니다.
+   OnRep_HeadlightOn();
+
+   BARU_NET_LOG(this, LogBaru, Log, TEXT("Headlight: %s"), bHeadlightOn ? TEXT("ON") : TEXT("OFF"));
+}
+
+// ★[추가 09.10] 복제된 상태가 클라이언트에 도착했을 때
+void ABaruCharacter::OnRep_HeadlightOn()
+{
+   UpdateHeadlightVisual();
+}
+
+// ★[추가 09.10] 실제 라이트 켜고 끄기. 서버·클라 공통 경로.
+void ABaruCharacter::UpdateHeadlightVisual()
+{
+   if (Headlight)
+   {
+      Headlight->SetVisibility(bHeadlightOn);
+   }
+}
 // [추가] 연사 중지.
 //   사망 체크를 안 하는 이유: 죽는 순간에도 반드시 발사가 멈춰야해서
 void ABaruCharacter::Input_StopFire()
@@ -378,7 +455,7 @@ void ABaruCharacter::Input_SelectSecondaryWeapon()
 
 void ABaruCharacter::HandleWeaponSlotInput(EBaruEquipmentSlot DesiredSlot)
 {
-   if (bIsDead || !EquipmentComponent)
+   if (bIsDead || Execute_IsDBNO(this) || !EquipmentComponent)
    {
       return;
    }
@@ -490,7 +567,7 @@ UBaruItemInstance* ABaruCharacter::FindInventoryWeaponForSlot(EBaruEquipmentSlot
 
 void ABaruCharacter::Input_SprintStart()
 {
-   if (bIsDead)
+   if (bIsDead || Execute_IsDBNO(this))
    {
       return;
    }
@@ -527,7 +604,7 @@ void ABaruCharacter::OnRep_IsSprinting()
 
 void ABaruCharacter::Input_ToggleCrouch()
 {
-   if (bIsDead)
+   if (bIsDead || Execute_IsDBNO(this))
    {
       return;
    }
@@ -562,12 +639,182 @@ void ABaruCharacter::OnRep_Controller()
    InitAbilityActorInfo();
 }
 
-// ==============================================================================
-// CombatInterface 함수 구현부 
-// ==============================================================================
+// [추가] 소생 대상이 될 수 있는지. 클라이언트에서 프롬프트 표시에도 쓰입니다.
+bool ABaruCharacter::CanInteract_Implementation(APawn* Interactor) const
+{
+   // 나는 다운 상태여야 합니다.
+   if (bIsDead || !Execute_IsDBNO(this))
+   {
+      return false;
+   }
 
-// [수정] 전면 재작성. 기존엔 로그 한 줄만 찍고 끝나서
-//   GameMode 의 생존자 집계/전멸 판정/관전 전환이 전부 돌지 않았음
+   // 상대는 살아있는 다른 플레이어여야 합니다.
+   const ABaruCharacter* Rescuer = Cast<ABaruCharacter>(Interactor);
+   if (!Rescuer || Rescuer == this)
+   {
+      return false;
+   }
+
+   return !Rescuer->bIsDead && !Execute_IsDBNO(Rescuer);
+}
+
+FText ABaruCharacter::GetInteractPromptText_Implementation(APawn* Interactor) const
+{
+   // 실제 키 표시는 나중에 UI 가 IMC 에서 읽어오도록 개선할 수 있습니다.
+   return FText::FromString(TEXT("F: 소생"));
+}
+
+FGameplayTag ABaruCharacter::GetInteractionTag_Implementation() const
+{
+   // 전용 Revive 태그가 없어서 협동(CoOp) 태그를 씁니다.
+   // 프레임워크팀에 Interaction.Type.Revive 추가를 요청해두면 바꾸면 됩니다.
+   return FBaruGameplayTags::Get().Interaction_Type_CoOp;
+}
+
+float ABaruCharacter::GetInteractionDuration_Implementation() const
+{
+   // 0 보다 크므로 Server_ProcessInteraction 이 홀드 방식으로 처리합니다.
+   // 중간에 F 를 떼거나 멀어지면 자동 취소됩니다.
+   return ReviveDuration;
+}
+
+void ABaruCharacter::ExecuteInteraction_Implementation(APawn* Interactor)
+{
+   // 서버에서만 호출됩니다(Server_ProcessInteraction 경유).
+   ReviveFromDBNO(ReviveHealthRatio);
+
+   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("%s revived by %s"),
+       *GetName(), Interactor ? *Interactor->GetName() : TEXT("None"));
+}
+
+// [추가] DBNO 진입. 서버 전용.
+//   BaruCoreAttributeSet::PostGameplayEffectExecute 가 첫 체력 0 도달 시 호출합니다.
+void ABaruCharacter::EnterDBNO(AActor* DownCauser)
+{
+   if (!HasAuthority() || bIsDead)
+   {
+      return;
+   }
+
+   ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
+   if (!BaruPS || BaruPS->IsDBNO())
+   {
+      return;   // 이미 다운 상태
+   }
+
+   LastKiller = DownCauser;   // 블리드아웃으로 죽으면 이 사람이 킬 크레딧
+
+   // 진행 중이던 상호작용·발사를 정리합니다.
+   CancelPendingInteraction();
+   if (EquipmentComponent)
+   {
+      EquipmentComponent->RequestStopFireActiveWeapon();
+   }
+
+   if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+   {
+      ASC->CancelAllAbilities();
+      ASC->AddLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+   }
+
+   // 상태 확정. 복제되어 각 클라의 HandleDBNOStatusChanged 를 깨웁니다.
+   BaruPS->SetDBNOState(true);
+
+   // 방치되면 사망
+   if (UWorld* World = GetWorld())
+   {
+      World->GetTimerManager().SetTimer(
+         BleedOutTimerHandle, this, &ABaruCharacter::OnBleedOutExpired, BleedOutDuration, false);
+   }
+
+   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s entered DBNO. Causer: %s (bleed out %.0fs)"),
+     *GetName(), DownCauser ? *DownCauser->GetName() : TEXT("None"), BleedOutDuration);
+}
+
+// ★[추가 09.10] 소생. 서버 전용.
+//   HealthRatio 만큼 체력을 회복시키며 일어납니다.
+void ABaruCharacter::ReviveFromDBNO(float HealthRatio)
+{
+   if (!HasAuthority() || bIsDead)
+   {
+      return;
+   }
+
+   ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
+   if (!BaruPS || !BaruPS->IsDBNO())
+   {
+      return;
+   }
+
+   if (UWorld* World = GetWorld())
+   {
+      World->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+   }
+
+   if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+   {
+      ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+
+      const float MaxHP = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
+      ASC->SetNumericAttributeBase(
+         UBaruCoreAttributeSet::GetHealthAttribute(),
+         FMath::Max(1.0f, MaxHP * FMath::Clamp(HealthRatio, 0.01f, 1.0f)));
+   }
+
+   LastKiller = nullptr;
+   BaruPS->SetDBNOState(false);
+
+   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s revived."), *GetName());
+}
+
+// [추가] 블리드아웃 만료 → 완전 사망
+void ABaruCharacter::OnBleedOutExpired()
+{
+   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s bled out."), *GetName());
+
+   // Die_Implementation 을 직접 부르지 않고 인터페이스로 호출합니다.
+   // BP 에서 오버라이드했을 때도 반영되도록 하기 위함입니다.
+   if (Implements<UCombatInterface>())
+   {
+      ICombatInterface::Execute_Die(this, LastKiller);
+   }
+}
+
+// ★[추가 09.10] DBNO 상태 변화 반영. 서버·클라 공통.
+//   PlayerState 의 OnRep 이 브로드캐스트하므로 모든 머신에서 호출됩니다.
+void ABaruCharacter::HandleDBNOStatusChanged(bool bNewDBNO)
+{
+   if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+   {
+      if (bNewDBNO)
+      {
+         // 지금은 이동을 완전히 막습니다.
+         // 기어가는 연출을 넣게 되면 DisableMovement 대신
+         // UpdateMaxWalkSpeed 에서 낮은 속도를 주는 방식으로 바꾸면 됩니다.
+         MoveComp->StopMovementImmediately();
+         MoveComp->DisableMovement();
+      }
+      else
+      {
+         MoveComp->SetMovementMode(MOVE_Walking);
+         UpdateMaxWalkSpeed();
+      }
+   }
+   // [추가] 다운 중에만 상호작용 트레이스에 걸리게 합니다.
+   //   Interaction 채널 기본 응답이 Overlap 이라, Block 으로 바꿔야
+   //   LineTraceSingleByChannel 이 이 캐릭터를 히트로 잡습니다.
+   //   살아있는 동안 Block 이면 팀원 뒤의 아이템을 주울 수 없게 됩니다.
+   if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+   {
+      Capsule->SetCollisionResponseToChannel(
+         InteractionTraceChannel,
+         bNewDBNO ? ECR_Block : ECR_Overlap);
+   }
+   
+   OnDBNOCosmetic(bNewDBNO);   // 몽타주·포스트프로세스는 BP 에서
+
+   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("DBNO status changed: %d"), bNewDBNO);
+}
 void ABaruCharacter::Die_Implementation(AActor* Killer)
 {
    if (bIsDead)
@@ -581,8 +828,18 @@ void ABaruCharacter::Die_Implementation(AActor* Killer)
    }
 
    bIsDead = true;
+   CancelPendingInteraction();
    LastKiller = Killer;
-
+   
+   // [추가] 다운 상태에서 죽었다면 블리드아웃 타이머와 태그를 정리
+   if (UWorld* World = GetWorld())
+   {
+      World->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+   }
+   if (UAbilitySystemComponent* DBNOASC = GetAbilitySystemComponent())
+   {
+      DBNOASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+   }
    // 서버에서는 OnRep 이 자동 호출되지 않으므로 직접 호출(리슨서버 호스트 화면 연출용)
    OnRep_IsDead();
 
@@ -843,17 +1100,88 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
       return;
    }
 
-   // CanInteract 판단은 대상이 스스로 합니다(쿨다운, 이미 열린 문, 인벤토리 가득참 등).
-   if (!IInteractableInterface::Execute_CanInteract(ClaimedActor, this))
+   // ★[추가 09.10] 대상이 요구하는 홀드 시간을 확인합니다.
+   //   0 이하면 즉시 실행(아이템 줍기 등), 0보다 크면 그 시간만큼 F 를 누르고 있어야 합니다.
+   const float HoldDuration = IInteractableInterface::Execute_GetInteractionDuration(ClaimedActor);
+
+   if (HoldDuration <= 0.0f)
    {
-      BARU_NET_LOG(this, LogBaruItem, Log,
-          TEXT("Interaction refused by target: %s"), *ClaimedActor->GetName());
+      IInteractableInterface::Execute_ExecuteInteraction(ClaimedActor, this);
+      BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *ClaimedActor->GetName());
       return;
    }
 
-   IInteractableInterface::Execute_ExecuteInteraction(ClaimedActor, this);
+   // 홀드 상호작용 시작. 이전에 잡고 있던 게 있으면 먼저 정리합니다.
+   CancelPendingInteraction();
+   PendingInteractTarget = ClaimedActor;
 
-   BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *ClaimedActor->GetName());
+   GetWorldTimerManager().SetTimer(
+      InteractionTimerHandle,
+      this,
+      &ABaruCharacter::CompletePendingInteraction,
+      HoldDuration,
+      false);
+
+   BARU_NET_LOG(this, LogBaruItem, Log,
+      TEXT("Interaction hold started: %s (%.2fs)"), *ClaimedActor->GetName(), HoldDuration);
+}
+
+// [추가] 홀드 시간이 다 찼을 때 서버에서 실행됩니다.
+//   시작 시점의 검증만 믿지 않고 다시 확인합니다.
+//   누르고 있는 동안 플레이어가 멀어졌거나 문이 잠겼을 수 있기 때문입니다.
+void ABaruCharacter::CompletePendingInteraction()
+{
+   AActor* Target = PendingInteractTarget.Get();
+   CancelPendingInteraction();   // 타이머·타깃 먼저 정리
+
+   if (bIsDead || !IsValid(Target))
+   {
+      return;
+   }
+
+   const float MaxDist = InteractionTraceDistance + InteractionLagTolerance;
+   if (FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) > FMath::Square(MaxDist))
+   {
+      BARU_NET_LOG(this, LogBaruNet, Warning,
+         TEXT("Interaction hold cancelled: target out of range (%s)"), *Target->GetName());
+      return;
+   }
+
+   if (!IInteractableInterface::Execute_CanInteract(Target, this))
+   {
+      BARU_NET_LOG(this, LogBaruItem, Log,
+         TEXT("Interaction hold refused by target: %s"), *Target->GetName());
+      return;
+   }
+
+   IInteractableInterface::Execute_ExecuteInteraction(Target, this);
+   BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *Target->GetName());
+}
+
+// ★[추가] 진행 중인 홀드를 정리 서버 전용.
+void ABaruCharacter::CancelPendingInteraction()
+{
+   if (UWorld* World = GetWorld())
+   {
+      World->GetTimerManager().ClearTimer(InteractionTimerHandle);
+   }
+   PendingInteractTarget.Reset();
+}
+
+// ★[추가] 클라이언트가 F 를 뗐을 때 서버가 홀드를 중단
+bool ABaruCharacter::Server_StopInteraction_Validate()
+{
+   return true;
+}
+
+void ABaruCharacter::Server_StopInteraction_Implementation()
+{
+   if (PendingInteractTarget.IsValid())
+   {
+      BARU_NET_LOG(this, LogBaruItem, Log,
+         TEXT("Interaction hold cancelled by input release: %s"), *PendingInteractTarget->GetName());
+   }
+   CancelPendingInteraction();
 }
 
 UAbilitySystemComponent* ABaruCharacter::GetAbilitySystemComponent() const

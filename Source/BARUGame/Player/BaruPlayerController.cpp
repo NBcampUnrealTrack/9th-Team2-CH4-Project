@@ -2,13 +2,17 @@
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Pawn.h"
-#include "EnhancedInputComponent.h"       // [추가] 관전 입력 바인딩
+#include "EnhancedInputComponent.h"       
 #include "GameFramework/GameStateBase.h" 
 #include "Player/BaruPlayerState.h"
-#include "Core/BaruLobbyGameMode.h"    // [추가] StartGameRaid 호출
-#include "Core/BaruLobbyGameState.h"   // [추가] 준비 상태 / 목표 맵 조회
-#include "AbilitySystem/BaruAbilitySystemComponent.h"   // ★[추가] ProcessAbilityInput 호출용
+#include "Core/BaruLobbyGameMode.h"    
+#include "Core/BaruLobbyGameState.h"   
+#include "AbilitySystem/BaruAbilitySystemComponent.h"   
 #include "Subsystems/BaruSaveGameSubsystem.h"
+#include "UI/Subsystem/BaruUIManagerSubsystem.h"   // [추가] 인벤 UI Push/Pop
+#include "UI/BaruUITags.h"                         // [추가] UI_Layer_GameMenu
+#include "CommonActivatableWidget.h"               // [추가]
+#include "Engine/LocalPlayer.h"                    // [추가] GetSubsystem
 #include "BaruLog.h"
 
 
@@ -51,6 +55,10 @@ void ABaruPlayerController::SetupInputComponent()
         {
             EIC->BindAction(SpectatePrevAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_SpectatePrev);
         }
+        if (ToggleInventoryAction)
+        {
+            EIC->BindAction(ToggleInventoryAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_ToggleInventory);
+        }
     }
 }
 
@@ -76,6 +84,72 @@ void ABaruPlayerController::PostProcessInput(const float DeltaTime, const bool b
     }
 
     Super::PostProcessInput(DeltaTime, bGamePaused);
+}
+
+// ★[추가 09.10] 인벤토리 토글 입력.
+void ABaruPlayerController::Input_ToggleInventory()
+{
+    ToggleInventory();
+}
+
+// ★[추가 09.10] 인벤토리 UI 열기/닫기.
+void ABaruPlayerController::ToggleInventory()
+{
+    if (!IsLocalController())
+    {
+        return;
+    }
+
+    UBaruUIManagerSubsystem* UIManager =
+        ULocalPlayer::GetSubsystem<UBaruUIManagerSubsystem>(GetLocalPlayer());
+
+    if (!UIManager)
+    {
+        BARU_LOG(LogBaruUI, Warning, TEXT("ToggleInventory: UIManagerSubsystem 을 찾지 못했습니다."));
+        return;
+    }
+
+    // ── 이미 열려 있으면 닫기 ────────────────────────────────
+    if (IsValid(ActiveInventoryWidget))
+    {
+        UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
+        ActiveInventoryWidget = nullptr;
+
+        // 게임 입력으로 복귀
+        FInputModeGameOnly InputMode;
+        InputMode.SetConsumeCaptureMouseDown(true);
+        SetInputMode(InputMode);
+        SetShowMouseCursor(false);
+
+        BARU_LOG(LogBaruUI, Log, TEXT("Inventory closed."));
+        return;
+    }
+
+    // ── 닫혀 있으면 열기 ────────────────────────────────────
+    if (!InventoryWidgetClass)
+    {
+        BARU_LOG(LogBaruUI, Warning,
+            TEXT("ToggleInventory: BP_BaruPlayerController 에 Inventory Widget Class 가 비어 있습니다."));
+        return;
+    }
+
+    ActiveInventoryWidget =
+        UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_GameMenu.GetTag(), InventoryWidgetClass);
+
+    if (!ActiveInventoryWidget)
+    {
+        BARU_LOG(LogBaruUI, Warning, TEXT("ToggleInventory: 위젯 생성에 실패했습니다."));
+        return;
+    }
+
+    // 마우스로 아이템을 옮겨야 하므로 커서를 켜고 UI 입력을 허용합니다.
+    FInputModeGameAndUI InputMode;
+    InputMode.SetWidgetToFocus(ActiveInventoryWidget->TakeWidget());
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockOnCapture);
+    SetInputMode(InputMode);
+    SetShowMouseCursor(true);
+
+    BARU_LOG(LogBaruUI, Log, TEXT("Inventory opened."));
 }
 
 // Server RPC

@@ -6,6 +6,7 @@
 #include "InputActionValue.h"
 #include "Engine/EngineTypes.h"     
 #include "Interfaces/CombatInterface.h" 
+#include "Interfaces/InteractableInterface.h"
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "BaruCharacter.generated.h"     
 
@@ -18,10 +19,11 @@ class UAbilitySystemComponent;
 class UBaruCharacterAnimSet;           
 class UBaruEquipmentComponent; 
 class UBaruItemInstance;   
+class USpotLightComponent;
 struct FOnAttributeChangeData;               
 
 UCLASS()
-class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface // [추가] ICombatInterface 상속
+class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface , public IInteractableInterface
 {
     GENERATED_BODY()
 
@@ -35,6 +37,10 @@ public:
     
     UFUNCTION(BlueprintPure, Category = "BARU|Movement")
     bool IsSprinting() const { return bIsSprinting; }
+    
+    UFUNCTION(BlueprintPure, Category = "BARU|Headlight")
+    bool IsHeadlightOn() const { return bHeadlightOn; }
+    
     //수정 서버재검증 트레이스까지 선을 그리면 지저분해짐
     UFUNCTION(BlueprintCallable, Category = "BARU|Combat") 
     bool PerformLineTrace(FHitResult& OutHitResult, float TraceDistance = 1000.0f, bool bDrawDebug = false);
@@ -43,15 +49,35 @@ public:
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_ProcessInteraction(const FHitResult& HitResult);
     
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_StopInteraction();
+    
     virtual void PossessedBy(AController* NewController) override;
     virtual void OnRep_PlayerState() override;
 
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
     virtual void OnRep_Controller() override;
     
+    
+    // [추가] DBNO(다운) 진입. 서버 전용.
+    //   BaruCoreAttributeSet 이 첫 체력 0 도달 시 호출합니다.
+    UFUNCTION(BlueprintCallable, Category = "BARU|Combat")
+    void EnterDBNO(AActor* DownCauser);
+
+    // [추가] DBNO 해제(소생). 서버 전용.
+    UFUNCTION(BlueprintCallable, Category = "BARU|Combat")
+    void ReviveFromDBNO(float HealthRatio = 0.3f);
+    
     // [추가] CombatInterface 구현 함수 
     virtual void Die_Implementation(AActor* Killer) override;
     virtual bool IsDead_Implementation() const override;
+    
+    // [추가] InteractableInterface 구현 — 다운된 팀원 소생
+    virtual bool     CanInteract_Implementation(APawn* Interactor) const override;
+    virtual FText    GetInteractPromptText_Implementation(APawn* Interactor) const override;
+    virtual FGameplayTag GetInteractionTag_Implementation() const override;
+    virtual float    GetInteractionDuration_Implementation() const override;
+    virtual void     ExecuteInteraction_Implementation(APawn* Interactor) override;
     
     // [추가] 아래 7개는 구현이 없어서 UHT기본스터입이 0 / FALSE를 반환하고 있던 함수들
     virtual bool  IsDBNO_Implementation() const override;
@@ -80,7 +106,16 @@ protected:
     
     void Input_Jump();          
     void Input_StopJumping();   
-    void Input_Interact();      
+    void Input_Interact(); 
+    void Input_StopInteract();
+    void Input_ToggleHeadlight();
+    
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_SetHeadlightOn(bool bNewOn);
+
+    UFUNCTION()
+    void OnRep_HeadlightOn();
+    void UpdateHeadlightVisual();
     
     void Input_Fire();            
     void Input_SprintStart();       
@@ -118,6 +153,41 @@ protected:
     void OnRep_IsDead();      
 
     void NotifyGameModeOfDeath(); 
+    
+    // [추가] DBNO 상태가 바뀌었을 때 이동·연출을 갱신합니다.
+    //   PlayerState 의 OnDBNOStatusChanged 에 바인딩되어 서버·클라 모두에서 호출됩니다.
+    UFUNCTION()
+    void HandleDBNOStatusChanged(bool bNewDBNO);
+
+    // 블리드아웃(방치 시 사망) 타이머
+    FTimerHandle BleedOutTimerHandle;
+
+    void OnBleedOutExpired();
+
+    // [추가] 다운 상태로 버틸 수 있는 시간(초)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat")
+    float BleedOutDuration = 60.0f;
+    
+    // [추가] 소생에 걸리는 시간(초). F 를 이만큼 누르고 있어야 합니다.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat")
+    float ReviveDuration = 5.0f;
+
+    // [추가] 소생 시 회복 비율
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat")
+    float ReviveHealthRatio = 0.3f;
+    
+    // [추가] 다운 중에도 사망 연출과 구분되도록 BP 훅을 열어둡니다.
+    UFUNCTION(BlueprintImplementableEvent, Category = "BARU|Combat")
+    void OnDBNOCosmetic(bool bNewDBNO);
+    
+    // [추가] 진행 중인 홀드 상호작용 (서버 전용 상태)
+    UPROPERTY(Transient)
+    TWeakObjectPtr<AActor> PendingInteractTarget;
+
+    FTimerHandle InteractionTimerHandle;
+
+    void CompletePendingInteraction();
+    void CancelPendingInteraction();
 
 
 protected:
@@ -132,6 +202,14 @@ protected:
     //인벤토리 컴포넌트 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Equipment")
     TObjectPtr<UBaruEquipmentComponent> EquipmentComponent;
+    
+    // [추가 ] 헤드라이트. 세부 값은 BP 에서 조정가능
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Headlight")
+    TObjectPtr<USpotLightComponent> Headlight;
+
+    // 켜짐 상태. 복제되어야 다른 플레이어 화면에서도 내 불빛이 보임
+    UPROPERTY(ReplicatedUsing = OnRep_HeadlightOn, VisibleInstanceOnly, BlueprintReadOnly, Category = "BARU|Headlight")
+    bool bHeadlightOn = false;
     
     // 크라우치를 넣을 때 반드시 다시 손대게 됩니다
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
@@ -168,7 +246,11 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
     TObjectPtr<UInputAction> SelectSecondaryWeaponAction;
-
+    
+    //헤드라이트 토글 (L 키)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+    TObjectPtr<UInputAction> HeadlightAction;
+    
     // [추가] 달리기 (Shift, Hold)
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
     TObjectPtr<UInputAction> SprintAction;

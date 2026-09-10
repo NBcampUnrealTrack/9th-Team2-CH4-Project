@@ -2,7 +2,8 @@
 #include "Character/BaruCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Interfaces/CombatInterface.h"
-#include "Gameplay/Equipment/BaruEquipmentComponent.h"   // [추가] 무기 소지 여부 조회
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"   
+#include "KismetAnimationLibrary.h"
 
 void UBaruAnimInstance::NativeInitializeAnimation()
 {
@@ -41,10 +42,11 @@ void UBaruAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	const FVector Velocity = OwnerCharacter->GetVelocity();
 	const FVector GroundVelocity(Velocity.X, Velocity.Y, 0.f);
 
+	
 	GroundSpeed = GroundVelocity.Size();
 	bIsInAir = OwnerMovement->IsFalling();
 	bIsAccelerating = OwnerMovement->GetCurrentAcceleration().SizeSquared() > 0.f;
-	Direction = CalculateDirection(GroundVelocity, OwnerCharacter->GetActorRotation());
+	Direction = UKismetAnimationLibrary::CalculateDirection(GroundVelocity, OwnerCharacter->GetActorRotation());
 
 	// 사망 여부는 CombatInterface 로 조회합니다.
 	// _Implementation 을 직접 부르지 않고 Execute_ 를 쓰는 이유:
@@ -52,6 +54,7 @@ void UBaruAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	if (OwnerCharacter->Implements<UCombatInterface>())
 	{
 		bIsDead = ICombatInterface::Execute_IsDead(OwnerCharacter);
+		bIsDBNO = ICombatInterface::Execute_IsDBNO(OwnerCharacter);
 	}
 
 	// ★[추가] 앉기 상태. ACharacter 가 관리하는 복제 변수라 클라에서도 정확합니다.

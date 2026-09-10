@@ -55,6 +55,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|State")
 	bool bIsDead = false;
+	
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|State")
+	bool bIsDBNO = false;
 
 	// 상하 조준각. 나중에 AO_Rifle 같은 에임 오프셋에 연결합니다.
 	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Aim")
