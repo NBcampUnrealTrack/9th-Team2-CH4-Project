@@ -143,7 +143,6 @@ void ABaruGameMode::Logout(AController* Exiting)
 
             Super::Logout(Exiting);
             UpdateAlivePlayerCount();
-            CheckTeamWipe();
             return;
         }
 
@@ -465,7 +464,8 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
     const int32 TotalValue = CachedBaruGameState ? CachedBaruGameState->GetTeamScrapValue() : 0;
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Processing Settlement (Survived: %d, Total Team Value: %d)"), bAllExtracted, TotalValue);
 
-    UBaruSaveGameSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
+    // 데디케이티드 서버라면 GameMode에서 세이브를 관리하지만, 로컬 .sav 저장 시스템에서는 GameMode가 저장을 해서는 안됨
+    // UBaruSaveGameSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
 
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
@@ -477,27 +477,24 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
             const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
 
-            // Todo : 인벤토리 컴포넌트에서 GetTotalItemCount() 함수 구현되면 주석 해제
-            // int32 ExtractedItemCount = 0;
-            // if (bPlayerSurvived && PS)
-            // {
-            //     if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
-            //     {
-            //         ExtractedItemCount = InvenComp->GetTotalItemCount();
-            //     }
-            // }
-            
-            const int32 Kills = PS ? PS->GetMonsterKillCount() : 0;
-            
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
 
             // Todo : 인벤토리 컴포넌트에서 GetTotalItemCount() 함수 구현되면 주석 해제
-            // Report.ExtractedItemCount = ExtractedItemCount;
-            // Todo : PlayerController에서 int32 MonsterKillCount = 0; 선언부 구현되면 주석 해제
-            // Todo : BaruMonsterCharacter에서 몬스터가 사망할 때 GameMode->OnMonsterDied()를 호출하면 킬 카운트 정상 작동
-            // Report.MonsterKillCount = Kills;
+            // if (bPlayerSurvived && PS)
+            // {
+            //     if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
+            //     {
+            //         Report.ExtractedItemCount = InvenComp->GetTotalItemCount();
+            //     }
+            // }
+
+            // Todo : BaruPlayerController.h의 FBaruSettlementReport에 MonsterKillCount 필드가 추가되면 주석 해제
+            // if (PS)
+            // {
+            //     Report.MonsterKillCount = PS->GetMonsterKillCount();
+            // }
 
             BaruPC->Client_ShowSettlementUI(Report);
         }
@@ -546,7 +543,6 @@ void ABaruGameMode::CleanUpExpiredSnapshots()
     if (ExpiredIds.Num() > 0)
     {
         UpdateAlivePlayerCount();
-        CheckTeamWipe();
     }
 }
 
