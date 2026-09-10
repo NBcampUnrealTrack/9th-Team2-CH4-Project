@@ -67,6 +67,9 @@ protected:
 	// DataAsset에 지정된 몬스터 Ability를 서버에서 ASC에 등록
 	void GrantInitialAbilities();
 	
+	// DataAsset의 초기 능력치를 몬스터의 GAS Attribute에 적용
+	void ApplyInitialAttributesFromDataAsset();
+	
 	UPROPERTY(
 		ReplicatedUsing = OnRep_IsDead,
 		VisibleInstanceOnly,
@@ -77,6 +80,11 @@ protected:
 	
 	UFUNCTION()
 	void OnRep_IsDead();
+	
+	// 몬스터별 사망 애니메이션이나 래그돌 연출을
+	// 자식 블루프린트에서 구현할 수 있도록 제공
+	UFUNCTION(BlueprintImplementableEvent, Category = "Monster|Combat")
+	void OnDeathCosmetic();
 
 public:
 	

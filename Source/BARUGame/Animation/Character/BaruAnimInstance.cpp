@@ -2,6 +2,7 @@
 #include "Character/BaruCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Interfaces/CombatInterface.h"
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"   // [추가] 무기 소지 여부 조회
 
 void UBaruAnimInstance::NativeInitializeAnimation()
 {
@@ -11,6 +12,8 @@ void UBaruAnimInstance::NativeInitializeAnimation()
 	if (OwnerCharacter)
 	{
 		OwnerMovement = OwnerCharacter->GetCharacterMovement();
+		
+		bIsFirstPersonMesh = (GetOwningComponent() != OwnerCharacter->GetMesh());
 	}
 }
 
@@ -51,7 +54,21 @@ void UBaruAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		bIsDead = ICombatInterface::Execute_IsDead(OwnerCharacter);
 	}
 
-	// GetBaseAimRotation 은 시뮬레이션 프록시(남의 캐릭터)에서도
-	// 복제된 컨트롤 로테이션을 반환하므로 다른 플레이어 조준 방향도 맞게 나옵니다.
+	// ★[추가] 앉기 상태. ACharacter 가 관리하는 복제 변수라 클라에서도 정확합니다.
+	bIsCrouching = OwnerCharacter->bIsCrouched;
+	bIsSprinting = OwnerCharacter->IsSprinting();
+	
+	if (const UBaruEquipmentComponent* Equip = OwnerCharacter->FindComponentByClass<UBaruEquipmentComponent>())
+	{
+		bHasWeapon = (Equip->GetActiveWeapon() != nullptr);
+		
+		ActiveWeaponSlot = Equip->GetActiveWeaponSlot();
+	}
+	else
+	{
+		bHasWeapon = false;
+		ActiveWeaponSlot = EBaruEquipmentSlot::None;
+	}
+	
 	AimPitch = FRotator::NormalizeAxis(OwnerCharacter->GetBaseAimRotation().Pitch);
 }

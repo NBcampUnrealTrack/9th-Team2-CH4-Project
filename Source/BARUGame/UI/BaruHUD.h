@@ -5,10 +5,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
 #include "GameplayTagContainer.h"
+#include "Player/BaruPlayerController.h"
 
 #include "BaruHUD.generated.h"
 
 class UBaruPrimaryGameLayout;
+class UBaruSettlementResultWidget;
 class UCommonActivatableWidget;
 
 /**
@@ -27,7 +29,13 @@ protected:
 	virtual void BeginPlay() override;
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	
+	// PlayerController에서 정산 결과를 받았을 때 호출된다.
+	UFUNCTION()
+	void HandleSettlementReceived(
+		const FBaruSettlementReport& Report);
 
+protected:
 	// 화면에 생성할 Primary Game Layout Blueprint 클래스
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
 	TSubclassOf<UBaruPrimaryGameLayout> PrimaryGameLayoutClass;
@@ -46,8 +54,16 @@ protected:
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI", meta = (Categories = "UI.Layer"))
 	FGameplayTag InitialWidgetLayerTag;
+	
+	// 게임 종료 시 표시할 결과창 클래스
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI|Result")
+	TSubclassOf<UBaruSettlementResultWidget> SettlementResultWidgetClass;
 
 	// 실행 중 생성된 로컬 플레이어의 Primary Game Layout
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "BARU|UI")
 	TObjectPtr<UBaruPrimaryGameLayout> PrimaryGameLayout;
+	
+	// 정산 델리게이트를 연결한 로컬 PlayerController
+	UPROPERTY(Transient)
+	TObjectPtr<ABaruPlayerController> BoundPlayerController;
 };

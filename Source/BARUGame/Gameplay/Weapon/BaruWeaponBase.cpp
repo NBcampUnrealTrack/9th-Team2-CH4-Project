@@ -1,8 +1,11 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// BaruWeaponBase.cpp
 
 
 #include "Gameplay/Weapon/BaruWeaponBase.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/MeshComponent.h"
+#include "GameFramework/Character.h"
 #include "Gameplay/Weapon/Data/BaruWeaponDataAsset.h"
 #include "Net/UnrealNetwork.h"
 #include "GameplayEffect.h" // UGameplayEffect
@@ -10,11 +13,14 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
-	// GAS 인터페이스와 ASC 타입을 사용하기 위함
-#include "AbilitySystemInterface.h"
+
+#include "AbilitySystemInterface.h"	// GAS 인터페이스와 ASC 타입을 사용하기 위함
 #include "AbilitySystemComponent.h"
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
 #include "GameFramework/PlayerState.h" // PlayerState를 Cast할 때 전체 클래스 정의 필요(안 하면 cast.h 오류 발생)
+
+#include "Components/PrimitiveComponent.h"	// 무기 비활성 시 위치.
+
 
 ABaruWeaponBase::ABaruWeaponBase()
 {
@@ -24,8 +30,8 @@ ABaruWeaponBase::ABaruWeaponBase()
 		// 다른 플레이어에게도 장착 무기가 보이도록 Actor 복제
 	bReplicates = true;
 
-	// 무기는 Character에 붙어서 움직이므로 별도 위치 복제는 하지 않음
-	SetReplicateMovement(false);
+// 서버의 3인칭 무기 부착·이동 상태를 클라이언트에도 반영.
+	SetReplicateMovement(true);
 
 	// 무기의 보이는 몸체이자 RootComponent
 	WeaponMesh =
@@ -37,7 +43,74 @@ ABaruWeaponBase::ABaruWeaponBase()
 	// 장착 무기는 충돌 판정을 하지 않음
 	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	WeaponMesh->SetGenerateOverlapEvents(false);
+	
+		// 무기 장착 외형 추가 부분.
+	FirstPersonWeaponMesh =
+	CreateDefaultSubobject<USkeletalMeshComponent>(
+		TEXT("FirstPersonWeaponMesh"));
+
+	FirstPersonWeaponMesh->SetupAttachment(WeaponMesh);
+	FirstPersonWeaponMesh->SetIsReplicated(false);
+	FirstPersonWeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonWeaponMesh->SetGenerateOverlapEvents(false);
+	FirstPersonWeaponMesh->SetOnlyOwnerSee(true);
+	FirstPersonWeaponMesh->SetOwnerNoSee(false);
+	FirstPersonWeaponMesh->SetCastShadow(false);
+	FirstPersonWeaponMesh->SetHiddenInGame(true);
+
+	FirstPersonStaticMesh =
+		CreateDefaultSubobject<UStaticMeshComponent>(
+			TEXT("FirstPersonStaticMesh"));
+
+	FirstPersonStaticMesh->SetupAttachment(WeaponMesh);
+	FirstPersonStaticMesh->SetIsReplicated(false);
+	FirstPersonStaticMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonStaticMesh->SetGenerateOverlapEvents(false);
+	FirstPersonStaticMesh->SetOnlyOwnerSee(true);
+	FirstPersonStaticMesh->SetOwnerNoSee(false);
+	FirstPersonStaticMesh->SetCastShadow(false);
+	FirstPersonStaticMesh->SetHiddenInGame(true);
 }
+
+	// 무기를 다른 사람한테도 보이도록.
+void ABaruWeaponBase::BeginPlay()
+{
+	Super::BeginPlay();
+
+	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents;
+	GetComponents(PrimitiveComponents);
+
+	for (UPrimitiveComponent* Component : PrimitiveComponents)
+	{
+		if (!IsValid(Component))
+		{
+			continue;
+		}
+
+		const bool bFirstPerson =
+			Component == FirstPersonWeaponMesh.Get()
+			|| Component == FirstPersonStaticMesh.Get();
+
+		Component->SetOnlyOwnerSee(bFirstPerson);
+		
+		// 일반 WeaponMesh는 bHideFromOwner 설정을 따름.
+		// 별도 1인칭 Mesh는 항상 소유자에게 보이도록 유지.
+		Component->SetOwnerNoSee(!bFirstPerson && bHideFromOwner);
+		
+		// 장착 외형은 물리 시뮬레이션과 명중 충돌을 담당하지 않음.
+		Component->SetSimulatePhysics(false);
+		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Component->SetGenerateOverlapEvents(false);
+
+		if (bFirstPerson)
+		{
+			Component->SetCastShadow(false);
+		}
+	}
+
+	RefreshFirstPersonVisual();
+}
+
 
 	// 서버가 검증된 무기로 실제 발사 판정을 수행.
 void ABaruWeaponBase::Fire(AActor* WeaponInstigator)
@@ -191,6 +264,16 @@ void ABaruWeaponBase::InitializeFromData(
 		// 무기별 비활성 보관 위치 정보도 런타임 Weapon Actor에 복사.
 	HolsterSocketName = WeaponData->HolsterSocketName;
 	HolsterRelativeTransform = WeaponData->HolsterRelativeTransform;
+	HandRelativeTransform = WeaponData->HandRelativeTransform;
+	
+	
+	FirstPersonHandSocketName =
+	WeaponData->FirstPersonHandSocketName;
+
+	FirstPersonHandRelativeTransform =
+		WeaponData->FirstPersonHandRelativeTransform;
+
+	RefreshFirstPersonVisual();
 	
 		// Soft Class는 발사할 때마다 에셋을 로드하지 않기 위해, 장착할 때 한 번만 실제 클래스로 불러옴.
 	DamageEffectClass = WeaponData->DamageEffectClass.LoadSynchronous();
@@ -219,4 +302,170 @@ void ABaruWeaponBase::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABaruWeaponBase, Range);
 	DOREPLIFETIME(ABaruWeaponBase, MagazineCapacity);
 	DOREPLIFETIME(ABaruWeaponBase, FireInterval);
+	DOREPLIFETIME(ABaruWeaponBase, FirstPersonHandSocketName);
+	DOREPLIFETIME(ABaruWeaponBase, FirstPersonHandRelativeTransform);
+	DOREPLIFETIME(ABaruWeaponBase, bFirstPersonWeaponActive);
+}
+
+
+	//서버 - 무기 외형 정송 관련.
+void ABaruWeaponBase::OnRep_Owner()
+{
+    Super::OnRep_Owner();
+    RefreshFirstPersonVisual();
+}
+
+void ABaruWeaponBase::OnRep_FirstPersonState()
+{
+    RefreshFirstPersonVisual();
+}
+
+void ABaruWeaponBase::SetFirstPersonWeaponActive(bool bNewActive)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    bFirstPersonWeaponActive = bNewActive;
+
+    // 서버에서는 RepNotify가 자동 호출되지 않으므로 직접 갱신.
+    RefreshFirstPersonVisual();
+    ForceNetUpdate();
+}
+
+void ABaruWeaponBase::RefreshFirstPersonVisual()
+{
+    FirstPersonWeaponMesh->SetHiddenInGame(true);
+    FirstPersonStaticMesh->SetHiddenInGame(true);
+
+    if (!bFirstPersonWeaponActive || GetNetMode() == NM_DedicatedServer)
+    {
+        return;
+    }
+
+    ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+	if (!IsValid(OwnerCharacter) || !OwnerCharacter->IsLocallyControlled())
+	{
+    	if (IsValid(FirstPersonWeaponMesh))
+    	{
+    		FirstPersonWeaponMesh->SetVisibility(false, true);
+    	}
+        // Owner 복제가 도착하면 OnRep_Owner에서 다시 처리.
+        return;
+    }
+
+    USkeletalMeshComponent* ArmsMesh = nullptr;
+
+    TInlineComponentArray<USkeletalMeshComponent*> CharacterMeshes;
+    OwnerCharacter->GetComponents(CharacterMeshes);
+
+    const FName ArmsTag(TEXT("Baru.FirstPersonArms"));
+
+    for (USkeletalMeshComponent* Mesh : CharacterMeshes)
+    {
+        if (IsValid(Mesh) && Mesh->ComponentHasTag(ArmsTag))
+        {
+            ArmsMesh = Mesh;
+            break;
+        }
+    }
+
+    if (!IsValid(ArmsMesh))
+    {
+        BARU_NET_LOG(
+            this, LogBaruItem, Warning,
+            TEXT("1인칭 무기 부착 실패: Baru.FirstPersonArms 태그의 팔 메시가 없습니다."));
+        return;
+    }
+
+    const bool bHasAttachPoint =
+        ArmsMesh->DoesSocketExist(FirstPersonHandSocketName)
+        || ArmsMesh->GetBoneIndex(FirstPersonHandSocketName) != INDEX_NONE;
+
+    if (!bHasAttachPoint)
+    {
+        BARU_NET_LOG(
+            this, LogBaruItem, Warning,
+            TEXT("1인칭 무기 부착 실패: 팔 메시에서 '%s'를 찾지 못했습니다."),
+            *FirstPersonHandSocketName.ToString());
+        return;
+    }
+
+    const bool bSkeletalAttached =
+        FirstPersonWeaponMesh->AttachToComponent(
+            ArmsMesh,
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+            FirstPersonHandSocketName);
+
+    const bool bStaticAttached =
+        FirstPersonStaticMesh->AttachToComponent(
+            ArmsMesh,
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+            FirstPersonHandSocketName);
+
+    if (bSkeletalAttached)
+    {
+        FirstPersonWeaponMesh->SetRelativeTransform(
+            FirstPersonHandRelativeTransform);
+
+        FirstPersonWeaponMesh->SetHiddenInGame(false);
+    }
+
+    if (bStaticAttached)
+    {
+        FirstPersonStaticMesh->SetRelativeTransform(
+            FirstPersonHandRelativeTransform);
+
+        FirstPersonStaticMesh->SetHiddenInGame(false);
+    }
+}
+
+USceneComponent* ABaruWeaponBase::GetFireEffectAttachComponent() const
+{
+    const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+    if (!IsValid(OwnerPawn))
+    {
+        return nullptr;
+    }
+
+    const FName MuzzleSocket(TEXT("Muzzle"));
+
+    if (OwnerPawn->IsLocallyControlled())
+    {
+        if (FirstPersonWeaponMesh->GetSkeletalMeshAsset()
+            && FirstPersonWeaponMesh->DoesSocketExist(MuzzleSocket))
+        {
+            return FirstPersonWeaponMesh.Get();
+        }
+
+        if (FirstPersonStaticMesh->GetStaticMesh()
+            && FirstPersonStaticMesh->DoesSocketExist(MuzzleSocket))
+        {
+            return FirstPersonStaticMesh.Get();
+        }
+
+        return nullptr;
+    }
+
+    // 기존 BP의 3인칭 외형은 SkeletalMesh 또는 StaticMesh일 수 있음.
+    TInlineComponentArray<UMeshComponent*> MeshComponents;
+    GetComponents(MeshComponents);
+
+    for (UMeshComponent* Mesh : MeshComponents)
+    {
+        if (!IsValid(Mesh)
+            || Mesh == FirstPersonWeaponMesh.Get()
+            || Mesh == FirstPersonStaticMesh.Get())
+        {
+            continue;
+        }
+
+        if (Mesh->DoesSocketExist(MuzzleSocket))
+        {
+            return Mesh;
+        }
+    }
+
+    return nullptr;
 }

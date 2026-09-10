@@ -5,10 +5,18 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"
+#include "GameplayAbilitySpec.h"
 #include "BaruEquipmentComponent.generated.h"
 
 class ABaruWeaponBase;
 class UBaruWeaponDataAsset;
+class UGameplayAbility;
+class UBaruAbilitySystemComponent;
+class UBaruItemInstance;
+class UBaruInventoryComponent;
+
+
+DECLARE_MULTICAST_DELEGATE(FOnBaruEquipmentUpdated);
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class BARUGAME_API UBaruEquipmentComponent : public UActorComponent
@@ -24,8 +32,10 @@ public:
 	
 		// 서버에서 Weapon DataAsset을 받아 실제 Weapon Actor를 생성·장착.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
-	bool EquipWeapon(UBaruWeaponDataAsset* WeaponData);
-
+	bool EquipWeapon(
+		UBaruWeaponDataAsset* WeaponData,
+		UBaruItemInstance* SourceItem);
+	
 		// 지정한 무기 슬롯의 Weapon Actor를 제거.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment|Weapon")
 	void UnequipWeapon(EBaruEquipmentSlot WeaponSlot);
@@ -34,11 +44,19 @@ public:
 	// ActiveWeaponSlot에 따라 현재 손에 든 무기를 반환.
 	UFUNCTION(BlueprintPure, Category = "BARU|Equipment")
 	ABaruWeaponBase* GetActiveWeapon() const;
+	
+		// 장착 상태를 ASC의 발사 GA에 반영.
+		// Character의 ASC 초기화가 완료된 시점에도 호출.
+	void SyncActiveWeaponFireAbilityOnServer();
 
 		// GAS.
 	// Character 입력을 현재 장착 무기에 전달.
 	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
 	void RequestFireActiveWeapon();
+	
+		// 발사 버튼을 놓았을 때 호출. GA 연결.
+	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
+	void RequestStopFireActiveWeapon();
 	
 	// 서버 RPC를 추가.
 		// 클라이언트의 발사 입력을 서버로 전달.
@@ -47,8 +65,34 @@ public:
 
 		// 서버가 현재 장착 무기를 검증하고 실제 Fire()를 호출.
 	void FireActiveWeaponOnServer();
+	
+		// 지정한 무기 슬롯에 장착된 인벤토리 아이템을 반환.
+		// UI 아이콘과 이름 조회에 사용.
+	UFUNCTION(BlueprintPure, Category = "BARU|Equipment|Weapon")
+	UBaruItemInstance* GetEquippedWeaponItem(
+		EBaruEquipmentSlot WeaponSlot) const;
+
+		// 장착·해제·활성 무기 전환 시 UI에 변경을 알ㄹla.
+	FOnBaruEquipmentUpdated OnEquipmentUpdated;
 
 protected:
+	UBaruInventoryComponent*
+	GetOwnerInventoryComponent() const;
+	
+	// 서버가 현재 부여한 무기 발사 GA를 추적합니다.
+	// 무기 전환 시 기존 GA를 제거하기 위해 필요합니다.
+	// 이 장비 컴포넌트가 부여한 발사 GA만 제거합니다.
+	void ClearActiveWeaponFireAbilityOnServer();
+	
+	// 현재 부여한 발사 GA의 식별자.
+	FGameplayAbilitySpecHandle ActiveFireAbilityHandle;
+
+	// 기존 GA가 어느 ASC에 부여되었는지 추적합니다.
+	// PlayerState 교체나 캐릭터 제거 시 안전하게 정리하기 위한 약한 참조입니다.
+	// 캐릭터와 PlayerState의 연결이 끊겨도 기존 GA를 정리하기 위해 보관합니다.
+	TWeakObjectPtr<UBaruAbilitySystemComponent> ActiveFireAbilityASC;
+	
+	
 		// 주무기 슬롯에 실제로 생성되어 있는 Weapon Actor
 		// 아직 Equip 함수가 없으므로 현재는 비어 있는 상태.
 	UPROPERTY(
@@ -57,6 +101,17 @@ protected:
 		BlueprintReadOnly,
 		Category = "BARU|Equipment|Weapon")
 	TObjectPtr<ABaruWeaponBase> PrimaryWeapon;
+	
+	// 주무기 Actor를 생성할 때 사용한 인벤토리 아이템입니다.
+	UPROPERTY(
+		Transient,
+		ReplicatedUsing = OnRep_EquipmentState)
+	TObjectPtr<UBaruItemInstance> PrimaryWeaponItem;
+	
+	
+		// 각 무기가 사용할 Fire GA. 서버에서 장착 시 DA로부터 기록.
+	UPROPERTY(Transient)
+	TSubclassOf<UGameplayAbility> PrimaryFireAbilityClass;
 
 		// 보조무기 슬롯에 실제로 생성되어 있는 Weapon Actor
 	UPROPERTY(
@@ -65,11 +120,21 @@ protected:
 		BlueprintReadOnly,
 		Category = "BARU|Equipment|Weapon")
 	TObjectPtr<ABaruWeaponBase> SecondaryWeapon;
-
+	
+	// 보조무기 Actor를 생성할 때 사용한 인벤토리 아이템입니다.
+	UPROPERTY(
+		Transient,
+		ReplicatedUsing = OnRep_EquipmentState)
+	TObjectPtr<UBaruItemInstance> SecondaryWeaponItem;
+	
+		// 각 무기가 사용할 Fire GA. 서버에서 장착 시 DA로부터 기록 - 2.
+	UPROPERTY(Transient)
+	TSubclassOf<UGameplayAbility> SecondaryFireAbilityClass;
+	
 		// 현재 손에 들고 사용 중인 무기 슬롯
 		// 지금은 None이며, 다음 단계에서 PrimaryWeapon 또는 SecondaryWeapon으로 변경.
 	UPROPERTY(
-		Replicated,
+		ReplicatedUsing = OnRep_EquipmentState,
 		BlueprintReadOnly,
 		Category = "BARU|Equipment|Weapon")
 	EBaruEquipmentSlot ActiveWeaponSlot = EBaruEquipmentSlot::None;
@@ -109,4 +174,9 @@ protected:
 
 		// 비활성 무기: DataAsset에 지정된 등/허리 소켓에 부착
 	void AttachWeaponToHolster(ABaruWeaponBase* Weapon);
+
+	TSubclassOf<UGameplayAbility> GetActiveWeaponFireAbilityClass() const;
+	
+	UFUNCTION()
+	void OnRep_EquipmentState();
 };

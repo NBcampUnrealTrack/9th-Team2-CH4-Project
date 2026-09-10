@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   // ★[추가] EBaruEquipmentSlot
 #include "BaruAnimInstance.generated.h"
 
 class ABaruCharacter;
@@ -29,6 +30,21 @@ protected:
 	// -180 ~ 180. 옆걸음(스트레이프) 블렌드용.
 	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
 	float Direction = 0.f;
+	
+	//  앉은 상태. ABP 에서 크라우치 애니메이션 분기에 사용
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
+	bool bIsCrouching = false;
+
+	//  달리는 중인지. 걷기/달리기 블렌드 구분용.
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
+	bool bIsSprinting = false;
+
+	// 무기를 들고 있는지. 권총 자세로 블렌드할 때 사용
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Weapon")
+	bool bHasWeapon = false;
+	
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Weapon")
+	EBaruEquipmentSlot ActiveWeaponSlot = EBaruEquipmentSlot::None;
 
 	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Movement")
 	bool bIsInAir = false;
@@ -43,6 +59,9 @@ protected:
 	// 상하 조준각. 나중에 AO_Rifle 같은 에임 오프셋에 연결합니다.
 	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|Aim")
 	float AimPitch = 0.f;
+	
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Anim|View")
+	bool bIsFirstPersonMesh = false;
 
 private:
 	UPROPERTY(Transient)

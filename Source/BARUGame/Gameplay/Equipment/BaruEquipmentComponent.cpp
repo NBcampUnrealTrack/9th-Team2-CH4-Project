@@ -12,6 +12,17 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 
+    //GA 연결
+#include "GameFramework/Pawn.h"
+#include "Player/BaruPlayerState.h"
+#include "AbilitySystem/BaruAbilitySystemComponent.h"
+#include "GameplayTags/BaruGameplayTags.h"
+#include "Abilities/GameplayAbility.h"
+#include "GameplayAbilitySpec.h"
+#include "Gameplay/Items/BaruItemInstance.h"
+
+#include "Gameplay/Inventory/BaruInventoryComponent.h"
+
 #include "BaruLog.h"
 
 	// 장비는 매 프레임 계산할 일이 없으므로 Tick을 사용 않함.
@@ -23,6 +34,21 @@ UBaruEquipmentComponent::UBaruEquipmentComponent()
 	SetIsReplicatedByDefault(true);
 }
 
+UBaruInventoryComponent*
+UBaruEquipmentComponent::GetOwnerInventoryComponent() const
+{
+    const ACharacter* OwnerCharacter =
+        Cast<ACharacter>(GetOwner());
+
+    ABaruPlayerState* BaruPS = OwnerCharacter
+        ? OwnerCharacter->GetPlayerState<ABaruPlayerState>()
+        : nullptr;
+
+    return IsValid(BaruPS)
+        ? BaruPS->GetInventoryComponent()
+        : nullptr;
+}
+
 // 플레이어 캐릭터 사망 시 액터도 사라지게 하는 내용.
     // Owner Character가 Destroy될 때 호출됨.
     // 단순 사망 상태가 아니라 Actor가 실제로 사라질 때만 실행됨.
@@ -30,11 +56,13 @@ UBaruEquipmentComponent::UBaruEquipmentComponent()
 void UBaruEquipmentComponent::EndPlay(
     const EEndPlayReason::Type EndPlayReason)
 {
-        // 무기 Actor의 Destroy는 서버만 결정하고, 결과를 클라이언트에 복제합니다.
-    if (AActor* OwnerActor = GetOwner();
-        IsValid(OwnerActor) && OwnerActor->HasAuthority())
+    AActor* OwnerActor = GetOwner();
+
+    if (OwnerActor && OwnerActor->HasAuthority())
     {
-            // 기존 장착 해제 함수가 내부에서 Weapon->Destroy()를 수행한다는 전제입니다.
+        // PlayerState를 다시 찾지 않고 저장된 ASC로 GA부터 정리.
+        ClearActiveWeaponFireAbilityOnServer();
+
         UnequipWeapon(EBaruEquipmentSlot::PrimaryWeapon);
         UnequipWeapon(EBaruEquipmentSlot::SecondaryWeapon);
     }
@@ -45,22 +73,35 @@ void UBaruEquipmentComponent::EndPlay(
 
 	// 위에서 Replicated로 선언한 변수들을 실제 복제 목록에 등록.
 void UBaruEquipmentComponent::GetLifetimeReplicatedProps(
-	TArray<FLifetimeProperty>& OutLifetimeProps) const
+    TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(UBaruEquipmentComponent, PrimaryWeapon);
-	DOREPLIFETIME(UBaruEquipmentComponent, SecondaryWeapon);
-	DOREPLIFETIME(UBaruEquipmentComponent, ActiveWeaponSlot);
+    DOREPLIFETIME(UBaruEquipmentComponent, PrimaryWeapon);
+    DOREPLIFETIME(UBaruEquipmentComponent, SecondaryWeapon);
+
+    DOREPLIFETIME(
+        UBaruEquipmentComponent,
+        PrimaryWeaponItem);
+
+    DOREPLIFETIME(
+        UBaruEquipmentComponent,
+        SecondaryWeaponItem);
+
+    DOREPLIFETIME(
+        UBaruEquipmentComponent,
+        ActiveWeaponSlot);
 }
 
     // 서버가 무기 DataAsset을 기준으로 Weapon Actor를 생성.
     // Character의 3인칭 Mesh에 부착.
 bool UBaruEquipmentComponent::EquipWeapon(
-    UBaruWeaponDataAsset* WeaponData)
+    UBaruWeaponDataAsset* WeaponData,
+    UBaruItemInstance* SourceItem)
 {
        // 장착 판정은 서버.
-    if (!GetOwner() || !GetOwner()->HasAuthority() || !WeaponData)
+        // 인벤토리 ItemInstance가 없는 장착 요청은 받지 않음.
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !WeaponData || !IsValid(SourceItem))
     {
         return false;
     }
@@ -81,6 +122,31 @@ bool UBaruEquipmentComponent::EquipWeapon(
         return false;
     }
 
+    UBaruItemInstance* EquippedItem =
+    TargetSlot == EBaruEquipmentSlot::PrimaryWeapon
+    ? PrimaryWeaponItem.Get()
+    : SecondaryWeaponItem.Get();
+
+    if (IsValid(SourceItem) && EquippedItem == SourceItem)
+    {
+        if (ActiveWeaponSlot != TargetSlot)
+        {
+            SetActiveWeaponSlotOnServer(TargetSlot);
+        }
+
+        return true;
+    }
+    
+    UBaruInventoryComponent* InventoryComponent =
+    GetOwnerInventoryComponent();
+
+    if (!IsValid(InventoryComponent)
+        || InventoryComponent->IsItemEquipped(SourceItem))
+    {
+        return false;
+    }
+    
+    
         // DataAsset에 지정된 BP_Weapon_Revolver / BP_Weapon_Rifle 클래스를 부름.
     TSubclassOf<ABaruWeaponBase> WeaponClass =
         WeaponData->WeaponActorClass.LoadSynchronous();
@@ -153,6 +219,30 @@ bool UBaruEquipmentComponent::EquipWeapon(
         // WeaponBase의 런타임 값에 DataAsset의 피해량·사거리·탄창 수 등 정적 설정을 새 Actor에 복사.
         // 무기별 수치의 기준을 DataAsset 한 곳으로 유지하기 위함.
     NewWeapon->InitializeFromData(WeaponData);
+    
+    // 새 무기 액터 생성까지 성공한 뒤 격자를 비움.
+    if (!InventoryComponent->SetItemEquipped(
+            SourceItem,
+            true))
+    {
+        NewWeapon->Destroy();
+        return false;
+    }
+
+    // 같은 슬롯에 기존 무기가 있다면 인벤토리로 반환.
+    if (IsValid(EquippedItem)
+        && !InventoryComponent->SetItemEquipped(
+            EquippedItem,
+            false))
+    {
+        // 기존 무기를 반환할 공간이 없으면 새 장착 취소.
+        InventoryComponent->SetItemEquipped(
+            SourceItem,
+            false);
+
+        NewWeapon->Destroy();
+        return false;
+    }
 
     /* 비활성 무기를 캐릭터 메시에 붙이기로 한 다음 주석처리한 부분.
      * 만약 비활성 무기를 안 할 거라면 다시 복구할 것.
@@ -191,14 +281,18 @@ bool UBaruEquipmentComponent::EquipWeapon(
         PreviousWeaponInSlot->Destroy();
     }
     
-    // 새 무기를 해당 슬롯에 보관
+    // 새 무기 Actor와 해당 무기의 발사 GA를 같은 슬롯에 보관.
     if (TargetSlot == EBaruEquipmentSlot::PrimaryWeapon)
     {
         PrimaryWeapon = NewWeapon;
+        PrimaryWeaponItem = SourceItem;
+        PrimaryFireAbilityClass = WeaponData->FireAbilityClass;
     }
     else
     {
         SecondaryWeapon = NewWeapon;
+        SecondaryWeaponItem = SourceItem;
+        SecondaryFireAbilityClass = WeaponData->FireAbilityClass;
     }
     
     NewWeapon->SetActorHiddenInGame(false);
@@ -213,14 +307,21 @@ bool UBaruEquipmentComponent::EquipWeapon(
     {
         ActiveWeaponSlot = TargetSlot;
         AttachWeaponToHand(NewWeapon);
+
+         // 손에 사용하는 무기가 바뀌었으므로 발사 GA도 변경.
+        SyncActiveWeaponFireAbilityOnServer();
     }
     else
     {
-           // 이미 손에 든 무기가 있으면 새 무기는 등/허리에 보관
+         // 홀스터에만 추가하는 무기는 현재 발사 GA를 바꾸지 않음.
         AttachWeaponToHolster(NewWeapon);
     }
 
     GetOwner()->ForceNetUpdate();
+    
+        // Listen Server의 로컬 UI는 서버에서 직접 갱신합니다.
+        // 일반 클라이언트는 OnRep_EquipmentState에서 갱신됩니다.
+    OnEquipmentUpdated.Broadcast();
     //-------여기까지 비활성 무기 장착 부분.
 
     BARU_NET_LOG(
@@ -242,6 +343,32 @@ void UBaruEquipmentComponent::UnequipWeapon(
     {
         return;
     }
+    
+    UBaruItemInstance* EquippedItem =
+    GetEquippedWeaponItem(WeaponSlot);
+
+    if (IsValid(EquippedItem))
+    {
+        UBaruInventoryComponent* InventoryComponent =
+            GetOwnerInventoryComponent();
+
+        if (!IsValid(InventoryComponent)
+            || !InventoryComponent->SetItemEquipped(
+                EquippedItem,
+                false))
+        {
+            BARU_NET_LOG(
+                GetOwner(),
+                LogBaruItem,
+                Warning,
+                TEXT(
+                    "무기 장착 해제 실패: "
+                    "인벤토리에 반환할 공간이 없습니다. Slot=%d"),
+                static_cast<int32>(WeaponSlot));
+
+            return;
+        }
+    }
 
     if (WeaponSlot == EBaruEquipmentSlot::PrimaryWeapon)
     {
@@ -251,6 +378,8 @@ void UBaruEquipmentComponent::UnequipWeapon(
         }
 
         PrimaryWeapon = nullptr;
+        PrimaryWeaponItem = nullptr;
+        PrimaryFireAbilityClass = nullptr;
     }
     else if (WeaponSlot == EBaruEquipmentSlot::SecondaryWeapon)
     {
@@ -260,14 +389,24 @@ void UBaruEquipmentComponent::UnequipWeapon(
         }
 
         SecondaryWeapon = nullptr;
+        SecondaryWeaponItem = nullptr;
+        SecondaryFireAbilityClass = nullptr;
+    }
+    else
+    {
+        return;
     }
 
     if (ActiveWeaponSlot == WeaponSlot)
     {
         ActiveWeaponSlot = EBaruEquipmentSlot::None;
+
+        // 활성 무기를 해제했으므로 현재 발사 GA 제거 요청.
+        SyncActiveWeaponFireAbilityOnServer();
     }
 
     GetOwner()->ForceNetUpdate();
+    OnEquipmentUpdated.Broadcast();
 }
 
     //GAS
@@ -286,6 +425,31 @@ ABaruWeaponBase* UBaruEquipmentComponent::GetActiveWeapon() const
     }
 }
     //GAS
+
+UBaruItemInstance*
+UBaruEquipmentComponent::GetEquippedWeaponItem(
+    EBaruEquipmentSlot WeaponSlot) const
+{
+    switch (WeaponSlot)
+    {
+    case EBaruEquipmentSlot::PrimaryWeapon:
+        return PrimaryWeaponItem;
+
+    case EBaruEquipmentSlot::SecondaryWeapon:
+        return SecondaryWeaponItem;
+
+    default:
+        return nullptr;
+    }
+}
+
+void UBaruEquipmentComponent::OnRep_EquipmentState()
+{
+    OnEquipmentUpdated.Broadcast();
+}
+
+
+/*GA 연결로 인하여 해당 부분 수정.
     //Character가 발사 입력을 받았을 때 호출. 진입점.
 void UBaruEquipmentComponent::RequestFireActiveWeapon()
 {
@@ -304,6 +468,53 @@ void UBaruEquipmentComponent::RequestFireActiveWeapon()
     Server_RequestFireActiveWeapon();   // 서버_ 응답 -> 발싸!!! 액티브 웨폰.
     
 }
+*/
+    //GA 사격 시작.
+void UBaruEquipmentComponent::RequestFireActiveWeapon()
+{
+    APawn* Pawn = Cast<APawn>(GetOwner());
+    if (!IsValid(Pawn) || !Pawn->IsLocallyControlled())
+    {
+        return;
+    }
+
+    ABaruPlayerState* PS = Pawn->GetPlayerState<ABaruPlayerState>();
+    UBaruAbilitySystemComponent* ASC =
+        PS ? PS->GetBaruAbilitySystemComponent() : nullptr;
+
+    if (!IsValid(ASC))
+    {
+        BARU_NET_LOG(Pawn, LogBaruGAS, Warning,
+            TEXT("[TEST] 발사 입력 실패: ASC 없음"));
+        return;
+    }
+
+    BARU_NET_LOG(Pawn, LogBaruGAS, Log,
+        TEXT("[TEST] 발사 입력 → ASC"));
+
+    ASC->AbilityInputTagPressed(
+        FBaruGameplayTags::Get().InputTag_Ability_Primary);
+}
+    // GA - 연사 멈춤.
+void UBaruEquipmentComponent::RequestStopFireActiveWeapon()
+{
+    APawn* Pawn = Cast<APawn>(GetOwner());
+    if (!IsValid(Pawn) || !Pawn->IsLocallyControlled())
+    {
+        return;
+    }
+
+    ABaruPlayerState* PS = Pawn->GetPlayerState<ABaruPlayerState>();
+    UBaruAbilitySystemComponent* ASC =
+        PS ? PS->GetBaruAbilitySystemComponent() : nullptr;
+
+    if (IsValid(ASC))
+    {
+        ASC->AbilityInputTagReleased(
+            FBaruGameplayTags::Get().InputTag_Ability_Primary);
+    }
+}
+
 
         //RPC 데이터에는 별도 입력값이 없음. -> 최소한 컴포넌트의 Owner가 정상인지 확인 필요.
 bool UBaruEquipmentComponent::Server_RequestFireActiveWeapon_Validate()
@@ -403,6 +614,10 @@ void UBaruEquipmentComponent::SetActiveWeaponSlotOnServer(
         // 해당 슬롯에 실제 장착된 무기가 없으면 전환하지 않음
     if (!IsValid(NewActiveWeapon))
     {
+        BARU_NET_LOG(
+            GetOwner(), LogBaruItem, Warning,
+            TEXT("무기 전환 실패: 해당 슬롯에 장착된 무기가 없습니다. Slot=%d"),
+            static_cast<int32>(NewWeaponSlot));
         return;
     }
 
@@ -418,11 +633,15 @@ void UBaruEquipmentComponent::SetActiveWeaponSlotOnServer(
         AttachWeaponToHolster(PreviousWeapon);
     }
 
-        // 새 무기는 손으로 이동
+    // 새 무기는 손으로 이동.
     ActiveWeaponSlot = NewWeaponSlot;
     AttachWeaponToHand(NewActiveWeapon);
 
+    // 손에 든 무기에 맞춰 발사 GA 변경.
+    SyncActiveWeaponFireAbilityOnServer();
+
     GetOwner()->ForceNetUpdate();
+    OnEquipmentUpdated.Broadcast();
 }
 
     //무기를 손에 붙이기.
@@ -447,15 +666,29 @@ void UBaruEquipmentComponent::AttachWeaponToHand(
 
     if (!bHasAttachPoint)
     {
+        BARU_NET_LOG(
+            GetOwner(), LogBaruItem, Warning,
+            TEXT("손 부착 실패: 전신 메시에서 '%s'를 찾지 못했습니다."),
+            *ThirdPersonWeaponAttachPoint.ToString());
         return;
     }
 
-    Weapon->AttachToComponent(
+    const bool bAttached = Weapon->AttachToComponent(
         CharacterMesh,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale,
         ThirdPersonWeaponAttachPoint);
 
-    Weapon->SetActorRelativeTransform(FTransform::Identity);
+    if (!bAttached)
+    {
+        return;
+    }
+
+    Weapon->SetActorRelativeTransform(
+        Weapon->GetHandRelativeTransform());
+
+    // 같은 무기의 본인용 외형도 팔에 표시.
+    Weapon->SetFirstPersonWeaponActive(true);
+    Weapon->ForceNetUpdate();
 }
 
     // 홀스터에 무기 붙이기.
@@ -468,6 +701,10 @@ void UBaruEquipmentComponent::AttachWeaponToHolster(
         return;
     }
 
+    
+        // 비활성 무기의 본인용 외형은 숨김.
+    Weapon->SetFirstPersonWeaponActive(false);  // 기존 무기의 본인용 외형은 숨겨지고, 새 무기의 본인용 외형만 나타남.
+    
     const FName HolsterSocketName = Weapon->GetHolsterSocketName();    
     if (HolsterSocketName.IsNone())
     {
@@ -531,4 +768,159 @@ void UBaruEquipmentComponent::AttachWeaponToHolster(
         TEXT("홀스터 부착 성공: Weapon=%s, Socket=%s"),
         *GetNameSafe(Weapon),
         *HolsterSocketName.ToString());
+}
+
+    //GA 추가 위해. DA는 외형 담당.
+TSubclassOf<UGameplayAbility>
+UBaruEquipmentComponent::GetActiveWeaponFireAbilityClass() const
+{
+    switch (ActiveWeaponSlot)
+    {
+    case EBaruEquipmentSlot::PrimaryWeapon:
+        return PrimaryFireAbilityClass;
+
+    case EBaruEquipmentSlot::SecondaryWeapon:
+        return SecondaryFireAbilityClass;
+
+    default:
+        return nullptr;
+    }
+}
+
+
+void UBaruEquipmentComponent::ClearActiveWeaponFireAbilityOnServer()
+{
+    AActor* OwnerActor = GetOwner();
+
+    if (!OwnerActor || !OwnerActor->HasAuthority())
+    {
+        return;
+    }
+
+    UBaruAbilitySystemComponent* GrantedASC =
+        ActiveFireAbilityASC.Get();
+
+    const FGameplayAbilitySpecHandle HandleToRemove =
+        ActiveFireAbilityHandle;
+
+    // 취소 과정에서 다른 처리가 실행되더라도 같은 핸들을 다시 제거하지 않도록
+    // 내부 기록부터 비웁니다.
+    ActiveFireAbilityHandle = FGameplayAbilitySpecHandle();
+    ActiveFireAbilityASC.Reset();
+
+    if (!IsValid(GrantedASC) || !HandleToRemove.IsValid())
+    {
+        return;
+    }
+
+    GrantedASC->CancelAbilityHandle(HandleToRemove);
+    GrantedASC->ClearAbility(HandleToRemove);
+}
+
+void UBaruEquipmentComponent::SyncActiveWeaponFireAbilityOnServer()
+{
+    AActor* OwnerActor = GetOwner();
+
+    if (!OwnerActor || !OwnerActor->HasAuthority())
+    {
+        return;
+    }
+
+    ABaruWeaponBase* ActiveWeapon = GetActiveWeapon();
+
+    // 무기 해제 시에는 현재 PlayerState 연결 여부와 무관하게
+    // 저장해 둔 ASC에서 기존 발사 GA를 제거합니다.
+    if (!IsValid(ActiveWeapon))
+    {
+        ClearActiveWeaponFireAbilityOnServer();
+        return;
+    }
+
+    const TSubclassOf<UGameplayAbility> FireClass =
+        GetActiveWeaponFireAbilityClass();
+
+    if (!FireClass || FireClass->HasAnyClassFlags(CLASS_Abstract))
+    {
+        ClearActiveWeaponFireAbilityOnServer();
+
+        BARU_NET_LOG(
+            OwnerActor, LogBaruGAS, Warning,
+            TEXT("Fire GA 연결 실패: FireAbilityClass 미지정 또는 추상 클래스. Weapon=%s"),
+            *GetNameSafe(ActiveWeapon));
+
+        return;
+    }
+
+    ACharacter* OwnerCharacter = Cast<ACharacter>(OwnerActor);
+
+    ABaruPlayerState* PS = OwnerCharacter
+        ? OwnerCharacter->GetPlayerState<ABaruPlayerState>()
+        : nullptr;
+
+    UBaruAbilitySystemComponent* ASC = IsValid(PS)
+        ? PS->GetBaruAbilitySystemComponent()
+        : nullptr;
+
+    if (!IsValid(ASC))
+    {
+        // 새 발사 GA를 연결할 수 없는 상태에서 이전 GA가 남지 않도록 정리.
+        ClearActiveWeaponFireAbilityOnServer();
+
+        BARU_NET_LOG(
+            OwnerActor, LogBaruGAS, Warning,
+            TEXT("Fire GA 연결 실패: PlayerState ASC가 없습니다."));
+
+        return;
+    }
+
+    // ASC, GA 클래스, 원본 무기 Actor가 모두 같으면 중복 부여하지 않음.
+    if (ActiveFireAbilityHandle.IsValid()
+        && ActiveFireAbilityASC.Get() == ASC)
+    {
+        const FGameplayAbilitySpec* ExistingSpec =
+            ASC->FindAbilitySpecFromHandle(ActiveFireAbilityHandle);
+
+        if (ExistingSpec
+            && ExistingSpec->Ability
+            && ExistingSpec->Ability->GetClass() == FireClass.Get()
+            && ExistingSpec->SourceObject.Get() == ActiveWeapon)
+        {
+            return;
+        }
+    }
+
+    // 이전 무기의 GA를 취소·제거한 뒤 새 GA를 부여.
+    ClearActiveWeaponFireAbilityOnServer();
+
+    // FireClass는 DA에서 선택한 GA_Revolver_Fire 또는 GA_Rifle_Fire.
+    // SourceObject에는 이번에 실제로 장착된 무기 Actor를 저장.
+    FGameplayAbilitySpec NewSpec(
+        FireClass,
+        1,
+        INDEX_NONE,
+        ActiveWeapon);
+
+    NewSpec.GetDynamicSpecSourceTags().AddTag(
+        FBaruGameplayTags::Get().InputTag_Ability_Primary);
+
+    ActiveFireAbilityHandle = ASC->GiveAbility(NewSpec);
+
+    if (!ActiveFireAbilityHandle.IsValid())
+    {
+        BARU_NET_LOG(
+            OwnerActor, LogBaruGAS, Warning,
+            TEXT("Fire GA 부여 실패: Weapon=%s GA=%s"),
+            *GetNameSafe(ActiveWeapon),
+            *GetNameSafe(FireClass.Get()));
+
+        return;
+    }
+
+    ActiveFireAbilityASC = ASC;
+
+    BARU_NET_LOG(
+        OwnerActor, LogBaruGAS, Log,
+        TEXT("활성 Fire GA 변경: Weapon=%s GA=%s"),
+        *GetNameSafe(ActiveWeapon),
+        *GetNameSafe(FireClass.Get()));
 }

@@ -3,6 +3,8 @@
 #include "GameplayEffectExtension.h"
 #include "Interfaces/CombatInterface.h"
 #include "BaruLog.h"
+#include "Character/BaruCharacter.h"
+#include "GameplayTags/BaruGameplayTags.h"
 
 UBaruCoreAttributeSet::UBaruCoreAttributeSet()
 {
@@ -21,7 +23,7 @@ void UBaruCoreAttributeSet::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, Health, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, MaxHealth, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, PhysicalDefense, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, SpecialResistance, COND_None, REPNOTIFY_Always); // [추가]
+    DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, SpecialResistance, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UBaruCoreAttributeSet, MoveSpeed, COND_None, REPNOTIFY_Always);
 }
 
@@ -66,15 +68,54 @@ void UBaruCoreAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCa
             const float OldHealth = GetHealth();
             const float NewHealth = FMath::Clamp(OldHealth - LocalIncomingDamage, 0.0f, GetMaxHealth());
             SetHealth(NewHealth);
+            
+            if (NewHealth > 0.0f && TargetActor)
+            {
+                // 인터페이스를 통해 몽타주 및 로컬 사운드 호출
+                if (TargetActor->Implements<UCombatInterface>())
+                {
+                    FHitResult EmptyHit;
+                    ICombatInterface::Execute_ApplyCombatDamage(TargetActor, LocalIncomingDamage, EmptyHit, SourceActor, nullptr);
+                }
 
-            BARU_NET_LOG(TargetActor, LogBaruCombat, Log, TEXT("Damage Applied: %.1f | Health: %.1f -> %.1f"), LocalIncomingDamage, OldHealth, NewHealth);
+                // GameplayCue로 피격 신음/피격 화면 연출 브로드캐스트
+                if (UAbilitySystemComponent* TargetASC = GetOwningAbilitySystemComponent())
+                {
+                    FGameplayCueParameters CueParams;
+                    CueParams.RawMagnitude = LocalIncomingDamage;
+                    CueParams.EffectCauser = SourceActor;
+                    TargetASC->ExecuteGameplayCue(FBaruGameplayTags::Get().GameplayCue_Character_Moan, CueParams);
+                }
+            }
 
             // 사망 검증 및 1회만 Die 인터페이스 호출
             if (NewHealth <= 0.0f && TargetActor && TargetActor->Implements<UCombatInterface>())
             {
-                if (!ICombatInterface::Execute_IsDead(TargetActor))
+                // 이미 완전 사망한 액터는 무시
+                if (ICombatInterface::Execute_IsDead(TargetActor))
+                {
+                    return;
+                }
+
+                // 몬스터는 DBNO 없이 즉시 사망
+                if (TargetActor->IsA(APawn::StaticClass()) && !Cast<APawn>(TargetActor)->IsPlayerControlled())
                 {
                     ICombatInterface::Execute_Die(TargetActor, SourceActor);
+                    return;
+                }
+
+                // 플레이어: 이미 DBNO 상태에서 또 치명상을 입었으면 완전 사망
+                if (ICombatInterface::Execute_IsDBNO(TargetActor))
+                {
+                    ICombatInterface::Execute_Die(TargetActor, SourceActor);
+                }
+                else
+                {
+                    // 첫 체력 0 도달 -> 다운(DBNO) 상태 진입 (TODO : BaruCharacter에서 EnterDBNO 구현 되면 주석 해제)
+                    // if (ABaruCharacter* BaruChar = Cast<ABaruCharacter>(TargetActor))
+                    // {
+                    //     BaruChar->EnterDBNO(SourceActor);
+                    // }
                 }
             }
         }

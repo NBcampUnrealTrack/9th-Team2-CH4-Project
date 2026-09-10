@@ -125,6 +125,10 @@ public:
 	FGameplayTag GameplayCue_Weapon_Rifle_Fire;
 	FGameplayTag GameplayCue_Weapon_Revolver_Fire;
 	FGameplayTag GameplayCue_Weapon_Grenade_Explode;
+	
+	FGameplayTag GameplayCue_Combat_HitImpact;
+	FGameplayTag GameplayCue_Character_Moan;
+	FGameplayTag GameplayCue_Monster_Aggro;
 
 private:
 	static FBaruGameplayTags GameplayTags;
