@@ -9,7 +9,8 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruReadyStatusChanged, bool, bIsReady);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDBNOStatusChanged, bool, bIsDBNO);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSanity);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDeadStatusChanged, bool, bIsDead); // [추가]
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDeadStatusChanged, bool, bIsDead);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruPlayerKillCountChanged, int32, NewKillCount);
 
 class UAbilitySystemComponent;
 class UBaruAbilitySystemComponent;      
@@ -142,7 +143,7 @@ protected:
     UPROPERTY(ReplicatedUsing = OnRep_IsDBNO, VisibleInstanceOnly, Category = "BARU|State")
     bool bIsDBNO = false;
 
-    UPROPERTY(ReplicatedUsing = OnRep_IsDead, VisibleInstanceOnly, Category = "BARU|State")   // ★[추가]
+    UPROPERTY(ReplicatedUsing = OnRep_IsDead, VisibleInstanceOnly, Category = "BARU|State")
     bool bIsDead = false;
 
     // [삭제] float Sanity = 100.0f; 중복
@@ -154,12 +155,34 @@ protected:
     virtual void OnRep_IsDBNO();
 
     UFUNCTION()
-    virtual void OnRep_IsDead();      // [추가]
+    virtual void OnRep_IsDead();
 
     // [삭제] OnRep_Sanity()
     // [추가] Sanity 어트리뷰트 변경 → UI 델리게이트 브로드캐스트
     void HandleSanityChanged(const FOnAttributeChangeData& ChangeData);
 
 private:
-    FDelegateHandle SanityChangedHandle;   // [추가]
+    FDelegateHandle SanityChangedHandle;
+    
+    
+    
+    
+public:
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState|Score")
+    int32 GetMonsterKillCount() const { return MonsterKillCount; }
+
+    // [Server Only] 킬 수 증가
+    UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState|Score")
+    void AddMonsterKill();
+
+public:
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Score")
+    FOnBaruPlayerKillCountChanged OnMonsterKillCountChanged;
+
+protected:
+    UPROPERTY(ReplicatedUsing = OnRep_MonsterKillCount, VisibleInstanceOnly, Category = "BARU|Score")
+    int32 MonsterKillCount = 0;
+
+    UFUNCTION()
+    virtual void OnRep_MonsterKillCount();
 };

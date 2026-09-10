@@ -10,6 +10,7 @@
 class ABaruPlayerController;
 class ABaruPlayerState;
 class ABaruCharacter;
+class ABaruMonsterCharacter;
 
 struct FDisconnectedPlayerSnapshot
 {
@@ -61,6 +62,22 @@ public:
 	// 최종 보상 정산 및 SaveGame 영구 기록 실행
 	UFUNCTION(BlueprintCallable, Category = "BARU|GameMode")
 	void ProcessSettlement(bool bAllExtracted);
+	
+	
+	// 몬스터 등록 및 사망 처리 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|GameMode|Monster")
+	void RegisterMonster(ABaruMonsterCharacter* Monster);
+
+	UFUNCTION(BlueprintCallable, Category = "BARU|GameMode|Monster")
+	void OnMonsterDied(ABaruMonsterCharacter* Monster, AActor* Killer);
+	
+	// 비정상 강제 파괴(KillZ/Destroy) 대비 안전 등록 해제 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|GameMode|Monster")
+	void UnregisterMonster(ABaruMonsterCharacter* Monster);
+	
+	// [스포너 대비 방어 로직] 스포너가 앞으로 소환할 예정 수량을 등록
+	UFUNCTION(BlueprintCallable, Category = "BARU|GameMode|Monster")
+	void RegisterExpectedSpawns(int32 ExpectedCount);
 
 protected:
 	void CheckTeamWipe();
@@ -95,7 +112,7 @@ protected:
 	
 	// 탐사 실패/시간 초과 정산 후 복귀할 기본 로비 맵 (에디터 디폴트 설정)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Rules")
-	FString DefaultReturnMapURL = TEXT("/Game/BARUGame/Maps/Company01_Lobby");
+	FString DefaultReturnMapURL = TEXT("/Game/BARUGame/Maps/MainLobbyLevel");
 
 	// 정산 UI 확인 후 로비로 강제 이동하기까지의 대기 시간 (초)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Rules")
@@ -114,4 +131,15 @@ protected:
 	// 사망 직후 일정 연출 시간 필요 (5초)
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Rules")
 	float DeathSpectateDelay = 5.0f;
+	
+	
+	// 월드 내 생존해 있는 몬스터 추적용 컨테이너
+	UPROPERTY(Transient)
+	TSet<TWeakObjectPtr<ABaruMonsterCharacter>> ActiveMonsters;
+
+	int32 TotalSpawnedMonsters = 0;
+	
+	
+	// 앞으로 스포너에서 나올 예정인 몬스터 수량
+	int32 PendingSpawnMonsterCount = 0;
 };
