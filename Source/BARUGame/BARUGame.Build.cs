@@ -38,6 +38,7 @@ public class BARUGame : ModuleRules
 			"SQLiteSupport",
 			"AIModule",
 			"Niagara",
+			"NavigationSystem",
 			"AnimGraphRuntime"
 		});
 

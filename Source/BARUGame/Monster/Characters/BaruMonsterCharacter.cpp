@@ -11,10 +11,12 @@
 
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayTags/BaruGameplayTags.h"
+#include "GameFramework/Controller.h"
 #include "Core/BaruGameMode.h"
 #include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "BrainComponent.h"
+#include "TimerManager.h"
 #include "Engine/World.h"
 #include "BaruLog.h"
 
@@ -76,7 +78,7 @@ void ABaruMonsterCharacter::BeginPlay()
 		if (ABaruGameMode* BaruGameMode =
 			GetWorld()->GetAuthGameMode<ABaruGameMode>())
 		{
-			//BaruGameMode->RegisterMonster(this);
+			BaruGameMode->RegisterMonster(this);
 		}
 	}
 	
@@ -194,12 +196,50 @@ void ABaruMonsterCharacter::BeginPlay()
 		RegisteredMonsterAttributeSet->GetSuppression()
 	);
 	
+	// 그로기 판정과 회복 타이머는 서버에서만 관리
+	if (HasAuthority())
+	{
+		const FGameplayTag GroggyTag =
+			FBaruGameplayTags::Get().State_Debuff_Groggy;
+
+		// 태그가 처음 생기거나 완전히 사라질 때 알림을 받음
+		GroggyTagChangedHandle =
+			AbilitySystemComponent->RegisterGameplayTagEvent(
+				GroggyTag,
+				EGameplayTagEventType::NewOrRemoved
+			).AddUObject(
+				this,
+				&ABaruMonsterCharacter::HandleGroggyTagChanged
+			);
+
+		// 연결 전에 이미 그로기 태그가 있었다면 현재 상태도 반영
+		HandleGroggyTagChanged(
+			GroggyTag,
+			AbilitySystemComponent->GetTagCount(GroggyTag)
+		);
+	}
+	
 }
 
 void ABaruMonsterCharacter::EndPlay(
 	const EEndPlayReason::Type EndPlayReason
 )
 {
+	// 몬스터가 제거된 뒤 회복 함수가 실행되지 않도록 예약 취소
+	GetWorldTimerManager().ClearTimer(GroggyRecoveryTimerHandle);
+
+	// ASC에서 받던 그로기 태그 변경 알림 연결 해제
+	if (IsValid(AbilitySystemComponent) &&
+		GroggyTagChangedHandle.IsValid())
+	{
+		AbilitySystemComponent->RegisterGameplayTagEvent(
+			FBaruGameplayTags::Get().State_Debuff_Groggy,
+			EGameplayTagEventType::NewOrRemoved
+		).Remove(GroggyTagChangedHandle);
+
+		GroggyTagChangedHandle.Reset();
+	}
+	
 	// 정상적인 사망이 아닌 맵 이탈, 강제 삭제 등의 이유로
 	// 몬스터가 사라진 경우 GameMode 목록에서도 제거
 	if (HasAuthority() && !bIsDead)
@@ -207,7 +247,7 @@ void ABaruMonsterCharacter::EndPlay(
 		if (ABaruGameMode* BaruGameMode =
 			GetWorld()->GetAuthGameMode<ABaruGameMode>())
 		{
-			//BaruGameMode->UnregisterMonster(this);
+			BaruGameMode->UnregisterMonster(this);
 		}
 	}
 
@@ -380,6 +420,11 @@ void ABaruMonsterCharacter::Die_Implementation(AActor* Killer)
 	}
 
 	bIsDead = true;
+	
+	// 그로기 도중 사망하면 회복 예약 취소
+	// bIsDead를 먼저 설정해서 이후에도 행동이 재개되지 않도록 함
+	GetWorldTimerManager().ClearTimer(GroggyRecoveryTimerHandle);
+	bIsGroggy = false;
 
 	// 서버 화면에도 즉시 사망 상태를 적용
 	// 클라이언트에서는 bIsDead가 복제될 때 자동 호출됨
@@ -390,7 +435,7 @@ void ABaruMonsterCharacter::Die_Implementation(AActor* Killer)
 	if (ABaruGameMode* BaruGameMode =
 		GetWorld()->GetAuthGameMode<ABaruGameMode>())
 	{
-		//BaruGameMode->OnMonsterDied(this, Killer);
+		BaruGameMode->OnMonsterDied(this, Killer);
 	}
 
 	BARU_NET_LOG(
@@ -463,4 +508,294 @@ void ABaruMonsterCharacter::OnRep_IsDead()
 	// 래그돌을 켜더라도 액터를 삭제하지 않으므로 시체는 유지됨
 	OnDeathCosmetic();
 	
+}
+
+//----------------
+// Groggy 관련
+//----------------
+
+void ABaruMonsterCharacter::HandleGroggyTagChanged(
+    const FGameplayTag Tag,
+    int32 NewCount
+)
+{
+    // 상태 변경은 서버에서만 처리
+    // 사망한 몬스터는 그로기 진입과 행동 재개 모두 차단
+    if (!HasAuthority() || bIsDead)
+    {
+        return;
+    }
+
+    // 이 함수가 처리할 태그인지 확인
+    if (Tag != FBaruGameplayTags::Get().State_Debuff_Groggy)
+    {
+        return;
+    }
+
+    if (NewCount > 0)
+    {
+        EnterGroggy();
+    }
+    else
+    {
+        ExitGroggy();
+    }
+}
+
+void ABaruMonsterCharacter::EnterGroggy()
+{
+    // 중복 진입으로 회복 시간이 계속 초기화되는 것을 방지
+    if (!HasAuthority() || bIsDead || bIsGroggy)
+    {
+        return;
+    }
+
+    bIsGroggy = true;
+
+    // Behavior Tree를 중단해서 새로운 행동 요청을 멈춤
+    if (ABaruMonsterAIController* MonsterController =
+        Cast<ABaruMonsterAIController>(GetController()))
+    {
+        if (UBrainComponent* MonsterBrain =
+            MonsterController->GetBrainComponent())
+        {
+            MonsterBrain->StopLogic(TEXT("Monster entered groggy"));
+        }
+
+        // 현재 목적지로 이동하던 요청도 취소
+        MonsterController->StopMovement();
+    }
+
+    // 이미 재생 중인 공격 Ability도 취소
+    // 새 공격은 기존 ActivationBlockedTags의 그로기 태그로 차단
+    if (IsValid(AbilitySystemComponent))
+    {
+        AbilitySystemComponent->CancelAllAbilities();
+    }
+
+    // 이동 속도를 즉시 없애고 이동 모드를 비활성화
+    if (UCharacterMovementComponent* MovementComponent =
+        GetCharacterMovement())
+    {
+        MovementComponent->StopMovementImmediately();
+        MovementComponent->DisableMovement();
+    }
+
+    // Ability 취소 과정에서 사망하거나 그로기가 해제됐으면 예약하지 않음
+    if (bIsDead || !bIsGroggy)
+    {
+        return;
+    }
+
+    // DataAsset이 없으면 기본 5초 사용
+    const float RecoveryDelay = IsValid(MonsterDataAsset)
+        ? FMath::Max(0.1f, MonsterDataAsset->GroggyDuration)
+        : 5.0f;
+
+    // 지정된 시간이 지나면 한 번만 회복 함수 실행
+    GetWorldTimerManager().SetTimer(
+        GroggyRecoveryTimerHandle,
+        this,
+        &ABaruMonsterCharacter::RecoverFromGroggy,
+        RecoveryDelay,
+        false
+    );
+
+    BARU_NET_LOG(
+        this,
+        LogBaruCombat,
+        Log,
+        TEXT("Monster groggy started. Duration=%.1f"),
+        RecoveryDelay
+    );
+}
+
+void ABaruMonsterCharacter::RecoverFromGroggy()
+{
+    // 사망한 몬스터나 이미 그로기가 끝난 몬스터는 회복하지 않음
+    if (!HasAuthority() || bIsDead || !bIsGroggy ||
+        !IsValid(AbilitySystemComponent) ||
+        !IsValid(MonsterAttributeSet))
+    {
+        return;
+    }
+
+    // 현재 최대 제압도까지 회복
+    const float RecoverySuppression =
+        FMath::Max(0.0f, MonsterAttributeSet->GetMaxSuppression());
+
+    AbilitySystemComponent->SetNumericAttributeBase(
+        UBaruMonsterAttributeSet::GetSuppressionAttribute(),
+        RecoverySuppression
+    );
+
+    // AttributeSet에서 추가했던 Loose 태그 1개를 제거
+    // 태그 개수가 0이 되면 HandleGroggyTagChanged → ExitGroggy 호출
+    AbilitySystemComponent->RemoveLooseGameplayTag(
+        FBaruGameplayTags::Get().State_Debuff_Groggy
+    );
+}
+
+void ABaruMonsterCharacter::ExitGroggy()
+{
+    // 사망한 몬스터의 이동과 AI가 다시 켜지는 것을 방지
+    if (!HasAuthority() || bIsDead || !bIsGroggy)
+    {
+        return;
+    }
+
+    bIsGroggy = false;
+
+    // 다른 시스템에서 먼저 태그를 제거한 경우에도 남은 예약 취소
+    GetWorldTimerManager().ClearTimer(GroggyRecoveryTimerHandle);
+
+    // 현재 지상 보행 몬스터 기준으로 이동 재개
+    // 공중에 있다면 낙하 모드로 복귀
+    if (UCharacterMovementComponent* MovementComponent =
+        GetCharacterMovement())
+    {
+        MovementComponent->SetDefaultMovementMode();
+    }
+
+    BARU_NET_LOG(
+        this,
+        LogBaruCombat,
+        Log,
+        TEXT("Monster groggy ended.")
+    );
+
+    // 이동이 가능한 상태로 복구한 뒤 Behavior Tree를 다시 시작
+    // 현재 Blackboard 값을 기준으로 다음 행동을 판단
+    if (ABaruMonsterAIController* MonsterController =
+        Cast<ABaruMonsterAIController>(GetController()))
+    {
+        if (UBrainComponent* MonsterBrain =
+            MonsterController->GetBrainComponent())
+        {
+            MonsterBrain->RestartLogic();
+        }
+    }
+}
+
+//----------------
+// 피격 반응
+//----------------
+
+void ABaruMonsterCharacter::ApplyCombatDamage_Implementation(
+    float DamageAmount,
+    const FHitResult& HitResult,
+    AActor* DamageCauser,
+    AController* InstigatedBy
+)
+{
+    // 체력은 이미 처리됐으므로 위협도와 밀림만 처리
+    if (!HasAuthority() || bIsDead ||
+        !FMath::IsFinite(DamageAmount) || DamageAmount <= 0.0f)
+    {
+        return;
+    }
+
+    // 공격자가 PlayerState라면 ASC에 연결된 실제 몸을 사용
+    AActor* AttackOriginActor = DamageCauser;
+
+    if (IsValid(DamageCauser))
+    {
+        if (IAbilitySystemInterface* SourceInterface =
+            Cast<IAbilitySystemInterface>(DamageCauser))
+        {
+            if (UAbilitySystemComponent* SourceASC =
+                SourceInterface->GetAbilitySystemComponent())
+            {
+                if (AActor* SourceAvatar = SourceASC->GetAvatarActor())
+                {
+                    AttackOriginActor = SourceAvatar;
+                }
+            }
+        }
+
+        // Controller가 전달됐다면 조종 중인 Pawn 사용
+        if (AController* SourceController =
+            Cast<AController>(AttackOriginActor))
+        {
+            AttackOriginActor = SourceController->GetPawn();
+        }
+    }
+
+    if (!IsValid(AttackOriginActor) && IsValid(InstigatedBy))
+    {
+        AttackOriginActor = InstigatedBy->GetPawn();
+    }
+
+    if (!IsValid(AttackOriginActor) || AttackOriginActor == this)
+    {
+        return;
+    }
+
+    // [추가] 그로기·밀림 검사보다 먼저 피해 위협도 등록
+    if (ABaruMonsterAIController* MonsterController =
+        Cast<ABaruMonsterAIController>(GetController()))
+    {
+        if (APawn* AttackerPawn = Cast<APawn>(AttackOriginActor))
+        {
+            MonsterController->RegisterDamageThreat(
+                AttackerPawn,
+                DamageAmount
+            );
+        }
+    }
+
+    // 그로기 중에는 위협도만 등록하고 밀림 생략
+    if (bIsGroggy ||
+        (IsValid(AbilitySystemComponent) &&
+         AbilitySystemComponent->HasMatchingGameplayTag(
+             FBaruGameplayTags::Get().State_Debuff_Groggy
+         )))
+    {
+        return;
+    }
+
+    UCharacterMovementComponent* MovementComponent =
+        GetCharacterMovement();
+
+    // 이동이 비활성화된 상태는 그대로 유지
+    if (!IsValid(MovementComponent) ||
+        MovementComponent->MovementMode == MOVE_None)
+    {
+        return;
+    }
+
+    const float PushSpeed = IsValid(MonsterDataAsset)
+        ? FMath::Max(0.0f, MonsterDataAsset->HitPushSpeed)
+        : 200.0f;
+
+    if (PushSpeed <= 0.0f)
+    {
+        return;
+    }
+
+    // 공격자의 반대 방향으로 수평 밀림
+    const FVector PushDirection =
+        (GetActorLocation() - AttackOriginActor->GetActorLocation())
+        .GetSafeNormal2D();
+
+    if (PushDirection.IsNearlyZero())
+    {
+        return;
+    }
+
+    MovementComponent->StopMovementImmediately();
+
+    MovementComponent->AddImpulse(
+        PushDirection * PushSpeed,
+        true
+    );
+
+    BARU_NET_LOG(
+        this,
+        LogBaruCombat,
+        Log,
+        TEXT("Monster hit push. Source=%s, Speed=%.1f"),
+        *GetNameSafe(AttackOriginActor),
+        PushSpeed
+    );
 }

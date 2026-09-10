@@ -190,6 +190,96 @@ public:
         meta = (ClampMin = "0.0")
     )
     float AttackCooldown = 0.0f;
+    
+    // 그로기 상태가 유지되는 시간
+    // 시간이 끝나면 살아 있는 몬스터의 제압도를 회복하고 행동을 재개
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|Combat",
+        meta = (ClampMin = "0.1", Units = "s")
+    )
+    float GroggyDuration = 5.0f;
+    
+    // 피격 시 공격자의 반대 방향으로 밀리는 수평 속도
+    // 이동 거리가 아니라 속도이며, 0이면 피격 밀림을 사용하지 않음
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|Combat",
+        meta = (ClampMin = "0.0", Units = "cm/s")
+    )
+    float HitPushSpeed = 200.0f;
+    
+    //----------------
+    // 위협도 / 어그로
+    //----------------
+
+    // 이 간격마다 대상 점수를 다시 비교
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Threat",
+        meta = (ClampMin = "0.1", Units = "s")
+    )
+    float ThreatUpdateInterval = 0.5f;
+
+    // 거리 점수가 0이 되는 기준 거리
+    // 실제 감지 가능 거리는 기존 시야 설정을 따름
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Threat",
+        meta = (ClampMin = "1.0", Units = "cm")
+    )
+    float ThreatDistanceReference = 2000.0f;
+
+    // 바로 가까이에 있는 플레이어가 받는 최대 거리 점수
+    // 기준 거리까지 멀어질수록 점수가 0으로 감소
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Threat",
+        meta = (ClampMin = "0.0")
+    )
+    float ThreatDistanceWeight = 30.0f;
+
+    // 실제 받은 체력 피해 1당 공격자에게 추가할 위협도
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Threat",
+        meta = (ClampMin = "0.0")
+    )
+    float ThreatPerDamage = 1.0f;
+
+    // 플레이어 한 명에게 쌓이는 피해 위협도의 상한
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Threat",
+        meta = (ClampMin = "0.0")
+    )
+    float MaxDamageThreat = 100.0f;
+
+    // 누적 피해 위협도가 초당 감소하는 양
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Threat",
+        meta = (ClampMin = "0.0")
+    )
+    float ThreatDecayPerSecond = 5.0f;
+
+    // 현재 추적 대상에게 추가하는 유지 점수
+    // 점수 차이가 작을 때 대상을 계속 바꾸는 현상을 줄임
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Threat",
+        meta = (ClampMin = "0.0")
+    )
+    float CurrentTargetThreatBonus = 15.0f;
 	
 };
 
