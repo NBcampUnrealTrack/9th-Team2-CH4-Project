@@ -173,7 +173,7 @@ protected:
     void HandleSanityChanged(const FOnAttributeChangeData& ChangeData);
     
     // 몬스터 개인 킬 카운트
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BARU|State")
+    UPROPERTY(ReplicatedUsing = OnRep_MonsterKillCount, VisibleInstanceOnly, BlueprintReadOnly, Category = "BARU|State")
     int32 MonsterKillCount = 0;
     
     UFUNCTION()
