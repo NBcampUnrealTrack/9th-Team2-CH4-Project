@@ -235,6 +235,8 @@ void ABaruPlayerState::AddMonsterKill()
     }
 
     MonsterKillCount++;
+    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Player %s MonsterKillCount: %d"), *GetPlayerName(), MonsterKillCount);
+
     OnRep_MonsterKillCount();
 }
 

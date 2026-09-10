@@ -5,6 +5,7 @@
 #include "Character/BaruCharacter.h"
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Subsystems/BaruSaveGameSubsystem.h"
+#include "Gameplay/Inventory/BaruInventoryComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -142,7 +143,6 @@ void ABaruGameMode::Logout(AController* Exiting)
 
             Super::Logout(Exiting);
             UpdateAlivePlayerCount();
-            CheckTeamWipe();
             return;
         }
 
@@ -298,6 +298,12 @@ void ABaruGameMode::ExecuteServerTravel()
 
 void ABaruGameMode::UpdateAlivePlayerCount()
 {
+    UWorld* World = GetWorld();
+    if (!World || World->bIsTearingDown)
+    {
+        return;
+    }
+    
     if (!CachedBaruGameState)
     {
         CachedBaruGameState = GetGameState<ABaruGameState>();
@@ -333,9 +339,12 @@ void ABaruGameMode::UpdateAlivePlayerCount()
     CachedBaruGameState->SetAlivePlayerCount(CurrentActive);
 
     // 완전 전멸(접속자 0 + 대기자 0) 시 전멸 검사
-    if (CurrentActive <= 0 && CurrentDBNO <= 0)
+    if (CachedBaruGameState->GetMatchState() == EBaruMatchState::InProgress)
     {
-        CheckTeamWipe();
+        if (CurrentActive <= 0 && CurrentDBNO <= 0)
+        {
+            CheckTeamWipe();
+        }
     }
 }
 
@@ -399,13 +408,19 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
 
 void ABaruGameMode::CheckTeamWipe()
 {
-    if (!CachedBaruGameState)
+    UWorld* World = GetWorld();
+    if (!World || World->bIsTearingDown || !CachedBaruGameState)
+    {
+        return;
+    }
+    
+    if (CachedBaruGameState->GetMatchState() != EBaruMatchState::InProgress)
     {
         return;
     }
     
     // DBNO 상태인 플레이어가 1명이라도 있으면 전멸이 아님 (방어 코드)
-    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    for (FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         if (APlayerController* PC = Iterator->Get())
         {
@@ -449,7 +464,8 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
     const int32 TotalValue = CachedBaruGameState ? CachedBaruGameState->GetTeamScrapValue() : 0;
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Processing Settlement (Survived: %d, Total Team Value: %d)"), bAllExtracted, TotalValue);
 
-    UBaruSaveGameSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
+    // 데디케이티드 서버라면 GameMode에서 세이브를 관리하지만, 로컬 .sav 저장 시스템에서는 GameMode가 저장을 해서는 안됨
+    // UBaruSaveGameSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
 
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
@@ -464,7 +480,21 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
-            Report.ExtractedItemCount = bPlayerSurvived ? 5 : 0;
+
+            // Todo : 인벤토리 컴포넌트에서 GetTotalItemCount() 함수 구현되면 주석 해제
+            // if (bPlayerSurvived && PS)
+            // {
+            //     if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
+            //     {
+            //         Report.ExtractedItemCount = InvenComp->GetTotalItemCount();
+            //     }
+            // }
+
+            // Todo : BaruPlayerController.h의 FBaruSettlementReport에 MonsterKillCount 필드가 추가되면 주석 해제
+            // if (PS)
+            // {
+            //     Report.MonsterKillCount = PS->GetMonsterKillCount();
+            // }
 
             BaruPC->Client_ShowSettlementUI(Report);
         }
@@ -513,7 +543,6 @@ void ABaruGameMode::CleanUpExpiredSnapshots()
     if (ExpiredIds.Num() > 0)
     {
         UpdateAlivePlayerCount();
-        CheckTeamWipe();
     }
 }
 
@@ -568,22 +597,45 @@ void ABaruGameMode::UnregisterMonster(ABaruMonsterCharacter* Monster)
 void ABaruGameMode::OnMonsterDied(ABaruMonsterCharacter* Monster, AActor* Killer)
 {
     if (!IsValid(Monster)) return;
-
+    
     ActiveMonsters.Remove(Monster);
 
-    // 킬러 PlayerState 킬 수 증가
-    ABaruPlayerState* KillerPS = nullptr;
-    if (APawn* KillerPawn = Cast<APawn>(Killer)) KillerPS = KillerPawn->GetPlayerState<ABaruPlayerState>();
-    else if (AController* KillerPC = Cast<AController>(Killer)) KillerPS = KillerPC->GetPlayerState<ABaruPlayerState>();
-    if (KillerPS) KillerPS->AddMonsterKill();
+    // Killer가 유효할 경우 PlayerState 역추적 후 개인 킬 카운트 누적
+    if (IsValid(Killer))
+    {
+        ABaruPlayerState* KillerPS = nullptr;
+        if (APawn* KillerPawn = Cast<APawn>(Killer))
+        {
+            KillerPS = KillerPawn->GetPlayerState<ABaruPlayerState>();
+        }
+        else if (AController* KillerPC = Cast<AController>(Killer))
+        {
+            KillerPS = KillerPC->GetPlayerState<ABaruPlayerState>();
+        }
+        // Killer 자체가 PlayerState로 직접 전달된 경우 대응
+        else if (ABaruPlayerState* DirectPS = Cast<ABaruPlayerState>(Killer))
+        {
+            KillerPS = DirectPS;
+        }
 
-    if (!CachedBaruGameState) CachedBaruGameState = GetGameState<ABaruGameState>();
+        if (KillerPS)
+        {
+            KillerPS->AddMonsterKill();
+        }
+    }
+
+    // GameState 팀 총합 킬 수 및 잔여 몬스터 수 갱신
+    if (!CachedBaruGameState)
+    {
+        CachedBaruGameState = GetGameState<ABaruGameState>();
+    }
+
     if (CachedBaruGameState)
     {
         CachedBaruGameState->SetTeamMonsterKillCount(CachedBaruGameState->GetTeamMonsterKillCount() + 1);
         CachedBaruGameState->SetMonsterCounts(TotalSpawnedMonsters, ActiveMonsters.Num() + PendingSpawnMonsterCount);
 
-        // 소환 대기 인원(Pending)도 0이고, 필드 잔여(Active)도 0일 때만 적 전멸 판정
+        // 스포너 소환 대기(Pending)와 필드 잔여(Active)가 모두 0일 때만 적 전멸 판정
         if (ActiveMonsters.Num() <= 0 && PendingSpawnMonsterCount <= 0 && TotalSpawnedMonsters > 0)
         {
             CachedBaruGameState->Multicast_NotifyAllMonstersEliminated();

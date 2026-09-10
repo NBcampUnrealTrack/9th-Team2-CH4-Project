@@ -28,8 +28,8 @@ public:
 	virtual FGameplayTag GetInteractionTag_Implementation() const override;
 	virtual float GetInteractionDuration_Implementation() const override;
 	virtual void ExecuteInteraction_Implementation(APawn* Interactor) override;
+	virtual void EndInteraction_Implementation(APawn* Interactor) override; // [추가]
 
-	/** 서버에서 버튼 상태를 강제로 리셋하거나 설정 */
 	void SetButtonActive(bool bActive);
 
 protected:
@@ -38,6 +38,8 @@ protected:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "BARU|CoopButton")
 	void BP_OnButtonPressedStateChanged(bool bPressed);
+	
+	void CheckHoldingPlayerValidity();
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
@@ -45,11 +47,19 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
 	TObjectPtr<UStaticMeshComponent> ButtonMesh;
-
-	/** 이 버튼이 연결된 협동 문 액터 (에디터 디테일 패널에서 스포이트로 지정) */
+	
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "BARU|CoopDoor")
 	TObjectPtr<ABaruCoopDoorActor> TargetDoor;
 
 	UPROPERTY(ReplicatedUsing = OnRep_IsPressed, BlueprintReadOnly, Category = "BARU|CoopDoor")
 	bool bIsPressed = false;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor")
+	float MaxHoldDistance = 250.0f;
+	
+private:
+	UPROPERTY(Transient)
+	TWeakObjectPtr<APawn> HoldingPlayer;
+
+	FTimerHandle HoldCheckTimerHandle;
 };

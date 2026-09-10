@@ -34,8 +34,6 @@ public class BARUGame : ModuleRules
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
 			"OnlineSubsystemSteam",
-			"SQLiteCore",
-			"SQLiteSupport",
 			"AIModule",
 			"Niagara",
 			"AnimGraphRuntime"

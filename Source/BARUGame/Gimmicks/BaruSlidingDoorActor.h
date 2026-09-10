@@ -20,6 +20,7 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
+    // IInteractableInterface
     virtual bool CanInteract_Implementation(APawn* Interactor) const override;
     virtual FText GetInteractPromptText_Implementation(APawn* Interactor) const override;
     virtual FGameplayTag GetInteractionTag_Implementation() const override;
@@ -29,7 +30,9 @@ public:
 protected:
     UFUNCTION()
     void OnRep_IsOpen();
-
+    
+    void StartDoorMotion();
+    
     UFUNCTION(BlueprintImplementableEvent, Category = "BARU|SlidingDoor")
     void BP_OnDoorStateChanged(bool bOpen);
 
@@ -64,5 +67,4 @@ protected:
 private:
     FVector InitialLeftDoorLoc;
     FVector InitialRightDoorLoc;
-    bool bIsMoving = false;
 };

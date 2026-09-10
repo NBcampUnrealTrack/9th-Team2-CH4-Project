@@ -100,7 +100,15 @@ public:
     // ABaruCharacter::Die_Implementation 이 true 로, PossessedBy(리스폰) 가 false 로 호출
     UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
     void SetDeadState(bool bNewDead, AActor* Killer = nullptr);
+    
+    // 몬스터 처치 수 반환
+    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
+    int32 GetMonsterKillCount() const { return MonsterKillCount; }
 
+    // [Server] 몬스터 처치 수 1 증가
+    UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
+    void AddMonsterKill();
+    
     
 public:
     // UI 델리게이트
@@ -115,6 +123,9 @@ public:
     
     UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")   // [추가]
     FOnBaruDeadStatusChanged OnDeadStatusChanged;
+    
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Score")
+    FOnBaruPlayerKillCountChanged OnMonsterKillCountChanged;
     
 protected:
     // GAS Components 부착
@@ -160,29 +171,14 @@ protected:
     // [삭제] OnRep_Sanity()
     // [추가] Sanity 어트리뷰트 변경 → UI 델리게이트 브로드캐스트
     void HandleSanityChanged(const FOnAttributeChangeData& ChangeData);
-
-private:
-    FDelegateHandle SanityChangedHandle;
     
-    
-    
-    
-public:
-    UFUNCTION(BlueprintPure, Category = "BARU|PlayerState|Score")
-    int32 GetMonsterKillCount() const { return MonsterKillCount; }
-
-    // [Server Only] 킬 수 증가
-    UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState|Score")
-    void AddMonsterKill();
-
-public:
-    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Score")
-    FOnBaruPlayerKillCountChanged OnMonsterKillCountChanged;
-
-protected:
-    UPROPERTY(ReplicatedUsing = OnRep_MonsterKillCount, VisibleInstanceOnly, Category = "BARU|Score")
+    // 몬스터 개인 킬 카운트
+    UPROPERTY(ReplicatedUsing = OnRep_MonsterKillCount, VisibleInstanceOnly, BlueprintReadOnly, Category = "BARU|State")
     int32 MonsterKillCount = 0;
-
+    
     UFUNCTION()
     virtual void OnRep_MonsterKillCount();
+    
+private:
+    FDelegateHandle SanityChangedHandle;
 };

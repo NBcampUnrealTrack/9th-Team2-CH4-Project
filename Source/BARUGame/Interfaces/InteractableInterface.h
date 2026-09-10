@@ -32,4 +32,7 @@ public:
 	
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	void ExecuteInteraction(APawn* Interactor);
+	
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	void EndInteraction(APawn* Interactor);
 };
