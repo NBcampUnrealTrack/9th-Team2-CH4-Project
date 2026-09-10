@@ -76,7 +76,7 @@ void ABaruMonsterCharacter::BeginPlay()
 		if (ABaruGameMode* BaruGameMode =
 			GetWorld()->GetAuthGameMode<ABaruGameMode>())
 		{
-			BaruGameMode->RegisterMonster(this);
+			//BaruGameMode->RegisterMonster(this);
 		}
 	}
 	
@@ -207,7 +207,7 @@ void ABaruMonsterCharacter::EndPlay(
 		if (ABaruGameMode* BaruGameMode =
 			GetWorld()->GetAuthGameMode<ABaruGameMode>())
 		{
-			BaruGameMode->UnregisterMonster(this);
+			//BaruGameMode->UnregisterMonster(this);
 		}
 	}
 
@@ -390,7 +390,7 @@ void ABaruMonsterCharacter::Die_Implementation(AActor* Killer)
 	if (ABaruGameMode* BaruGameMode =
 		GetWorld()->GetAuthGameMode<ABaruGameMode>())
 	{
-		BaruGameMode->OnMonsterDied(this, Killer);
+		//BaruGameMode->OnMonsterDied(this, Killer);
 	}
 
 	BARU_NET_LOG(
