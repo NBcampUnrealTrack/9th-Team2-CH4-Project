@@ -14,6 +14,11 @@
 
 #include "UI/ItemUI/BaruInventoryItemWidget.h"
 
+#include "UI/InventoryUI/BaruInventoryDragDropOperation.h"
+
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"	//[장비] 드래그 앤 드랍.
+#include "GameFramework/Pawn.h"
+
 #include "Components/CanvasPanel.h"	// 키입력 구현부.
 #include "Components/CanvasPanelSlot.h"
 
@@ -273,4 +278,72 @@ void UBaruInventoryWidget::RebuildItemWidgets()
 		ItemCanvasSlot->SetAutoSize(false);
 		ItemCanvasSlot->SetZOrder(1);
 	}
+}
+
+
+bool UBaruInventoryWidget::NativeOnDrop(
+	const FGeometry& InGeometry,
+	const FDragDropEvent& InDragDropEvent,
+	UDragDropOperation* InOperation)
+{
+	UBaruInventoryDragDropOperation* DragOperation =
+		Cast<UBaruInventoryDragDropOperation>(InOperation);
+
+	if (!IsValid(DragOperation)
+		|| !IsValid(DragOperation->ItemInstance)
+		|| !IsValid(InventoryComponent)
+		|| !IsValid(InventoryItemCanvas))
+	{
+		return false;
+	}
+
+	const FVector2D ScreenPosition =
+		InDragDropEvent.GetScreenSpacePosition();
+
+	const FGeometry& CanvasGeometry =
+		InventoryItemCanvas->GetCachedGeometry();
+
+	if (!CanvasGeometry.IsUnderLocation(ScreenPosition))
+	{
+		return false;
+	}
+
+	const FVector2D LocalPosition =
+		CanvasGeometry.AbsoluteToLocal(ScreenPosition);
+
+	const FIntPoint TargetCell(
+		FMath::FloorToInt(LocalPosition.X / GridCellSize),
+		FMath::FloorToInt(LocalPosition.Y / GridCellSize));
+	
+		//[장비] 드래그 앤 드랍
+	// 장비칸에서 가져온 무기라면 장비를 해제하고 인벤토리로 반환합니다.
+	if (DragOperation->SourceEquipmentSlot
+		!= EBaruEquipmentSlot::None)
+	{
+		APawn* OwningPawn = GetOwningPlayerPawn();
+
+		UBaruEquipmentComponent* EquipmentComponent =
+			IsValid(OwningPawn)
+			? OwningPawn->FindComponentByClass<
+				UBaruEquipmentComponent>()
+			: nullptr;
+
+		if (!IsValid(EquipmentComponent))
+		{
+			return false;
+		}
+
+		EquipmentComponent->RequestUnequipWeaponAtCell(
+			DragOperation->SourceEquipmentSlot,
+			TargetCell);
+
+		return true;
+	}
+	
+		//인벤토리 안에서 시작한 드래그.
+	InventoryComponent->RequestMoveItem(
+		DragOperation->ItemInstance,
+		TargetCell);
+
+	return true;
 }

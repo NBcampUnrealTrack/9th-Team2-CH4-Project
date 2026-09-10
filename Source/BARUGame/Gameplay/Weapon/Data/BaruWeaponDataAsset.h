@@ -23,7 +23,6 @@
 
 	// 포인터로만 사용하기 때문에 전방 선언
 class ABaruWeaponBase;
-class UGameplayEffect;	//GAS 용.
 class UGameplayAbility;	// GA용.
 
 
@@ -70,50 +69,11 @@ public:
 		Category = "BARU|Weapon|Attachment")
 	FTransform HandRelativeTransform = FTransform::Identity;
 	
-		//팔ㅇㅔ 무기 부착(09.09.)
-	// 본인용 팔 메시에서 무기를 붙일 본 또는 소켓 이름.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "BARU|Weapon|FirstPerson")
-	FName FirstPersonHandSocketName = TEXT("hand_r");
-
-	// 본인용 팔에 붙은 무기의 위치·회전·크기 보정값.
-	// 기존 HandRelativeTransform은 타인에게 보이는 전신용.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "BARU|Weapon|FirstPerson")
-	FTransform FirstPersonHandRelativeTransform = FTransform::Identity;
-
-
-		// 무기의 기본 피해량
-		// 추후 GAS GameplayEffect에 전달할 기본 수치로 사용
-	UPROPERTY(EditDefaultsOnly,	BlueprintReadOnly, Category = "BARU|Weapon|Combat",	meta = (ClampMin = "0.0"))
-	float BaseDamage = 10.0f;
-
-
-		// 무기의 최대 유효 사거리
-		// Unreal의 기본 거리 단위는 cm
-	UPROPERTY(EditDefaultsOnly,	BlueprintReadOnly, Category = "BARU|Weapon|Combat",
-													meta = (ClampMin = "0.0", Units = "cm"))
-	float MaxRange = 5000.0f;
 
 
 		// 한 탄창에 들어가는 최대 탄환 수
 	UPROPERTY(EditDefaultsOnly,	BlueprintReadOnly,	Category = "BARU|Weapon|Ammo",
 		meta = (ClampMin = "1"))
 	int32 MagazineCapacity = 6;
-
-
-		// 한 발 발사 후 다음 발까지 기다리는 시간. s는 초.
-	UPROPERTY(EditDefaultsOnly,	BlueprintReadOnly,	Category = "BARU|Weapon|Combat",
-		meta = (ClampMin = "0.01", Units = "s"))
-	float FireInterval = 0.25f;
 	
-	
-	// GAS.
-		// 이 무기가 명중했을 때 적용할 GAS GameplayEffect.
-		// 실제 피해량은 BaseDamage를 Data.Damage로 전달.
-	UPROPERTY(
-		EditDefaultsOnly,
-		BlueprintReadOnly,
-		Category = "BARU|Weapon|GAS")
-	TSoftClassPtr<UGameplayEffect> DamageEffectClass;
 };

@@ -13,6 +13,8 @@
 #include "Gameplay/Equipment/BaruEquipmentComponent.h"	// [09.03 추가]
 #include "Gameplay/Weapon/Data/BaruWeaponDataAsset.h"	// [09.03 추가]
 #include "BaruLog.h"	// [09.03 추가]
+#include "Kismet/GameplayStatics.h"
+#include "CollisionQueryParams.h"
 
 UBaruInventoryComponent::UBaruInventoryComponent()
 {
@@ -257,6 +259,54 @@ bool UBaruInventoryComponent::SetItemEquipped(
 	return true;
 }
 
+	//[장비] 드래그 앤드랍.
+bool UBaruInventoryComponent::ReturnEquippedItemToCell(
+	UBaruItemInstance* Item,
+	FIntPoint NewTopLeft)
+{
+	if (!IsValid(GetOwner())
+		|| !GetOwner()->HasAuthority()
+		|| !IsValid(Item))
+	{
+		return false;
+	}
+
+	FInventorySlot* InventorySlot = FindSlot(Item);
+
+	if (!InventorySlot || !InventorySlot->bEquipped)
+	{
+		return false;
+	}
+
+	const FItemData* ItemData =
+		FindItemData(Item->ItemID);
+
+	if (!ItemData)
+	{
+		return false;
+	}
+
+	// 장착 아이템은 현재 Cells를 점유하지 않으므로
+	// 드롭할 위치만 검사하면 됩니다.
+	if (!IsRoomAvailable(
+			NewTopLeft,
+			ItemData->GridSize))
+	{
+		return false;
+	}
+
+	InventorySlot->TopLeft = NewTopLeft;
+	InventorySlot->bEquipped = false;
+
+	OccupyCells(Item, NewTopLeft);
+
+	SlotList.MarkItemDirty(*InventorySlot);
+	OnInventoryUpdated.Broadcast();
+
+	return true;
+}
+
+
 // 4. 변경 - 서버 전용 (첫 줄에서 HasAuthority 체크)
 
 	// 아이템 추가. 스택 가능하면 기존 스택부터 채우고, 남으면 새 칸에 배치.
@@ -373,6 +423,34 @@ bool UBaruInventoryComponent::MoveItem(UBaruItemInstance* Item, FIntPoint NewTop
 
 	OnInventoryUpdated.Broadcast();
 	return true;
+}
+
+	// 인벤 이동 요청.
+void UBaruInventoryComponent::RequestMoveItem(
+	UBaruItemInstance* Item,
+	FIntPoint NewTopLeft)
+{
+	if (!IsValid(GetOwner()) || !IsValid(Item))
+	{
+		return;
+	}
+
+	if (NewTopLeft.X < 0
+		|| NewTopLeft.Y < 0
+		|| NewTopLeft.X >= GridWidth
+		|| NewTopLeft.Y >= GridHeight)
+	{
+		return;
+	}
+
+	if (GetOwner()->HasAuthority())
+	{
+		MoveItem(Item, NewTopLeft, false);
+	}
+	else
+	{
+		Server_MoveItem(Item, NewTopLeft);
+	}
 }
 
 	// 아이템 제거. 수량이 남으면 부분 차감, 다 빠지면 슬롯 통째 제거.
@@ -657,6 +735,7 @@ bool UBaruInventoryComponent::Server_UseItemAtCell_Validate(
 		&& ItemCell.Y < GridHeight;
 }
 
+/* 드롭 방식 변경으로 수정
 void UBaruInventoryComponent::Server_DropItem_Implementation(UBaruItemInstance* Item, int32 Count)
 {
 	if (!IsValid(Item)
@@ -710,38 +789,323 @@ void UBaruInventoryComponent::Server_DropItem_Implementation(UBaruItemInstance* 
 		RemoveItem(Item, Actual);
 	}
 }
+*/
 
+void UBaruInventoryComponent::Server_DropItem_Implementation(
+	UBaruItemInstance* Item, int32 Count)
+{
+	DropEntireItemOnServer(Item, Count);
+}
+
+/* 드롭 방식 변경으로 수정
 bool UBaruInventoryComponent::Server_DropItem_Validate(UBaruItemInstance* Item, int32 Count)
 {
 	return Count > 0;
+}
+*/
+
+bool UBaruInventoryComponent::Server_DropItem_Validate(
+	UBaruItemInstance* Item, int32 Count)
+{
+	// 소유 상태, 수량 차이, 바닥 유무는 Implementation에서 검사합니다.
+	return true;
 }
 
 // FastArray 콜백 - 클라에서 SlotList 복제 수신 시 자동 호출됨
 	// 슬롯이 새로 추가됨 -> 캐시 재구성 + UI 갱신.
 void FInventorySlotArray::PostReplicatedAdd(const TArrayView<int32>&, int32)
 {
-	if (OwnerComponent)
-	{
-		OwnerComponent->RebuildCellCache();
-		OwnerComponent->OnInventoryUpdated.Broadcast();
-	}
 }
 
-	// 슬롯 값이 바뀜(수량/위치 등) -> 캐시 재구성 + UI 갱신.
 void FInventorySlotArray::PostReplicatedChange(const TArrayView<int32>&, int32)
 {
-	if (OwnerComponent)
+}
+
+void FInventorySlotArray::PreReplicatedRemove(const TArrayView<int32>&, int32)
+{
+}
+
+void FInventorySlotArray::PostReplicatedReceive(
+	const FFastArraySerializer::FPostReplicatedReceiveParameters& Parameters)
+{
+	if (IsValid(OwnerComponent))
 	{
 		OwnerComponent->RebuildCellCache();
 		OwnerComponent->OnInventoryUpdated.Broadcast();
 	}
 }
 
-	// 슬롯이 제거되기 직전 -> UI 갱신 (캐시는 다음 Add/Change에서 재구성).
-void FInventorySlotArray::PreReplicatedRemove(const TArrayView<int32>&, int32)
+
+	//심리스 이전 관련
+void UBaruInventoryComponent::CopyInventoryFrom(
+	const UBaruInventoryComponent* SourceInventory)
 {
-	if (OwnerComponent)
+	if (!IsValid(GetOwner())
+		|| !GetOwner()->HasAuthority()
+		|| !IsValid(SourceInventory)
+		|| SourceInventory == this)
 	{
-		OwnerComponent->OnInventoryUpdated.Broadcast();
+		return;
 	}
+
+	// 혹시 목적지 Inventory에 기존 SubObject가 있다면 먼저 해제합니다.
+	if (IsUsingRegisteredSubObjectList()
+		&& IsReadyForReplication())
+	{
+		for (const FInventorySlot& ExistingSlot
+			: SlotList.Slots)
+		{
+			if (IsValid(ExistingSlot.Item))
+			{
+				RemoveReplicatedSubObject(
+					ExistingSlot.Item);
+			}
+		}
+	}
+
+	SlotList.Slots.Reset();
+
+	Cells.Reset();
+	Cells.SetNum(GridWidth * GridHeight);
+
+	for (const FInventorySlot& SourceSlot
+		: SourceInventory->GetSlots())
+	{
+		if (!IsValid(SourceSlot.Item))
+		{
+			continue;
+		}
+
+		// 새 PlayerState를 Outer로 사용하는 새 인스턴스 생성
+		UBaruItemInstance* NewItem =
+			NewObject<UBaruItemInstance>(GetOwner());
+
+		NewItem->ItemID =
+			SourceSlot.Item->ItemID;
+
+		NewItem->Quantity =
+			SourceSlot.Item->Quantity;
+
+		FInventorySlot& NewSlot =
+			SlotList.Slots.AddDefaulted_GetRef();
+
+		NewSlot.Item = NewItem;
+		NewSlot.TopLeft = SourceSlot.TopLeft;
+		NewSlot.bEquipped = SourceSlot.bEquipped;
+
+		// 장비 중이 아닌 아이템만 Grid를 점유합니다.
+		if (!NewSlot.bEquipped)
+		{
+			OccupyCells(
+				NewItem,
+				NewSlot.TopLeft);
+		}
+
+		SlotList.MarkItemDirty(NewSlot);
+
+		if (IsUsingRegisteredSubObjectList()
+			&& IsReadyForReplication())
+		{
+			AddReplicatedSubObject(NewItem);
+		}
+	}
+
+	SlotList.MarkArrayDirty();
+	OnInventoryUpdated.Broadcast();
+
+	GetOwner()->ForceNetUpdate();
+}
+
+
+	//무게 추가.
+float UBaruInventoryComponent::GetTotalCarriedWeightKg() const
+{
+	float TotalKg = 0.0f;
+	for (const FInventorySlot& InventorySlot : SlotList.Slots)
+	{
+		if (!IsValid(InventorySlot.Item))
+		{
+			continue;
+		}
+
+		const FItemData* Data = FindItemData(InventorySlot.Item->ItemID);
+		if (!Data)
+		{
+			continue;
+		}
+
+		TotalKg += FMath::Max(0.0f, Data->UnitWeightKg)
+			* static_cast<float>(FMath::Max(0, InventorySlot.Item->Quantity));
+	}
+	return TotalKg;
+}
+
+void UBaruInventoryComponent::RequestDropEntireItem(UBaruItemInstance* Item)
+{
+    if (!IsValid(GetOwner()) || !IsValid(Item)
+        || !FindSlot(Item) || Item->Quantity <= 0)
+    {
+        return;
+    }
+
+    if (GetOwner()->HasAuthority())
+    {
+        DropEntireItemOnServer(Item, Item->Quantity);
+        return;
+    }
+
+    const APlayerState* OwnerPS = Cast<APlayerState>(GetOwner());
+    const APawn* OwnerPawn = OwnerPS ? OwnerPS->GetPawn() : nullptr;
+    if (IsValid(OwnerPawn) && OwnerPawn->IsLocallyControlled())
+    {
+        Server_DropItem(Item, Item->Quantity);
+    }
+}
+
+bool UBaruInventoryComponent::DropEntireItemOnServer(
+    UBaruItemInstance* Item, int32 ExpectedQuantity)
+{
+    if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority()
+        || !IsValid(Item) || ExpectedQuantity <= 0)
+    {
+        return false;
+    }
+
+    FInventorySlot* SourceSlot = FindSlot(Item);
+    if (!SourceSlot || Item->Quantity != ExpectedQuantity)
+    {
+        // 오래된 수량, 다른 소유자의 아이템, 이미 삭제된 요청을 거절합니다.
+        return false;
+    }
+
+    const FItemData* Data = FindItemData(Item->ItemID);
+    APlayerState* OwnerPS = Cast<APlayerState>(GetOwner());
+    APawn* OwnerPawn = OwnerPS ? OwnerPS->GetPawn() : nullptr;
+    UWorld* World = GetWorld();
+    if (!Data || !Data->ItemActorClass || !IsValid(OwnerPawn) || !World)
+    {
+        BARU_NET_LOG(GetOwner(), LogBaruItem, Warning,
+            TEXT("월드 드롭 실패: Pickup 클래스 또는 플레이어가 없습니다."));
+        return false;
+    }
+
+    UBaruEquipmentComponent* Equipment =
+        OwnerPawn->FindComponentByClass<UBaruEquipmentComponent>();
+    if (SourceSlot->bEquipped)
+    {
+        if (!IsValid(Equipment)
+            || (Equipment->GetEquippedWeaponItem(EBaruEquipmentSlot::PrimaryWeapon) != Item
+                && Equipment->GetEquippedWeaponItem(EBaruEquipmentSlot::SecondaryWeapon) != Item))
+        {
+            return false;
+        }
+    }
+
+    // 클라이언트가 월드 좌표를 보내지 않습니다. 서버가 앞쪽 바닥을 찾습니다.
+    const FVector Start = OwnerPawn->GetActorLocation();
+    FVector Forward = OwnerPawn->GetActorForwardVector();
+    Forward.Z = 0.0f;
+    Forward = Forward.GetSafeNormal();
+    const FVector Ahead = Start + Forward * 120.0f;
+
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(BaruWorldDrop), false, OwnerPawn);
+    FHitResult ObstacleHit;
+    if (World->LineTraceSingleByChannel(
+        ObstacleHit, Start, Ahead, ECC_Visibility, Query))
+    {
+        BARU_NET_LOG(GetOwner(), LogBaruItem, Warning,
+            TEXT("월드 드롭 실패: 앞이 막혀 있습니다."));
+        return false;
+    }
+
+    FHitResult FloorHit;
+    if (!World->LineTraceSingleByChannel(
+            FloorHit, Ahead, Ahead - FVector(0, 0, 500), ECC_Visibility, Query)
+        || FloorHit.ImpactNormal.Z < 0.5f)
+    {
+        BARU_NET_LOG(GetOwner(), LogBaruItem, Warning,
+            TEXT("월드 드롭 실패: 놓을 바닥을 찾지 못했습니다."));
+        return false;
+    }
+
+    const ABaruBaseItem* PickupDefaults =
+        Data->ItemActorClass.GetDefaultObject();
+    if (!PickupDefaults)
+    {
+        return false;
+    }
+
+    const FVector Location = FloorHit.ImpactPoint
+        + FVector(0, 0, FMath::Clamp(PickupDefaults->GroundPlacementHeight, 0.0f, 100.0f));
+    const FTransform DropTransform(FRotator::ZeroRotator, Location);
+
+    ABaruBaseItem* Spawned = World->SpawnActorDeferred<ABaruBaseItem>(
+        Data->ItemActorClass, DropTransform, nullptr, nullptr,
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+    if (!IsValid(Spawned))
+    {
+        return false;
+    }
+
+    Spawned->ItemRow.DataTable = ItemDataTable;
+    Spawned->ItemRow.RowName = Item->ItemID;
+    Spawned->PickupCount = ExpectedQuantity;
+    Spawned->SetActorEnableCollision(false);
+    UGameplayStatics::FinishSpawningActor(Spawned, DropTransform);
+    if (!IsValid(Spawned))
+    {
+        return false;
+    }
+    Spawned->SetActorEnableCollision(false);
+
+    // BP Construction/BeginPlay 후에도 현재 소유권/수량을 다시 확인.
+    const int32 Index = SlotList.Slots.IndexOfByPredicate(
+        [Item](const FInventorySlot& Entry) { return Entry.Item.Get() == Item; });
+    if (Index == INDEX_NONE || !IsValid(Item) || Item->Quantity != ExpectedQuantity)
+    {
+        Spawned->Destroy();
+        return false;
+    }
+
+    const bool bWasEquipped = SlotList.Slots[Index].bEquipped;
+    if (bWasEquipped)
+    {
+        if (!IsValid(Equipment)
+            || !Equipment->ReleaseWeaponForWorldDropOnServer(Item))
+        {
+            Spawned->Destroy();
+            return false;
+        }
+    }
+    else
+    {
+        ClearCells(Item, SlotList.Slots[Index].TopLeft);
+    }
+
+    // 장착품은 Grid를 점유하지 않았으므로 ClearCells를 호출하지 않습니다.
+    if (IsUsingRegisteredSubObjectList() && IsReadyForReplication())
+    {
+        RemoveReplicatedSubObject(Item);
+    }
+    SlotList.Slots.RemoveAt(Index);
+    SlotList.MarkArrayDirty();
+
+    // Construction Script가 기본값을 덮었더라도 서버 확정값을 유지.
+    Spawned->ItemRow.DataTable = ItemDataTable;
+    Spawned->ItemRow.RowName = Item->ItemID;
+    Spawned->PickupCount = ExpectedQuantity;
+    Spawned->SetActorEnableCollision(true);
+    Spawned->ForceNetUpdate();
+    GetOwner()->ForceNetUpdate();
+
+    if (bWasEquipped)
+    {
+        Equipment->OnEquipmentUpdated.Broadcast();
+    }
+    OnInventoryUpdated.Broadcast();
+
+    BARU_NET_LOG(GetOwner(), LogBaruItem, Log,
+        TEXT("월드 드롭 완료: ItemID=%s Count=%d"),
+        *Item->ItemID.ToString(), ExpectedQuantity);
+    return true;
 }

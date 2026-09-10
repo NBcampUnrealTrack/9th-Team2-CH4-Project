@@ -15,6 +15,7 @@
 
 class USphereComponent; // 기본은 원형의 콜리전으로.
 class UStaticMeshComponent; // 움직이는 아이템이면 나중에 SkeletalMesh도 고려. 액터에 Skeletal 넣으려면 추가 조치 필요.
+class USkeletalMeshComponent;
 class APawn; // PlayerState에서 인터렉트가 진행되므로, Pawn을 직접.
 
 UCLASS()
@@ -27,7 +28,7 @@ public:
 		// BeginPlay()와 Tick은 아이템에 필요 없음. 주기적 스폰이나 힐포션의 주기적 회복을 넣을 시 다른곳에서.
 
 		//Item의 정보(아이디, 이름, 외형 등등. DataTable에 있는 정보)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category= "Item")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Replicated, Category = "Item")
 	FDataTableRowHandle ItemRow;	// 
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category= "Item")
@@ -36,9 +37,21 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category= "Item")
 	UStaticMeshComponent* MeshComponent;	// Static Mesh는 다른데서 쓰일 수도 있으니까 이걸로 이름.
 	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Item|Visual")
+	TObjectPtr<USkeletalMeshComponent> PickupSkeletalMesh;
+	
+	// 바닥 배치 때 적용할 높이 보정. BP에서 메시의 바닥과 Actor 원점을 맞춥니다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Drop",
+		meta = (ClampMin = "0.0", ClampMax = "100.0"))
+	float GroundPlacementHeight = 5.0f;
+	
+	virtual void GetLifetimeReplicatedProps(
+	TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	
 		//Item의 Pickup(습득)
 		// 습득하는 아이템의 수량(총알 10발 등.)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category= "Item", meta=(ClampMin = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Item",
+	meta = (ClampMin = "1"))
 	int32 PickupCount = 1;
 	
 		//습득 시도. 서버 전용 코드. 습득하는 아이템 전량을 수납 성공하면 자신을 파괴한 뒤, true 반환.

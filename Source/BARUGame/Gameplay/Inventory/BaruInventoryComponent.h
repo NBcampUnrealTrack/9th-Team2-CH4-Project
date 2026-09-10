@@ -98,6 +98,32 @@ public:
 
 		// 복제 콜백에서 호출 — Cells 재구성 : Cell - 슬롯의 각 구역?
 	void RebuildCellCache();
+	
+		// 인벤 이동 요청
+	UFUNCTION(BlueprintCallable, Category = "BARU|Inventory")
+	void RequestMoveItem(
+		UBaruItemInstance* Item,
+		FIntPoint NewTopLeft);
+	
+		// 장착 중인 아이템을 지정한 Grid 좌표에 반환.
+		// 서버에서만 실행.
+	bool ReturnEquippedItemToCell(
+		UBaruItemInstance* Item,
+		FIntPoint NewTopLeft);
+	
+	
+	// Seamless Travel 시 이전 Inventory에서 슬롯 데이터를 복사합니다.
+	// 서버 내부에서만 호출합니다.
+	void CopyInventoryFrom(
+		const UBaruInventoryComponent* SourceInventory);
+	
+	// Grid 보관품과 장착품을 합쳐 계산합니다. 같은 아이템을 중복 합산하지 않습니다.
+	UFUNCTION(BlueprintPure, Category = "BARU|Inventory|Weight")
+	float GetTotalCarriedWeightKg() const;
+	
+	// UI용: 해당 인벤토리 슬롯의 수량 전체를 버리는 요청.
+	UFUNCTION(BlueprintCallable, Category = "BARU|Inventory")
+	void RequestDropEntireItem(UBaruItemInstance* Item);
 
 private:
 		// [진실원(진짜 부분)] 복제 대상
@@ -125,4 +151,6 @@ private:
 	bool EquipWeaponItem(UBaruItemInstance* Item);
 
 	friend struct FInventorySlotArray; // friend는 friend로 지정된 FInventorySlotArray만 RebuildCellCache 등의 private 함수를 쓸 수 있고, 접근 가능하게. 델타 복제 콜백 시.
+	
+	bool DropEntireItemOnServer(UBaruItemInstance* Item, int32 ExpectedQuantity);
 };

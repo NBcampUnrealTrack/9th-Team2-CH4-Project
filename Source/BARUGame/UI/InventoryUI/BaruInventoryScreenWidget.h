@@ -1,10 +1,12 @@
-﻿//BaruInventoryScreenWidget.h
-
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "UI/Foundation/BaruActivatableWidget.h"
 #include "BaruInventoryScreenWidget.generated.h"
+
+
+class USizeBox;
+class UDragDropOperation;
 
 UCLASS(Abstract)
 class BARUGAME_API UBaruInventoryScreenWidget
@@ -15,4 +17,12 @@ class BARUGAME_API UBaruInventoryScreenWidget
 public:
 	UBaruInventoryScreenWidget(
 		const FObjectInitializer& ObjectInitializer);
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<USizeBox> SizeBox_Content;
+
+	virtual bool NativeOnDrop(
+		const FGeometry& InGeometry,
+		const FDragDropEvent& InDragDropEvent,
+		UDragDropOperation* InOperation) override;
 };

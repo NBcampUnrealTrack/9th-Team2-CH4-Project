@@ -106,6 +106,11 @@ protected:
 	// 아이템 한 개를 표시할 Widget Blueprint 클래스입니다.
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Inventory UI")
 	TSubclassOf<UBaruInventoryItemWidget> InventoryItemWidgetClass;
+	
+	virtual bool NativeOnDrop(
+	const FGeometry& InGeometry,
+	const FDragDropEvent& InDragDropEvent,
+	UDragDropOperation* InOperation) override;
 
 private:
 	void BindInventory();
