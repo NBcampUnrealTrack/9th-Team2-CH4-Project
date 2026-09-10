@@ -3,6 +3,7 @@
 #include "Player/BaruPlayerController.h"
 #include "Player/BaruPlayerState.h"
 #include "Character/BaruCharacter.h"
+#include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Subsystems/BaruSaveGameSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -422,6 +423,10 @@ void ABaruGameMode::CheckTeamWipe()
     {
         BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("Team wiped. Processing Failure Settlement."));
 
+        // 플레이어 전멸 시 패배 신호 발송
+        CachedBaruGameState->Multicast_BroadcastNotification(
+            FText::FromString(TEXT("MISSION FAILED: All Operatives Lost")), 5.0f);
+        
         GetWorldTimerManager().ClearTimer(LevelTransitionTimerHandle);
         GetWorldTimerManager().ClearTimer(RaidCountdownTimerHandle);
 
@@ -509,5 +514,80 @@ void ABaruGameMode::CleanUpExpiredSnapshots()
     {
         UpdateAlivePlayerCount();
         CheckTeamWipe();
+    }
+}
+
+void ABaruGameMode::RegisterExpectedSpawns(int32 ExpectedCount)
+{
+    if (ExpectedCount <= 0) return;
+    PendingSpawnMonsterCount += ExpectedCount;
+    TotalSpawnedMonsters += ExpectedCount;
+
+    if (CachedBaruGameState)
+    {
+        CachedBaruGameState->SetMonsterCounts(TotalSpawnedMonsters, ActiveMonsters.Num() + PendingSpawnMonsterCount);
+    }
+}
+
+void ABaruGameMode::RegisterMonster(ABaruMonsterCharacter* Monster)
+{
+    if (!IsValid(Monster) || ActiveMonsters.Contains(Monster)) return;
+
+    ActiveMonsters.Add(Monster);
+
+    // 스포너 대기 카운트에서 1 차감
+    if (PendingSpawnMonsterCount > 0)
+    {
+        PendingSpawnMonsterCount--;
+    }
+    else
+    {
+        TotalSpawnedMonsters++;
+    }
+
+    if (!CachedBaruGameState) CachedBaruGameState = GetGameState<ABaruGameState>();
+    if (CachedBaruGameState)
+    {
+        CachedBaruGameState->SetMonsterCounts(TotalSpawnedMonsters, ActiveMonsters.Num() + PendingSpawnMonsterCount);
+    }
+}
+
+void ABaruGameMode::UnregisterMonster(ABaruMonsterCharacter* Monster)
+{
+    // Die를 거치지 않고 엔진에 의해 강제 파괴된 경우 (예: 낙하/언로드)
+    if (ActiveMonsters.Contains(Monster))
+    {
+        ActiveMonsters.Remove(Monster);
+        if (CachedBaruGameState)
+        {
+            CachedBaruGameState->SetMonsterCounts(TotalSpawnedMonsters, ActiveMonsters.Num() + PendingSpawnMonsterCount);
+        }
+    }
+}
+
+void ABaruGameMode::OnMonsterDied(ABaruMonsterCharacter* Monster, AActor* Killer)
+{
+    if (!IsValid(Monster)) return;
+
+    ActiveMonsters.Remove(Monster);
+
+    // 킬러 PlayerState 킬 수 증가
+    ABaruPlayerState* KillerPS = nullptr;
+    if (APawn* KillerPawn = Cast<APawn>(Killer)) KillerPS = KillerPawn->GetPlayerState<ABaruPlayerState>();
+    else if (AController* KillerPC = Cast<AController>(Killer)) KillerPS = KillerPC->GetPlayerState<ABaruPlayerState>();
+    if (KillerPS) KillerPS->AddMonsterKill();
+
+    if (!CachedBaruGameState) CachedBaruGameState = GetGameState<ABaruGameState>();
+    if (CachedBaruGameState)
+    {
+        CachedBaruGameState->SetTeamMonsterKillCount(CachedBaruGameState->GetTeamMonsterKillCount() + 1);
+        CachedBaruGameState->SetMonsterCounts(TotalSpawnedMonsters, ActiveMonsters.Num() + PendingSpawnMonsterCount);
+
+        // 소환 대기 인원(Pending)도 0이고, 필드 잔여(Active)도 0일 때만 적 전멸 판정
+        if (ActiveMonsters.Num() <= 0 && PendingSpawnMonsterCount <= 0 && TotalSpawnedMonsters > 0)
+        {
+            CachedBaruGameState->Multicast_NotifyAllMonstersEliminated();
+            CachedBaruGameState->Multicast_BroadcastNotification(FText::FromString(TEXT("ALL HOSTILES ELIMINATED")), 5.0f);
+        }
     }
 }

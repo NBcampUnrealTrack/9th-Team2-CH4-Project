@@ -1,4 +1,9 @@
 #include "Subsystems/BaruSessionSubsystem.h"
+#include "Subsystems/BaruSaveGameSubsystem.h"
+#include "Player/BaruPlayerState.h"
+#include "Gameplay/Inventory/BaruInventoryComponent.h"
+#include "Gameplay/Items/BaruItemInstance.h"
+#include "Core/BaruGameState.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
@@ -12,6 +17,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/PackageName.h"
 #include "BaruLog.h"
+#include "Engine/GameInstance.h"
 
 UBaruSessionSubsystem::UBaruSessionSubsystem()
 	: CreateSessionCompleteDelegate(FOnCreateSessionCompleteDelegate::CreateUObject(this, &ThisClass::OnCreateSessionComplete))
@@ -44,6 +50,34 @@ void UBaruSessionSubsystem::HandleNetworkFailure(
 {
 	BARU_LOG(LogBaruSession, Warning, TEXT("Network Failure (%d): %s. Returning to MainMenuLevel."), 
 		static_cast<int32>(FailureType), *ErrorString);
+	
+	// 호스트 단절 시 게스트 로컬 PC에 인게임 파밍 결과 긴급 백업 저장
+	if (World)
+	{
+		if (APlayerController* LocalPC = World->GetFirstPlayerController())
+		{
+			if (ABaruPlayerState* PS = LocalPC->GetPlayerState<ABaruPlayerState>())
+			{
+				if (UGameInstance* GI = GetGameInstance())
+				{
+					if (UBaruSaveGameSubsystem* SaveSubsystem = GI->GetSubsystem<UBaruSaveGameSubsystem>())
+					{
+						// 게임스테이트에서 팀 스크랩 가치 일부 보존 (또는 인벤토리 아이템 유지)
+						int32 SalvagedGold = 0;
+						if (ABaruGameState* GS = World->GetGameState<ABaruGameState>())
+						{
+							// 세션 폭파 시 획득 가치의 50%를 비상 회수금으로 보전
+							SalvagedGold = FMath::RoundToInt(GS->GetTeamScrapValue() * 0.5f);
+						}
+
+						const FString PlayerName = PS->GetPlayerName().IsEmpty() ? TEXT("Operative") : PS->GetPlayerName();
+						SaveSubsystem->RecordRaidResult(PlayerName, SalvagedGold, /*bSurvived=*/false);
+						BARU_LOG(LogBaruSession, Log, TEXT("[EMERGENCY_SAVE] Salvaged %d Gold saved locally for %s"), SalvagedGold, *PlayerName);
+					}
+				}
+			}
+		}
+	}
 	
 	DestroySession(false);
 

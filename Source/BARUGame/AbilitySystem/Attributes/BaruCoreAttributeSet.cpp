@@ -3,6 +3,7 @@
 #include "GameplayEffectExtension.h"
 #include "Interfaces/CombatInterface.h"
 #include "BaruLog.h"
+#include "Character/BaruCharacter.h"
 #include "GameplayTags/BaruGameplayTags.h"
 
 UBaruCoreAttributeSet::UBaruCoreAttributeSet()
@@ -90,9 +91,31 @@ void UBaruCoreAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCa
             // 사망 검증 및 1회만 Die 인터페이스 호출
             if (NewHealth <= 0.0f && TargetActor && TargetActor->Implements<UCombatInterface>())
             {
-                if (!ICombatInterface::Execute_IsDead(TargetActor))
+                // 이미 완전 사망한 액터는 무시
+                if (ICombatInterface::Execute_IsDead(TargetActor))
+                {
+                    return;
+                }
+
+                // 몬스터는 DBNO 없이 즉시 사망
+                if (TargetActor->IsA(APawn::StaticClass()) && !Cast<APawn>(TargetActor)->IsPlayerControlled())
                 {
                     ICombatInterface::Execute_Die(TargetActor, SourceActor);
+                    return;
+                }
+
+                // 플레이어: 이미 DBNO 상태에서 또 치명상을 입었으면 완전 사망
+                if (ICombatInterface::Execute_IsDBNO(TargetActor))
+                {
+                    ICombatInterface::Execute_Die(TargetActor, SourceActor);
+                }
+                else
+                {
+                    // 첫 체력 0 도달 -> 다운(DBNO) 상태 진입 (TODO : BaruCharacter에서 EnterDBNO 구현 되면 주석 해제)
+                    // if (ABaruCharacter* BaruChar = Cast<ABaruCharacter>(TargetActor))
+                    // {
+                    //     BaruChar->EnterDBNO(SourceActor);
+                    // }
                 }
             }
         }
