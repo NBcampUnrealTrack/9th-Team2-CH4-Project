@@ -220,4 +220,13 @@ void ABaruPlayerState::OnRep_IsDead()
     OnDeadStatusChanged.Broadcast(bIsDead);
 }
 
-// [삭제] OnRep_Sanity() 구현부 삭제
+void ABaruPlayerState::AddMonsterKill()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    MonsterKillCount++;
+    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Player %s MonsterKillCount: %d"), *GetPlayerName(), MonsterKillCount);
+}

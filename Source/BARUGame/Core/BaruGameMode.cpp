@@ -4,6 +4,7 @@
 #include "Player/BaruPlayerState.h"
 #include "Character/BaruCharacter.h"
 #include "Subsystems/BaruSaveGameSubsystem.h"
+#include "Gameplay/Inventory/BaruInventoryComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -297,6 +298,12 @@ void ABaruGameMode::ExecuteServerTravel()
 
 void ABaruGameMode::UpdateAlivePlayerCount()
 {
+    UWorld* World = GetWorld();
+    if (!World || World->bIsTearingDown)
+    {
+        return;
+    }
+    
     if (!CachedBaruGameState)
     {
         CachedBaruGameState = GetGameState<ABaruGameState>();
@@ -332,9 +339,12 @@ void ABaruGameMode::UpdateAlivePlayerCount()
     CachedBaruGameState->SetAlivePlayerCount(CurrentActive);
 
     // 완전 전멸(접속자 0 + 대기자 0) 시 전멸 검사
-    if (CurrentActive <= 0 && CurrentDBNO <= 0)
+    if (CachedBaruGameState->GetMatchState() == EBaruMatchState::InProgress)
     {
-        CheckTeamWipe();
+        if (CurrentActive <= 0 && CurrentDBNO <= 0)
+        {
+            CheckTeamWipe();
+        }
     }
 }
 
@@ -398,13 +408,19 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
 
 void ABaruGameMode::CheckTeamWipe()
 {
-    if (!CachedBaruGameState)
+    UWorld* World = GetWorld();
+    if (!World || World->bIsTearingDown || !CachedBaruGameState)
+    {
+        return;
+    }
+    
+    if (CachedBaruGameState->GetMatchState() != EBaruMatchState::InProgress)
     {
         return;
     }
     
     // DBNO 상태인 플레이어가 1명이라도 있으면 전멸이 아님 (방어 코드)
-    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    for (FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
         if (APlayerController* PC = Iterator->Get())
         {
@@ -456,10 +472,27 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
             const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
 
+            // Todo : 인벤토리 컴포넌트에서 GetTotalItemCount() 함수 구현되면 주석 해제
+            // int32 ExtractedItemCount = 0;
+            // if (bPlayerSurvived && PS)
+            // {
+            //     if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
+            //     {
+            //         ExtractedItemCount = InvenComp->GetTotalItemCount();
+            //     }
+            // }
+            
+            const int32 Kills = PS ? PS->GetMonsterKillCount() : 0;
+
             FBaruSettlementReport Report;
             Report.bSurvived = bPlayerSurvived;
             Report.AcquiredCurrency = EarnedGold;
-            Report.ExtractedItemCount = bPlayerSurvived ? 5 : 0;
+            
+            // Todo : 인벤토리 컴포넌트에서 GetTotalItemCount() 함수 구현되면 주석 해제
+            // Report.ExtractedItemCount = ExtractedItemCount;
+            // Todo : PlayerController에서 int32 MonsterKillCount = 0; 선언부 구현되면 주석 해제
+            // Todo : BaruMonsterCharacter에서 몬스터가 사망할 때 GameMode->OnMonsterDied()를 호출하면 킬 카운트 정상 작동
+            // Report.MonsterKillCount = Kills;
 
             BaruPC->Client_ShowSettlementUI(Report);
         }
@@ -476,6 +509,34 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
             PostSettlementReturnDelay,
             false
         );
+    }
+}
+
+void ABaruGameMode::OnMonsterDied(AActor* MonsterActor, AActor* KillerActor)
+{
+    if (!KillerActor)
+    {
+        return;
+    }
+
+    // Killer로부터 PlayerState 역추적하여 킬 카운트 누적
+    ABaruPlayerState* KillerPS = nullptr;
+    if (APawn* KillerPawn = Cast<APawn>(KillerActor))
+    {
+        KillerPS = KillerPawn->GetPlayerState<ABaruPlayerState>();
+    }
+    else if (AController* KillerPC = Cast<AController>(KillerActor))
+    {
+        KillerPS = KillerPC->GetPlayerState<ABaruPlayerState>();
+    }
+    else if (ABaruPlayerState* DirectPS = Cast<ABaruPlayerState>(KillerActor))
+    {
+        KillerPS = DirectPS;
+    }
+
+    if (KillerPS)
+    {
+        KillerPS->AddMonsterKill();
     }
 }
 

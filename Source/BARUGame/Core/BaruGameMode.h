@@ -61,6 +61,10 @@ public:
 	// 최종 보상 정산 및 SaveGame 영구 기록 실행
 	UFUNCTION(BlueprintCallable, Category = "BARU|GameMode")
 	void ProcessSettlement(bool bAllExtracted);
+	
+	// 몬스터 사망 시 개인 킬 카운트 누적
+	UFUNCTION(BlueprintCallable, Category = "BARU|GameMode")
+	void OnMonsterDied(AActor* MonsterActor, AActor* KillerActor);
 
 protected:
 	void CheckTeamWipe();
