@@ -67,8 +67,8 @@ void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
     DOREPLIFETIME(ABaruPlayerState, bIsReady);
     DOREPLIFETIME(ABaruPlayerState, bIsDBNO);
-    DOREPLIFETIME(ABaruPlayerState, bIsDead);   // [추가]
-    // [삭제] DOREPLIFETIME(ABaruPlayerState, Sanity);  → AttributeSet 이 대신 복제
+    DOREPLIFETIME(ABaruPlayerState, bIsDead);
+    DOREPLIFETIME(ABaruPlayerState, MonsterKillCount);
 }
 
 // [추가] 레벨 이동 시 값 인수인계
@@ -78,7 +78,14 @@ void ABaruPlayerState::CopyProperties(APlayerState* PlayerState)
 
     if (ABaruPlayerState* NewPS = Cast<ABaruPlayerState>(PlayerState))
     {
-        
+        // 새 레벨 진입 시 레디 상태 초기화
+        NewPS->bIsReady = false;
+
+        // // TODO : 인벤토리 서버 전용 함수 구현 시 주석 해제하여 데이터 인수인계
+        // if (InventoryComponent && NewPS->InventoryComponent)
+        // {
+        //     NewPS->InventoryComponent->CopyInventoryFrom(InventoryComponent);
+        // }
     }
 }
 
@@ -229,4 +236,11 @@ void ABaruPlayerState::AddMonsterKill()
 
     MonsterKillCount++;
     BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Player %s MonsterKillCount: %d"), *GetPlayerName(), MonsterKillCount);
+    
+    OnRep_MonsterKillCount();
+}
+
+void ABaruPlayerState::OnRep_MonsterKillCount()
+{
+    OnMonsterKillCountChanged.Broadcast(MonsterKillCount);
 }

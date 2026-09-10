@@ -35,6 +35,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruExtractionPlayerCountChanged
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruPingReceived, FVector, PingLocation, EBaruPingType, PingType);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruGlobalNotificationReceived, const FText&, MessageText, float, DisplayDuration);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruMonsterCountChanged, int32, RemainingCount, int32, TotalCount);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruTeamMonsterKillCountChanged, int32, NewTeamKillCount);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBaruAllMonstersEliminated);
+
 /**
  * 생존자 수, 팀 수집물 총 가치등 GameState 및 전역 브로드캐스트(Notification) 관리
  */
@@ -64,6 +68,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "BARU|GameState")
 	int32 GetPlayersInExtractionZoneCount() const { return PlayersInExtractionZoneCount; }
+	
+	UFUNCTION(BlueprintPure, Category = "BARU|GameState|Monster")
+	int32 GetTotalMonsterCount() const { return TotalMonsterCount; }
+
+	UFUNCTION(BlueprintPure, Category = "BARU|GameState|Monster")
+	int32 GetRemainingMonsterCount() const { return RemainingMonsterCount; }
+
+	UFUNCTION(BlueprintPure, Category = "BARU|GameState|Monster")
+	int32 GetTeamMonsterKillCount() const { return TeamMonsterKillCount; }
 
 	// [Server Only] Setter
 	UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|GameState")
@@ -87,6 +100,16 @@ public:
 	
 	UFUNCTION(NetMulticast, Reliable, Category = "BARU|GameState")
 	void Multicast_BroadcastPing(FVector PingLocation, EBaruPingType PingType);
+	
+	UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|GameState|Monster")
+	void SetMonsterCounts(int32 InTotal, int32 InRemaining);
+
+	UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|GameState|Monster")
+	void SetTeamMonsterKillCount(int32 NewKillCount);
+
+	// Multicast RPC: 적 전멸 이벤트 브로드캐스트
+	UFUNCTION(NetMulticast, Reliable, Category = "BARU|GameState|Monster")
+	void Multicast_NotifyAllMonstersEliminated();
 
 public:
 	// UI 델리게이트
@@ -111,6 +134,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
 	FOnBaruGlobalNotificationReceived OnGlobalNotificationReceived;
 	
+	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
+	FOnBaruMonsterCountChanged OnMonsterCountChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
+	FOnBaruTeamMonsterKillCountChanged OnTeamMonsterKillCountChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
+	FOnBaruAllMonstersEliminated OnAllMonstersEliminated;
+	
 protected:
 	// Replicated Properties & RepNotifies
 	UPROPERTY(ReplicatedUsing = OnRep_MatchState, VisibleInstanceOnly, Category = "BARU|State")
@@ -127,6 +159,16 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_PlayersInExtractionZoneCount, VisibleInstanceOnly, Category = "BARU|State")
 	int32 PlayersInExtractionZoneCount = 0;
+	
+	
+	UPROPERTY(ReplicatedUsing = OnRep_MonsterCounts, VisibleInstanceOnly, Category = "BARU|Monster")
+	int32 TotalMonsterCount = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_MonsterCounts, VisibleInstanceOnly, Category = "BARU|Monster")
+	int32 RemainingMonsterCount = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_TeamMonsterKillCount, VisibleInstanceOnly, Category = "BARU|Monster")
+	int32 TeamMonsterKillCount = 0;
 
 	
 	// RepNotifies
@@ -135,4 +177,7 @@ protected:
 	UFUNCTION() virtual void OnRep_AlivePlayerCount();
 	UFUNCTION() virtual void OnRep_TeamScrapValue();
 	UFUNCTION() virtual void OnRep_PlayersInExtractionZoneCount();
+	
+	UFUNCTION() virtual void OnRep_MonsterCounts();
+	UFUNCTION() virtual void OnRep_TeamMonsterKillCount();
 };

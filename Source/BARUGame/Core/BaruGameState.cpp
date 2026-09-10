@@ -18,6 +18,10 @@ void ABaruGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(ABaruGameState, AlivePlayerCount);
     DOREPLIFETIME(ABaruGameState, TeamScrapValue);
     DOREPLIFETIME(ABaruGameState, PlayersInExtractionZoneCount);
+    
+    DOREPLIFETIME(ABaruGameState, TotalMonsterCount);
+    DOREPLIFETIME(ABaruGameState, RemainingMonsterCount);
+    DOREPLIFETIME(ABaruGameState, TeamMonsterKillCount);
 }
 
 
@@ -73,6 +77,24 @@ void ABaruGameState::SetPlayersInExtractionZoneCount(int32 NewCount)
     OnRep_PlayersInExtractionZoneCount();
 }
 
+
+void ABaruGameState::SetMonsterCounts(int32 InTotal, int32 InRemaining)
+{
+    if (!HasAuthority()) return;
+
+    TotalMonsterCount = FMath::Max(InTotal, 0);
+    RemainingMonsterCount = FMath::Max(InRemaining, 0);
+    OnRep_MonsterCounts();
+}
+
+void ABaruGameState::SetTeamMonsterKillCount(int32 NewKillCount)
+{
+    if (!HasAuthority()) return;
+
+    TeamMonsterKillCount = FMath::Max(NewKillCount, 0);
+    OnRep_TeamMonsterKillCount();
+}
+
 // Multicast RPC
 
 void ABaruGameState::Multicast_BroadcastNotification_Implementation(const FText& MessageText, float DisplayDuration)
@@ -85,6 +107,13 @@ void ABaruGameState::Multicast_BroadcastPing_Implementation(FVector PingLocation
 {
     BARU_NET_LOG(this, LogBaruNet, Verbose, TEXT("Ping Broadcast: Type %d at %s"), static_cast<int32>(PingType), *PingLocation.ToString());
     OnPingReceived.Broadcast(PingLocation, PingType);
+}
+
+
+void ABaruGameState::Multicast_NotifyAllMonstersEliminated_Implementation()
+{
+    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("All monsters eliminated notification received."));
+    OnAllMonstersEliminated.Broadcast();
 }
 
 // RepNotifies
@@ -115,4 +144,15 @@ void ABaruGameState::OnRep_TeamScrapValue()
 void ABaruGameState::OnRep_PlayersInExtractionZoneCount()
 {
     OnExtractionPlayerCountChanged.Broadcast(PlayersInExtractionZoneCount, AlivePlayerCount);
+}
+
+
+void ABaruGameState::OnRep_MonsterCounts()
+{
+    OnMonsterCountChanged.Broadcast(RemainingMonsterCount, TotalMonsterCount);
+}
+
+void ABaruGameState::OnRep_TeamMonsterKillCount()
+{
+    OnTeamMonsterKillCountChanged.Broadcast(TeamMonsterKillCount);
 }

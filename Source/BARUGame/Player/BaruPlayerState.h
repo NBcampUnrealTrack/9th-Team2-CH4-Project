@@ -9,7 +9,8 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruReadyStatusChanged, bool, bIsReady);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDBNOStatusChanged, bool, bIsDBNO);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSanity);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDeadStatusChanged, bool, bIsDead); // [추가]
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDeadStatusChanged, bool, bIsDead);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruPlayerKillCountChanged, int32, NewKillCount);
 
 class UAbilitySystemComponent;
 class UBaruAbilitySystemComponent;      
@@ -99,7 +100,6 @@ public:
     // ABaruCharacter::Die_Implementation 이 true 로, PossessedBy(리스폰) 가 false 로 호출
     UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
     void SetDeadState(bool bNewDead, AActor* Killer = nullptr);
-
     
     // 몬스터 처치 수 반환
     UFUNCTION(BlueprintPure, Category = "BARU|PlayerState")
@@ -108,6 +108,7 @@ public:
     // [Server] 몬스터 처치 수 1 증가
     UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
     void AddMonsterKill();
+    
     
 public:
     // UI 델리게이트
@@ -122,6 +123,9 @@ public:
     
     UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")   // [추가]
     FOnBaruDeadStatusChanged OnDeadStatusChanged;
+    
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Score")
+    FOnBaruPlayerKillCountChanged OnMonsterKillCountChanged;
     
 protected:
     // GAS Components 부착
@@ -150,7 +154,7 @@ protected:
     UPROPERTY(ReplicatedUsing = OnRep_IsDBNO, VisibleInstanceOnly, Category = "BARU|State")
     bool bIsDBNO = false;
 
-    UPROPERTY(ReplicatedUsing = OnRep_IsDead, VisibleInstanceOnly, Category = "BARU|State")   // ★[추가]
+    UPROPERTY(ReplicatedUsing = OnRep_IsDead, VisibleInstanceOnly, Category = "BARU|State")
     bool bIsDead = false;
 
     // [삭제] float Sanity = 100.0f; 중복
@@ -162,7 +166,7 @@ protected:
     virtual void OnRep_IsDBNO();
 
     UFUNCTION()
-    virtual void OnRep_IsDead();      // [추가]
+    virtual void OnRep_IsDead();
 
     // [삭제] OnRep_Sanity()
     // [추가] Sanity 어트리뷰트 변경 → UI 델리게이트 브로드캐스트
@@ -171,7 +175,10 @@ protected:
     // 몬스터 개인 킬 카운트
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "BARU|State")
     int32 MonsterKillCount = 0;
-
+    
+    UFUNCTION()
+    virtual void OnRep_MonsterKillCount();
+    
 private:
-    FDelegateHandle SanityChangedHandle;   // [추가]
+    FDelegateHandle SanityChangedHandle;
 };
