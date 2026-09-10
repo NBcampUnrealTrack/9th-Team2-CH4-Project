@@ -14,6 +14,19 @@ class UAISenseConfig_Sight;
 class UBaruMonsterDataAsset;
 class UBaruMonsterNavigationComponent;
 
+// 디렉터가 몬스터에게 내릴 수 있는 기본 명령
+UENUM(BlueprintType)
+enum class EBaruMonsterDirectorCommand : uint8
+{
+	// 디렉터 명령 없이 개별 AI 판단 사용
+	None UMETA(DisplayName = "명령 없음"),
+
+	// 지정 위치로 이동해서 조사
+	Investigate UMETA(DisplayName = "이동 및 조사"),
+
+	// 현재 자리에서 대기
+	Hold UMETA(DisplayName = "현재 위치 대기")
+};
 
 UCLASS()
 class BARUGAME_API ABaruMonsterAIController : public AAIController
@@ -58,6 +71,14 @@ protected:
 	// 감각 기관이 새로운 대상을 발견하거나 놓치면 호출
 	UFUNCTION()
 	void HandleTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+	
+	// 조종이 해제되면 기존 몬스터의 타이머와 대상 정보를 정리
+	virtual void OnUnPossess() override;
+
+	// Controller가 제거될 때 타이머와 감지 연결 정리
+	virtual void EndPlay(
+		const EEndPlayReason::Type EndPlayReason
+	) override;
 			
 private:
 	
@@ -85,8 +106,8 @@ private:
 	// 파괴되었거나 월드에서 사라져 무효가 된 플레이어를 정리
 	void RemoveInvalidPlayerCandidates();
 	
-	// 현재 보이는 플레이어 중 가장 가까운 대상을 선택
-	void SelectClosestVisiblePlayer();
+	// 현재 보이는 유효한 플레이어 중 위협도 점수가 가장 높은 대상 선택
+	void SelectHighestThreatVisiblePlayer();
 	
 	// 플레이어를 놓친 위치를 저장하고 기억시간 타이머를 시작
 	void RememberLastKnownTargetLocation(const FVector& TargetLocation);
@@ -121,5 +142,90 @@ private:
 	
 	// 현재 감지 상태를 Behavior Tree가 사용할 블랙보드에 반영
 	void UpdateBlackboardFromPerceptionState();
+	
+	//----------------
+	// 위협도 / 어그로
+	//----------------
+	
+public:
+	
+	// 몬스터가 실제로 받은 피해를 공격자의 위협도로 등록
+	// 그로기 중에도 위협도는 누적하며, 서버에서만 처리
+	void RegisterDamageThreat(
+		APawn* AttackerPawn,
+		float DamageAmount
+	);
+	
+private:
+	
+	// 플레이어별 누적 피해 위협도
+	// 플레이어의 수명을 유지하지 않도록 약한 참조 사용
+	TMap<TWeakObjectPtr<APawn>, float> DamageThreatByPlayer;
+
+	// 위협도 감소와 대상 재선택을 주기적으로 실행
+	FTimerHandle ThreatUpdateTimerHandle;
+
+	// 이전 갱신 시각
+	// 실제 경과시간을 기준으로 위협도를 감소시키는 데 사용
+	double LastThreatUpdateTime = 0.0;
+
+	// DataAsset에서 갱신 간격을 읽고 타이머 시작
+	void StartThreatUpdates();
+
+	// 누적 위협도를 감소시키고 현재 대상을 다시 선택
+	void UpdateThreat();
+
+	// 거리·피해 위협도·현재 대상 유지 보정을 합산
+	float CalculateThreatScore(APawn* CandidatePawn) const;
+	
+public:
+	
+	//----------------
+	// 디렉터 명령
+	//----------------
+
+	// 지정 위치로 이동·조사하도록 명령
+	// 서버에서 명령을 접수하면 true 반환
+	// 실제 경로 생성과 도착 성공 여부는 별도로 처리
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Monster|AI|Director")
+	bool ReceiveDirectorInvestigateCommand(
+		const FVector& TargetLocation
+	);
+
+	// 기존 디렉터 이동 명령을 취소하고 현재 자리에서 대기
+	// 플레이어 추적·수색이 진행 중이면 해당 행동을 우선
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Monster|AI|Director")
+	void ReceiveDirectorHoldCommand();
+
+	// 디렉터 명령을 해제하고 개별 AI 판단으로 복귀
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Monster|AI|Director")
+	void ClearDirectorCommand();
+
+	// 현재 접수된 명령을 확인
+	UFUNCTION(BlueprintPure, Category = "Monster|AI|Director")
+	EBaruMonsterDirectorCommand GetDirectorCommand() const
+	{
+		return DirectorCommand;
+	}
+	
+private:
+	
+	//----------------
+	// 디렉터 명령 상태
+	//----------------
+
+	// 현재 접수된 디렉터 명령
+	// AI 판단은 서버에서 하므로 복제하지 않음
+	UPROPERTY(Transient)
+	EBaruMonsterDirectorCommand DirectorCommand =
+		EBaruMonsterDirectorCommand::None;
+
+	// 이동·조사 명령의 목적지
+	// 명령 종류로 유효 여부를 구분하므로 원점도 목적지로 사용 가능
+	UPROPERTY(Transient)
+	FVector DirectorTargetLocation = FVector::ZeroVector;
+
+	// 현재 명령을 Behavior Tree의 Blackboard에 반영
+	void UpdateBlackboardFromDirectorState();
 	
 };

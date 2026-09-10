@@ -6,6 +6,8 @@
 #include "GameFramework/Character.h"
 #include "Engine/World.h"
 #include "CollisionQueryParams.h"
+#include "Monster/Characters/BaruMonsterCharacter.h"
+#include "Monster/Data/BaruMonsterDataAsset.h"
 #include "BaruLog.h"
 #include "GameplayTags/BaruGameplayTags.h"
 
@@ -194,8 +196,27 @@ void UBaruGA_MonsterAttack::PerformMeleeAttackTrace()
         return;
     }
 
+    // DataAsset을 읽을 수 없는 경우 Ability의 기존 공격 거리를 사용
+    float EffectiveAttackRange = FMath::Max(0.0f, AttackRange);
+
+    // 공격하는 몬스터의 DataAsset에서 실제 타격 거리를 가져옴
+    if (const ABaruMonsterCharacter* MonsterCharacter =
+        Cast<ABaruMonsterCharacter>(AvatarActor))
+    {
+        if (const UBaruMonsterDataAsset* MonsterData =
+            MonsterCharacter->GetMonsterDataAsset())
+        {
+            EffectiveAttackRange =
+                FMath::Max(0.0f, MonsterData->AttackRange);
+        }
+    }
+
+    // 몬스터 위치에서 정면으로 설정된 거리만큼 구를 이동시켜 검사
     const FVector Start = AvatarActor->GetActorLocation();
-    const FVector End = Start + (AvatarActor->GetActorForwardVector() * AttackRange);
+
+    const FVector End =
+        Start +
+        AvatarActor->GetActorForwardVector() * EffectiveAttackRange;
 
     FCollisionQueryParams Params(TEXT("MonsterAttackTrace"), false, AvatarActor);
     FHitResult HitResult;
@@ -245,8 +266,7 @@ void UBaruGA_MonsterAttack::EndAbility(
         {
             AnimInstance->OnPlayMontageNotifyBegin.RemoveDynamic(
                 this,
-                &UBaruGA_MonsterAttack::
-                    HandleAttackMontageNotifyBegin
+                &UBaruGA_MonsterAttack::HandleAttackMontageNotifyBegin
             );
         }
     }

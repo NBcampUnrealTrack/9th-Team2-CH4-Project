@@ -36,6 +36,7 @@ public class BARUGame : ModuleRules
 			"OnlineSubsystemSteam",
 			"AIModule",
 			"Niagara",
+			"NavigationSystem",
 			"AnimGraphRuntime"
 		});
 

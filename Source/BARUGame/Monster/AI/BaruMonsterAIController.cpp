@@ -12,6 +12,10 @@
 
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "Engine/World.h"
+#include "GameplayTags/BaruGameplayTags.h"
+#include "AbilitySystemComponent.h"
+#include "Interfaces/CombatInterface.h"
 #include "TimerManager.h"
 #include "BaruLog.h"
 
@@ -30,6 +34,17 @@ namespace BaruMonsterBlackboardKeys
 	const FName MoveAcceptanceRadius(
 		TEXT("MoveAcceptanceRadius")
 	);
+	
+	// 디렉터의 이동·조사 명령이 있는지
+	const FName HasDirectorInvestigation(
+		TEXT("HasDirectorInvestigation")
+	);
+
+	// 디렉터가 지정한 조사 위치
+	const FName DirectorTargetLocation(
+		TEXT("DirectorTargetLocation")
+	);
+	
 }
 
 ABaruMonsterAIController::ABaruMonsterAIController()
@@ -187,6 +202,12 @@ void ABaruMonsterAIController::InitializeFromControlledMonster()
 	// BT 실행에 성공한 뒤 초기 감지 상태를 반영
 	UpdateBlackboardFromPerceptionState();
 
+	// 초기화 전에 접수된 디렉터 명령도 Blackboard에 반영
+	UpdateBlackboardFromDirectorState();
+
+	// BT와 Blackboard 초기화가 끝난 뒤 위협도 갱신 시작
+	StartThreatUpdates();
+
 	BARU_NET_LOG(
 	   this,
 	   LogBaruAI,
@@ -289,7 +310,7 @@ void ABaruMonsterAIController::AddVisiblePlayerCandidate(
 		TWeakObjectPtr<APawn>(PlayerPawn)
 	);
 	
-	SelectClosestVisiblePlayer();
+	SelectHighestThreatVisiblePlayer();
 }
 
 void ABaruMonsterAIController::RemoveVisiblePlayerCandidate(
@@ -308,7 +329,7 @@ void ABaruMonsterAIController::RemoveVisiblePlayerCandidate(
 		}
 	);
 	
-	SelectClosestVisiblePlayer();
+	SelectHighestThreatVisiblePlayer();
 }
 
 void ABaruMonsterAIController::RemoveInvalidPlayerCandidates()
@@ -328,8 +349,15 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 	FAIStimulus Stimulus
 )
 {
-	// 몬스터의 감지 결과는 서버에서만 판단
-	if (!HasAuthority())
+	// 조종 중인 몬스터가 있는 서버에서만 감지 결과 처리
+	if (!HasAuthority() || !IsValid(GetPawn()))
+	{
+		return;
+	}
+
+	// 사망한 몬스터는 새로운 추적 대상을 선택하지 않음
+	if (GetPawn()->Implements<UCombatInterface>() &&
+		ICombatInterface::Execute_IsDead(GetPawn()))
 	{
 		return;
 	}
@@ -364,7 +392,7 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		ClearLastKnownTargetLocation();
 		
 		// 발견한 플레이어를 추적 후보 목록에 추가
-		// 가장 가까운 플레이어를 현재 대상으로 선택
+		// 현재 보이는 플레이어 중 위협도 점수가 가장 높은 대상 선택
 		AddVisiblePlayerCandidate(SensedPawn);
 		
 		// 새로 선택된 타깃을 블랙보드에 반영
@@ -447,58 +475,64 @@ FVector ABaruMonsterAIController::GetLastKnownTargetLocation() const
 	return LastKnownTargetLocation;
 }
 
-void ABaruMonsterAIController::SelectClosestVisiblePlayer()
+void ABaruMonsterAIController::SelectHighestThreatVisiblePlayer()
 {
-	APawn* ControlledPawn = GetPawn();
-
-	if (!IsValid(ControlledPawn))
+	if (!HasAuthority() || !IsValid(GetPawn()))
 	{
 		CurrentTarget.Reset();
 		return;
 	}
 
-	APawn* ClosestPlayer = nullptr;
-	float ClosestDistanceSquared =
-		TNumericLimits<float>::Max();
+	// 파괴된 대상, 조종되지 않는 대상, 사망한 대상을 제거
+	VisiblePlayerCandidates.RemoveAll(
+		[](const TWeakObjectPtr<APawn>& Candidate)
+		{
+			APawn* CandidatePawn = Candidate.Get();
+
+			if (!IsValid(CandidatePawn) ||
+				!CandidatePawn->IsPlayerControlled())
+			{
+				return true;
+			}
+
+			return CandidatePawn->Implements<UCombatInterface>() &&
+				ICombatInterface::Execute_IsDead(CandidatePawn);
+		}
+	);
+
+	APawn* BestTarget = nullptr;
+	float BestScore = -1.0f;
 
 	for (const TWeakObjectPtr<APawn>& Candidate :
-		 VisiblePlayerCandidates)
+		VisiblePlayerCandidates)
 	{
 		APawn* CandidatePawn = Candidate.Get();
+		const float Score = CalculateThreatScore(CandidatePawn);
 
-		if (!IsValid(CandidatePawn) ||
-			!CandidatePawn->IsPlayerControlled())
+		// 동점이라면 현재 대상을 우선해서 불필요한 전환 방지
+		if (Score > BestScore ||
+			(Score == BestScore &&
+			 CandidatePawn == CurrentTarget.Get()))
 		{
-			continue;
-		}
-
-		const float DistanceSquared =
-			FVector::DistSquared(
-				ControlledPawn->GetActorLocation(),
-				CandidatePawn->GetActorLocation()
-			);
-
-		if (DistanceSquared < ClosestDistanceSquared)
-		{
-			ClosestDistanceSquared = DistanceSquared;
-			ClosestPlayer = CandidatePawn;
+			BestScore = Score;
+			BestTarget = CandidatePawn;
 		}
 	}
 
-	// 기존 대상과 같으면 변경하지 않음
-	if (CurrentTarget.Get() == ClosestPlayer)
+	if (CurrentTarget.Get() == BestTarget)
 	{
 		return;
 	}
 
-	CurrentTarget = ClosestPlayer;
+	CurrentTarget = BestTarget;
 
 	BARU_NET_LOG(
 		this,
 		LogBaruAI,
 		Log,
-		TEXT("Current target changed: %s"),
-		*GetNameSafe(CurrentTarget.Get())
+		TEXT("Threat target changed: %s / Score=%.1f"),
+		*GetNameSafe(BestTarget),
+		BestScore
 	);
 }
 
@@ -652,4 +686,459 @@ void ABaruMonsterAIController::UpdateBlackboardFromPerceptionState()
 	);
 }
 
+//----------------
+// 위협도 / 어그로
+//----------------
+
+float ABaruMonsterAIController::CalculateThreatScore(APawn* CandidatePawn) const
+{
+    const ABaruMonsterCharacter* MonsterCharacter =
+        Cast<ABaruMonsterCharacter>(GetPawn());
+
+    if (!IsValid(MonsterCharacter) || !IsValid(CandidatePawn))
+    {
+        return 0.0f;
+    }
+
+    const UBaruMonsterDataAsset* MonsterData = MonsterCharacter->GetMonsterDataAsset();
+
+    if (!IsValid(MonsterData))
+    {
+        return 0.0f;
+    }
+
+    const float Distance = FVector::Distance(
+        MonsterCharacter->GetActorLocation(),
+        CandidatePawn->GetActorLocation()
+    );
+
+    const float ReferenceDistance =
+        FMath::Max(1.0f, MonsterData->ThreatDistanceReference);
+
+    // 가까울수록 높고, 기준 거리 이상이면 0점
+    const float DistanceScore =
+        FMath::Clamp(
+            1.0f - Distance / ReferenceDistance,
+            0.0f,
+            1.0f
+        ) * FMath::Max(0.0f, MonsterData->ThreatDistanceWeight);
+
+    const float* StoredThreat = DamageThreatByPlayer.Find(
+        TWeakObjectPtr<APawn>(CandidatePawn)
+    );
+
+    const float DamageScore = StoredThreat
+        ? FMath::Max(0.0f, *StoredThreat)
+        : 0.0f;
+
+    // 현재 대상에게 유지 보너스 부여
+    const float RetentionScore =
+        CandidatePawn == CurrentTarget.Get()
+        ? FMath::Max(0.0f, MonsterData->CurrentTargetThreatBonus)
+        : 0.0f;
+
+    return DistanceScore + DamageScore + RetentionScore;
+}
+
+void ABaruMonsterAIController::StartThreatUpdates()
+{
+    // 초기화가 다시 호출되어도 타이머가 중복되지 않도록 정리
+    GetWorldTimerManager().ClearTimer(ThreatUpdateTimerHandle);
+
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    ABaruMonsterCharacter* MonsterCharacter =
+        Cast<ABaruMonsterCharacter>(GetPawn());
+
+    if (!IsValid(MonsterCharacter) ||
+        ICombatInterface::Execute_IsDead(MonsterCharacter))
+    {
+        return;
+    }
+
+    const UBaruMonsterDataAsset* MonsterData =
+        MonsterCharacter->GetMonsterDataAsset();
+
+    if (!IsValid(MonsterData))
+    {
+        return;
+    }
+
+    LastThreatUpdateTime = GetWorld()->GetTimeSeconds();
+
+    GetWorldTimerManager().SetTimer(
+        ThreatUpdateTimerHandle,
+        this,
+        &ABaruMonsterAIController::UpdateThreat,
+        FMath::Max(0.1f, MonsterData->ThreatUpdateInterval),
+        true
+    );
+}
+
+void ABaruMonsterAIController::UpdateThreat()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    ABaruMonsterCharacter* MonsterCharacter =
+        Cast<ABaruMonsterCharacter>(GetPawn());
+
+    // 시체가 남더라도 위협도 갱신은 중단
+    if (!IsValid(MonsterCharacter) ||
+        ICombatInterface::Execute_IsDead(MonsterCharacter))
+    {
+        GetWorldTimerManager().ClearTimer(ThreatUpdateTimerHandle);
+        DamageThreatByPlayer.Reset();
+        return;
+    }
+
+    const UBaruMonsterDataAsset* MonsterData =
+        MonsterCharacter->GetMonsterDataAsset();
+
+    if (!IsValid(MonsterData))
+    {
+        return;
+    }
+
+    const double CurrentTime = GetWorld()->GetTimeSeconds();
+    const float ElapsedSeconds = static_cast<float>(
+        FMath::Max(0.0, CurrentTime - LastThreatUpdateTime)
+    );
+
+    LastThreatUpdateTime = CurrentTime;
+
+    const float DecayAmount =
+        FMath::Max(0.0f, MonsterData->ThreatDecayPerSecond) *
+        ElapsedSeconds;
+
+    for (auto It = DamageThreatByPlayer.CreateIterator(); It; ++It)
+    {
+        APawn* PlayerPawn = It.Key().Get();
+
+        // 사라졌거나 사망한 플레이어의 기록 정리
+        if (!IsValid(PlayerPawn) ||
+            !PlayerPawn->IsPlayerControlled() ||
+            (PlayerPawn->Implements<UCombatInterface>() &&
+             ICombatInterface::Execute_IsDead(PlayerPawn)))
+        {
+            It.RemoveCurrent();
+            continue;
+        }
+
+        It.Value() = FMath::Max(0.0f, It.Value() - DecayAmount);
+
+        if (It.Value() <= 0.0f)
+        {
+            It.RemoveCurrent();
+        }
+    }
+
+    // 그로기 중에도 점수는 감소하지만 주기적 대상 전환은 보류
+    UAbilitySystemComponent* MonsterASC =
+        MonsterCharacter->GetAbilitySystemComponent();
+
+    if (IsValid(MonsterASC) &&
+        MonsterASC->HasMatchingGameplayTag(
+            FBaruGameplayTags::Get().State_Debuff_Groggy
+        ))
+    {
+        return;
+    }
+
+    SelectHighestThreatVisiblePlayer();
+
+    // 현재 보이는 대상이 있으면 이전 수색 기억은 사용하지 않음
+    if (IsValid(CurrentTarget.Get()))
+    {
+        ClearLastKnownTargetLocation();
+    }
+
+    UpdateBlackboardFromPerceptionState();
+}
+
+void ABaruMonsterAIController::RegisterDamageThreat(
+    APawn* AttackerPawn,
+    float DamageAmount
+)
+{
+    if (!HasAuthority() ||
+        !IsValid(AttackerPawn) ||
+        !AttackerPawn->IsPlayerControlled() ||
+        !FMath::IsFinite(DamageAmount) ||
+        DamageAmount <= 0.0f)
+    {
+        return;
+    }
+
+    if (AttackerPawn->Implements<UCombatInterface>() &&
+        ICombatInterface::Execute_IsDead(AttackerPawn))
+    {
+        return;
+    }
+
+    ABaruMonsterCharacter* MonsterCharacter =
+        Cast<ABaruMonsterCharacter>(GetPawn());
+
+    if (!IsValid(MonsterCharacter) ||
+        ICombatInterface::Execute_IsDead(MonsterCharacter))
+    {
+        return;
+    }
+
+    const UBaruMonsterDataAsset* MonsterData =
+        MonsterCharacter->GetMonsterDataAsset();
+
+    if (!IsValid(MonsterData))
+    {
+        return;
+    }
+
+    // 새 피해를 더하기 전에 기존 위협도에 경과시간만큼 감소 적용
+    UpdateThreat();
+
+    float& StoredThreat = DamageThreatByPlayer.FindOrAdd(
+        TWeakObjectPtr<APawn>(AttackerPawn)
+    );
+
+    StoredThreat = FMath::Clamp(
+        StoredThreat +
+            DamageAmount * FMath::Max(0.0f, MonsterData->ThreatPerDamage),
+        0.0f,
+        FMath::Max(0.0f, MonsterData->MaxDamageThreat)
+    );
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT("Damage threat added: %s / Threat=%.1f"),
+        *GetNameSafe(AttackerPawn),
+        StoredThreat
+    );
+
+    // 피해 반영 후 재평가
+    // 공격자를 시야 후보에 강제로 추가하지는 않음
+    UpdateThreat();
+}
+
+void ABaruMonsterAIController::OnUnPossess()
+{
+	GetWorldTimerManager().ClearTimer(ThreatUpdateTimerHandle);
+	GetWorldTimerManager().ClearTimer(SightMemoryTimerHandle);
+
+	DamageThreatByPlayer.Reset();
+	VisiblePlayerCandidates.Reset();
+	CurrentTarget.Reset();
+
+	LastKnownTargetLocation = FVector::ZeroVector;
+	bHasLastKnownTargetLocation = false;
+	LastThreatUpdateTime = 0.0;
+	
+	// 다음 몬스터에게 이전 디렉터 명령이 전달되지 않도록 정리
+	DirectorCommand = EBaruMonsterDirectorCommand::None;
+	DirectorTargetLocation = FVector::ZeroVector;
+
+	UpdateBlackboardFromDirectorState();
+
+	// 기존 Blackboard의 추적·수색 정보도 제거
+	if (GetBlackboardComponent())
+	{
+		UpdateBlackboardFromPerceptionState();
+	}
+
+	Super::OnUnPossess();
+
+	// 다음 조종 대상에게 이전 감지 정보가 남지 않도록 정리
+	if (IsValid(MonsterPerceptionComponent))
+	{
+		MonsterPerceptionComponent->ForgetAll();
+	}
+}
+
+void ABaruMonsterAIController::EndPlay(
+	const EEndPlayReason::Type EndPlayReason
+)
+{
+	GetWorldTimerManager().ClearTimer(ThreatUpdateTimerHandle);
+	GetWorldTimerManager().ClearTimer(SightMemoryTimerHandle);
+
+	if (IsValid(MonsterPerceptionComponent))
+	{
+		MonsterPerceptionComponent->OnTargetPerceptionUpdated.RemoveDynamic(
+			this,
+			&ABaruMonsterAIController::HandleTargetPerceptionUpdated
+		);
+	}
+
+	DamageThreatByPlayer.Reset();
+	VisiblePlayerCandidates.Reset();
+	CurrentTarget.Reset();
+
+	Super::EndPlay(EndPlayReason);
+}
+
+//----------------
+// 디렉터 명령
+//----------------
+
+bool ABaruMonsterAIController::ReceiveDirectorInvestigateCommand(
+    const FVector& TargetLocation
+)
+{
+    // 명령 접수는 서버에서만 처리
+    if (!HasAuthority() || TargetLocation.ContainsNaN())
+    {
+        return false;
+    }
+
+    ABaruMonsterCharacter* MonsterCharacter =
+        Cast<ABaruMonsterCharacter>(GetPawn());
+
+    // 조종 대상이 없거나 사망했다면 명령 거부
+    if (!IsValid(MonsterCharacter) ||
+        ICombatInterface::Execute_IsDead(MonsterCharacter))
+    {
+        return false;
+    }
+
+    // 새로운 명령으로 기존 명령을 교체
+    DirectorCommand = EBaruMonsterDirectorCommand::Investigate;
+    DirectorTargetLocation = TargetLocation;
+
+    // 추적·수색을 강제로 중단하지 않고 명령 상태만 전달
+    // 실제 실행 우선순위는 Behavior Tree에서 결정
+    UpdateBlackboardFromDirectorState();
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT("Director investigation received: %s"),
+        *TargetLocation.ToString()
+    );
+
+    // 명령 접수 성공이며 경로·도착 성공을 의미하지 않음
+    return true;
+}
+
+void ABaruMonsterAIController::ReceiveDirectorHoldCommand()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    ABaruMonsterCharacter* MonsterCharacter =
+        Cast<ABaruMonsterCharacter>(GetPawn());
+
+    if (!IsValid(MonsterCharacter) ||
+        ICombatInterface::Execute_IsDead(MonsterCharacter))
+    {
+        return;
+    }
+
+    DirectorCommand = EBaruMonsterDirectorCommand::Hold;
+    DirectorTargetLocation = FVector::ZeroVector;
+
+    // 조사 분기를 해제해서 대기 분기로 넘어가도록 요청
+    UpdateBlackboardFromDirectorState();
+
+    // 추적·수색 중이면 해당 이동은 유지
+    if (!IsValid(CurrentTarget.Get()) &&
+        !bHasLastKnownTargetLocation)
+    {
+        StopMovement();
+    }
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT("Director hold command received.")
+    );
+}
+
+void ABaruMonsterAIController::ClearDirectorCommand()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    // 해제 전 조사 명령이 있었는지 기억
+    const bool bWasInvestigating =
+        DirectorCommand == EBaruMonsterDirectorCommand::Investigate;
+
+    DirectorCommand = EBaruMonsterDirectorCommand::None;
+    DirectorTargetLocation = FVector::ZeroVector;
+
+    UpdateBlackboardFromDirectorState();
+
+    // 디렉터 조사 이동만 취소하고 추적·수색 이동은 유지
+    if (bWasInvestigating &&
+        !IsValid(CurrentTarget.Get()) &&
+        !bHasLastKnownTargetLocation)
+    {
+        StopMovement();
+    }
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT("Director command cleared.")
+    );
+}
+
+void ABaruMonsterAIController::UpdateBlackboardFromDirectorState()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    UBlackboardComponent* MonsterBlackboard =
+        GetBlackboardComponent();
+
+    // BT 초기화 전이면 명령은 멤버 변수에 보관
+    // 초기화가 끝날 때 다시 반영
+    if (!IsValid(MonsterBlackboard))
+    {
+        return;
+    }
+
+    const bool bHasInvestigation =
+        DirectorCommand == EBaruMonsterDirectorCommand::Investigate;
+
+    if (bHasInvestigation)
+    {
+        // 목적지를 먼저 설정하고 실행 조건을 활성화
+        MonsterBlackboard->SetValueAsVector(
+            BaruMonsterBlackboardKeys::DirectorTargetLocation,
+            DirectorTargetLocation
+        );
+
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::HasDirectorInvestigation,
+            true
+        );
+    }
+    else
+    {
+        // 조사 분기를 먼저 비활성화하고 목적지 제거
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::HasDirectorInvestigation,
+            false
+        );
+
+        MonsterBlackboard->ClearValue(
+            BaruMonsterBlackboardKeys::DirectorTargetLocation
+        );
+    }
+}
 
