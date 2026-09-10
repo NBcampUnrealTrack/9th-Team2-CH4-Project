@@ -6,8 +6,8 @@
 
 
 class UInputAction;
-class UInputMappingContext; // 다시 추가 관전 전환 입력은 PC에서 직접 바인딩해야하기 때문에 추가함
-// [Result] 정산용 데이터 수신 구조체
+class UInputMappingContext; 
+class UCommonActivatableWidget;   // [추가] 인벤토리 위젯
 // Todo : 별도의 DatabaseType으로 분리 예정
 USTRUCT(BlueprintType)
 struct FBaruSettlementReport
@@ -53,6 +53,9 @@ public:
 
 	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Input")
 	void Server_RequestUseItem(int32 SlotIndex);
+	
+	UFUNCTION(BlueprintCallable, Category = "BARU|UI")
+	void ToggleInventory();
 
 	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Input")
 	void Server_RequestDropItem(int32 SlotIndex, int32 Count);
@@ -96,6 +99,18 @@ protected:
 	void Input_SpectateNext();
 	void Input_SpectatePrev();
 	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+	TObjectPtr<UInputAction> ToggleInventoryAction;
+
+	void Input_ToggleInventory();
+
+	// BP_BaruPlayerController 에서 WBP_Inventory 를 지정합니다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
+	TSubclassOf<UCommonActivatableWidget> InventoryWidgetClass;
+
+	// 현재 열려 있는 인벤토리 위젯. 열림/닫힘 판단에 씁니다.
+	UPROPERTY(Transient)
+	TObjectPtr<UCommonActivatableWidget> ActiveInventoryWidget;
 	UPROPERTY(Transient)
 	TWeakObjectPtr<APawn> CurrentSpectatingPawn;
 
