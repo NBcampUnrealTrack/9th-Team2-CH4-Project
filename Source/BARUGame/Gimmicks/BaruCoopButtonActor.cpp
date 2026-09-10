@@ -1,8 +1,10 @@
 #include "Gimmicks/BaruCoopButtonActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
 #include "Gimmicks/BaruCoopDoorActor.h"
 #include "GameplayTags/BaruGameplayTags.h"
+#include "GameFramework/Pawn.h"
 #include "BaruLog.h"
 
 ABaruCoopButtonActor::ABaruCoopButtonActor()
@@ -53,12 +55,54 @@ float ABaruCoopButtonActor::GetInteractionDuration_Implementation() const
 
 void ABaruCoopButtonActor::ExecuteInteraction_Implementation(APawn* Interactor)
 {
-    if (!HasAuthority() || !IsValid(TargetDoor))
+    if (!HasAuthority() || !IsValid(TargetDoor) || !IsValid(Interactor))
     {
         return;
     }
 
+    HoldingPlayer = Interactor;
+    SetButtonActive(true);
+
     TargetDoor->NotifyButtonPressed(this, Interactor);
+
+    GetWorldTimerManager().SetTimer(
+        HoldCheckTimerHandle,
+        this,
+        &ABaruCoopButtonActor::CheckHoldingPlayerValidity,
+        0.1f,
+        true
+    );
+}
+
+void ABaruCoopButtonActor::EndInteraction_Implementation(APawn* Interactor)
+{
+    if (!HasAuthority() || !bIsPressed)
+    {
+        return;
+    }
+
+    GetWorldTimerManager().ClearTimer(HoldCheckTimerHandle);
+
+    APawn* ReleasingPlayer = HoldingPlayer.Get();
+    HoldingPlayer.Reset();
+
+    SetButtonActive(false);
+
+    if (IsValid(TargetDoor))
+    {
+        TargetDoor->NotifyButtonReleased(this, ReleasingPlayer);
+    }
+}
+
+void ABaruCoopButtonActor::CheckHoldingPlayerValidity()
+{
+    if (!HasAuthority() || !bIsPressed) return;
+
+    if (!HoldingPlayer.IsValid() ||
+        FVector::DistSquared(GetActorLocation(), HoldingPlayer->GetActorLocation()) > FMath::Square(MaxHoldDistance))
+    {
+        EndInteraction_Implementation(HoldingPlayer.Get());
+    }
 }
 
 void ABaruCoopButtonActor::SetButtonActive(bool bActive)

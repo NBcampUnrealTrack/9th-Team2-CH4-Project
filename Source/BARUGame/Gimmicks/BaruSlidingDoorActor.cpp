@@ -9,6 +9,7 @@
 ABaruSlidingDoorActor::ABaruSlidingDoorActor()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
     bReplicates = true;
 
     RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
@@ -38,26 +39,39 @@ void ABaruSlidingDoorActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    // [중요] 에디터에서 배치한 원래 닫힌 위치를 기준 좌표로 캐싱
+    // 에디터에 배치된 초기 위치 캐싱
     InitialLeftDoorLoc = LeftDoorMesh->GetRelativeLocation();
     InitialRightDoorLoc = RightDoorMesh->GetRelativeLocation();
+}
+
+void ABaruSlidingDoorActor::StartDoorMotion()
+{
+    // 움직임 시작 시 틱 활성화
+    SetActorTickEnabled(true);
 }
 
 void ABaruSlidingDoorActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // 초기 위치 기준 오프셋 계산 (ZeroVector 버그 수정)
-    const FVector TargetLeftLoc = bIsOpen ? (InitialLeftDoorLoc + FVector(0.0f, -SlideDistance, 0.0f)) : InitialLeftDoorLoc;
-    const FVector TargetRightLoc = bIsOpen ? (InitialRightDoorLoc + FVector(0.0f, SlideDistance, 0.0f)) : InitialRightDoorLoc;
+    const FVector TargetLeftLoc = bIsOpen ? (InitialLeftDoorLoc + FVector(SlideDistance, 0.0f, 0.0f)) : InitialLeftDoorLoc;
+    const FVector TargetRightLoc = bIsOpen ? (InitialRightDoorLoc + FVector(-SlideDistance, 0.0f, 0.0f)) : InitialRightDoorLoc;
 
     const FVector CurrentLeftLoc = LeftDoorMesh->GetRelativeLocation();
     const FVector CurrentRightLoc = RightDoorMesh->GetRelativeLocation();
 
-    if (!CurrentLeftLoc.Equals(TargetLeftLoc, 0.1f) || !CurrentRightLoc.Equals(TargetRightLoc, 0.1f))
+    const FVector NewLeftLoc = FMath::VInterpTo(CurrentLeftLoc, TargetLeftLoc, DeltaTime, SlideSpeed);
+    const FVector NewRightLoc = FMath::VInterpTo(CurrentRightLoc, TargetRightLoc, DeltaTime, SlideSpeed);
+
+    LeftDoorMesh->SetRelativeLocation(NewLeftLoc);
+    RightDoorMesh->SetRelativeLocation(NewRightLoc);
+    
+    //  문이 모두 목표 위치에 도달하면 위치를 확정하고 틱 자동 비활성화
+    if (NewLeftLoc.Equals(TargetLeftLoc, 0.1f) && NewRightLoc.Equals(TargetRightLoc, 0.1f))
     {
-        LeftDoorMesh->SetRelativeLocation(FMath::VInterpTo(CurrentLeftLoc, TargetLeftLoc, DeltaTime, SlideSpeed));
-        RightDoorMesh->SetRelativeLocation(FMath::VInterpTo(CurrentRightLoc, TargetRightLoc, DeltaTime, SlideSpeed));
+        LeftDoorMesh->SetRelativeLocation(TargetLeftLoc);
+        RightDoorMesh->SetRelativeLocation(TargetRightLoc);
+        SetActorTickEnabled(false);
     }
 }
 
@@ -97,5 +111,6 @@ void ABaruSlidingDoorActor::ExecuteInteraction_Implementation(APawn* Interactor)
 
 void ABaruSlidingDoorActor::OnRep_IsOpen()
 {
+    StartDoorMotion();
     BP_OnDoorStateChanged(bIsOpen);
 }

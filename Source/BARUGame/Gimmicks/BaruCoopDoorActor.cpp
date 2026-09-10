@@ -1,4 +1,3 @@
-// BaruCoopDoorActor.cpp
 #include "Gimmicks/BaruCoopDoorActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -10,6 +9,7 @@
 ABaruCoopDoorActor::ABaruCoopDoorActor()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false; // 기본 정지 상태에서는 틱 비활성화
     bReplicates = true;
 
     RootScene = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
@@ -26,36 +26,69 @@ ABaruCoopDoorActor::ABaruCoopDoorActor()
 void ABaruCoopDoorActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    DOREPLIFETIME(ABaruCoopDoorActor, bIsOpen);
+    DOREPLIFETIME(ABaruCoopDoorActor, DoorState);
+    DOREPLIFETIME(ABaruCoopDoorActor, ReplicatedShutterLoc);
 }
 
 void ABaruCoopDoorActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    // [중요] 에디터에 배치된 셔터의 초기 상대 위치 보존
     InitialShutterLoc = ShutterMesh->GetRelativeLocation();
+    ReplicatedShutterLoc = InitialShutterLoc;
 }
 
 void ABaruCoopDoorActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // 초기 Z좌표 기준 상향 보간
-    const FVector TargetLocation = bIsOpen ? (InitialShutterLoc + FVector(0.0f, 0.0f, LiftHeight)) : InitialShutterLoc;
     const FVector CurrentLocation = ShutterMesh->GetRelativeLocation();
 
-    if (!CurrentLocation.Equals(TargetLocation, 0.1f))
+    // 1. 상승 상태 (2명 누름)
+    if (DoorState == EBaruCoopDoorState::Opening)
     {
-        ShutterMesh->SetRelativeLocation(FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaTime, LiftSpeed));
+        const FVector MaxLiftLoc = InitialShutterLoc + FVector(0.0f, 0.0f, LiftHeight);
+        const FVector NewLocation = FMath::VInterpConstantTo(CurrentLocation, MaxLiftLoc, DeltaTime, LiftSpeed);
+        ShutterMesh->SetRelativeLocation(NewLocation);
+
+        if (HasAuthority())
+        {
+            ReplicatedShutterLoc = NewLocation;
+
+            // 끝까지 도달하면 정지
+            if (NewLocation.Equals(MaxLiftLoc, 0.5f))
+            {
+                ShutterMesh->SetRelativeLocation(MaxLiftLoc);
+                ReplicatedShutterLoc = MaxLiftLoc;
+                SetDoorMovementState(EBaruCoopDoorState::Stopped);
+            }
+        }
+    }
+    // 2. 하강 상태 (0명 누름)
+    else if (DoorState == EBaruCoopDoorState::Closing)
+    {
+        const FVector NewLocation = FMath::VInterpConstantTo(CurrentLocation, InitialShutterLoc, DeltaTime, LowerSpeed);
+        ShutterMesh->SetRelativeLocation(NewLocation);
+
+        if (HasAuthority())
+        {
+            ReplicatedShutterLoc = NewLocation;
+
+            // 바닥에 완전히 닿으면 정지
+            if (NewLocation.Equals(InitialShutterLoc, 0.5f))
+            {
+                ShutterMesh->SetRelativeLocation(InitialShutterLoc);
+                ReplicatedShutterLoc = InitialShutterLoc;
+                SetDoorMovementState(EBaruCoopDoorState::Stopped);
+            }
+        }
     }
 }
 
 bool ABaruCoopDoorActor::CanAcceptButtonPress(const ABaruCoopButtonActor* InButton, const APawn* Interactor) const
 {
-    if (bIsOpen) return false;
-
-    if (FirstInteractingPlayer.IsValid() && FirstInteractingPlayer.Get() == Interactor)
+    // 동일 플레이어가 2개 버튼 동시 점유 방지
+    if (ActiveInteractors.Contains(Interactor))
     {
         return false;
     }
@@ -65,74 +98,99 @@ bool ABaruCoopDoorActor::CanAcceptButtonPress(const ABaruCoopButtonActor* InButt
 
 void ABaruCoopDoorActor::NotifyButtonPressed(ABaruCoopButtonActor* InButton, APawn* Interactor)
 {
-    if (!HasAuthority() || bIsOpen || !IsValid(InButton) || !IsValid(Interactor))
+    if (!HasAuthority() || !IsValid(InButton) || !IsValid(Interactor))
     {
         return;
     }
 
-    // 1단계: 첫 번째 버튼 활성화
-    if (!FirstPressedButton.IsValid())
-    {
-        FirstPressedButton = InButton;
-        FirstInteractingPlayer = Interactor;
-        InButton->SetButtonActive(true);
-
-        GetWorldTimerManager().SetTimer(
-            ButtonTimeoutTimerHandle,
-            this,
-            &ABaruCoopDoorActor::HandleButtonTimeout,
-            SyncToleranceSeconds,
-            false
-        );
-
-        Multicast_OnFirstButtonActivated(SyncToleranceSeconds);
-        BARU_NET_LOG(this, LogBaruSession, Log, TEXT("CoopShutter: Button 1 activated by %s"), *Interactor->GetName());
-        return;
-    }
-
-    // 2단계: 1인 2버튼 치팅 및 동일 버튼 중복 입력 방어
-    if (FirstPressedButton.Get() == InButton || FirstInteractingPlayer.Get() == Interactor)
+    if (ActiveInteractors.Contains(Interactor) || ActiveButtons.Contains(InButton))
     {
         return;
     }
 
-    // 동시 인증 성공: 차고문 개방
-    GetWorldTimerManager().ClearTimer(ButtonTimeoutTimerHandle);
-    InButton->SetButtonActive(true);
+    ActiveButtons.Add(InButton);
+    ActiveInteractors.Add(Interactor);
 
-    bIsOpen = true;
-    OnRep_IsOpen();
-
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("CoopShutter: Sync verified! Shutter lifting."));
+    EvaluateDoorMovement();
 }
 
-void ABaruCoopDoorActor::HandleButtonTimeout()
+void ABaruCoopDoorActor::NotifyButtonReleased(ABaruCoopButtonActor* InButton, APawn* Interactor)
 {
-    if (!HasAuthority() || bIsOpen) return;
-
-    if (FirstPressedButton.IsValid())
+    if (!HasAuthority() || !IsValid(InButton))
     {
-        FirstPressedButton->SetButtonActive(false);
+        return;
     }
 
-    FirstPressedButton.Reset();
-    FirstInteractingPlayer.Reset();
+    ActiveButtons.Remove(InButton);
+    ActiveInteractors.Remove(Interactor);
 
-    Multicast_OnSyncFailed();
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("CoopShutter: Button sync timeout!"));
+    EvaluateDoorMovement();
 }
 
-void ABaruCoopDoorActor::Multicast_OnFirstButtonActivated_Implementation(float TimeRemaining)
+void ABaruCoopDoorActor::EvaluateDoorMovement()
 {
-    BP_OnFirstButtonActivated(TimeRemaining);
+    const int32 ActiveCount = ActiveButtons.Num();
+    const FVector CurrentLoc = ShutterMesh->GetRelativeLocation();
+
+    // 2명이 누름 -> 상승
+    if (ActiveCount >= 2)
+    {
+        const FVector MaxLiftLoc = InitialShutterLoc + FVector(0.0f, 0.0f, LiftHeight);
+        if (!CurrentLoc.Equals(MaxLiftLoc, 0.5f))
+        {
+            SetDoorMovementState(EBaruCoopDoorState::Opening);
+        }
+        else
+        {
+            SetDoorMovementState(EBaruCoopDoorState::Stopped);
+        }
+    }
+    // 1명이 누름 -> 그 자리에 정지
+    else if (ActiveCount == 1)
+    {
+        SetDoorMovementState(EBaruCoopDoorState::Stopped);
+    }
+    // 0명이 누름 -> 바닥으로 하강
+    else
+    {
+        if (!CurrentLoc.Equals(InitialShutterLoc, 0.5f))
+        {
+            SetDoorMovementState(EBaruCoopDoorState::Closing);
+        }
+        else
+        {
+            SetDoorMovementState(EBaruCoopDoorState::Stopped);
+        }
+    }
 }
 
-void ABaruCoopDoorActor::Multicast_OnSyncFailed_Implementation()
+void ABaruCoopDoorActor::SetDoorMovementState(EBaruCoopDoorState NewState)
 {
-    BP_OnSyncFailed();
+    if (!HasAuthority() || DoorState == NewState)
+    {
+        return;
+    }
+
+    DoorState = NewState;
+    OnRep_DoorState(); // 서버/호스트 로컬 처리
 }
 
-void ABaruCoopDoorActor::OnRep_IsOpen()
+void ABaruCoopDoorActor::OnRep_DoorState()
 {
-    BP_OnDoorStateChanged(bIsOpen);
+    if (DoorState == EBaruCoopDoorState::Stopped)
+    {
+        SetActorTickEnabled(false);
+    }
+    else
+    {
+        SetActorTickEnabled(true);
+    }
+
+    BP_OnDoorMovementStateChanged(DoorState);
+}
+
+void ABaruCoopDoorActor::OnRep_ShutterLoc()
+{
+    // 서버와 위치 오차 동기화 보정
+    ShutterMesh->SetRelativeLocation(ReplicatedShutterLoc);
 }
