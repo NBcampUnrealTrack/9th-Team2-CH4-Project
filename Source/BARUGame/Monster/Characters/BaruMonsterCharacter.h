@@ -129,6 +129,16 @@ protected:
 )
 	TObjectPtr<ABaruMonsterDirector> AssignedDirector;
 	
+	// 이 몬스터 종류가 로봇 디렉터의 명령을 받을지 결정
+	// F0101은 블루프린트 기본값에서 활성화
+	// 미행자는 비활성화 상태를 유지
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|AI|Director"
+	)
+	bool bUsesMonsterDirector = false;
+	
 public:
 	
 	//이 몬스터가 사용하는 설정표를 반환

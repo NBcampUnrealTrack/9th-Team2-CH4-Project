@@ -18,6 +18,7 @@
 #include "Net/UnrealNetwork.h"
 #include "BrainComponent.h"
 #include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "BaruLog.h"
 
@@ -220,11 +221,28 @@ void ABaruMonsterCharacter::BeginPlay()
 		);
 	}
 	
-	// 초기화가 끝난 몬스터를 지정된 디렉터에 등록
-	// 디렉터가 없으면 기존 개별 AI만 사용
-	if (HasAuthority() && IsValid(AssignedDirector))
+	// 디렉터 검색과 등록은 서버에서만 처리
+	if (HasAuthority() && bUsesMonsterDirector)
 	{
-		AssignedDirector->RegisterMonster(this);
+		// 레벨 또는 스폰 과정에서 디렉터가 직접 지정되지 않았다면
+		// 현재 월드에 배치된 첫 번째 몬스터 디렉터를 자동으로 찾음
+		if (!IsValid(AssignedDirector))
+		{
+			AssignedDirector =
+				Cast<ABaruMonsterDirector>(
+					UGameplayStatics::GetActorOfClass(
+						GetWorld(),
+						ABaruMonsterDirector::StaticClass()
+					)
+				);
+		}
+
+		// 직접 지정됐거나 자동으로 찾은 디렉터에
+		// 현재 몬스터 자신을 지휘 대상으로 등록
+		if (IsValid(AssignedDirector))
+		{
+			AssignedDirector->RegisterMonster(this);
+		}
 	}
 	
 }
