@@ -479,7 +479,7 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
                 {
                     if (const UBaruInventoryComponent* Inven = PS->GetInventoryComponent())
                     {
-                        FinalTeamTotalValue += Inven->GetTotalSettlementValue();
+                        FinalTeamTotalValue += Inven->CalculateSettlementSummary().TotalValue;
                     }
                 }
             }
