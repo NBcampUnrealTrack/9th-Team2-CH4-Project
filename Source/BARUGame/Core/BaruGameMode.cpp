@@ -268,8 +268,8 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
         }
     }
 
-    // 연출 시간 대기 후 실제 ServerTravel 실행 : 5초 대기
-    const float SafeTransitionDelay = FMath::Max(TransitionDelayDuration, 5.0f);
+    // 연출 시간 대기 후 실제 ServerTravel 실행 : 8초 대기
+    const float SafeTransitionDelay = FMath::Max(TransitionDelayDuration, 8.0f);
 
     BARU_NET_LOG(this, LogBaruSession, Log, 
         TEXT("Level transition requested. Traveling to '%s' in %.1f seconds..."), 
@@ -469,38 +469,43 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
 
     for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
     {
-        if (ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get()))
+        ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get());
+        if (!IsValid(BaruPC) || BaruPC->IsPendingKillPending())
         {
-            if (!IsValid(BaruPC) || BaruPC->IsPendingKillPending()) continue;
-
-            const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
-            const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
-            const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
-
-            FBaruSettlementReport Report;
-            Report.bSurvived = bPlayerSurvived;
-            Report.AcquiredCurrency = EarnedGold;
-
-            // Todo : 인벤토리 컴포넌트에서 GetTotalItemCount() 함수 구현되면 주석 해제
-            // if (bPlayerSurvived && PS)
-            // {
-            //     if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
-            //     {
-            //         Report.ExtractedItemCount = InvenComp->GetTotalItemCount();
-            //     }
-            // }
-
-            // Todo : BaruPlayerController.h의 FBaruSettlementReport에 MonsterKillCount 필드가 추가되면 주석 해제
-            // if (PS)
-            // {
-            //     Report.MonsterKillCount = PS->GetMonsterKillCount();
-            // }
-
-            BaruPC->Client_ShowSettlementUI(Report);
+            continue;
         }
+
+        const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
+        
+        // 생존 여부 및 획득 골드 산정
+        const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
+        const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
+
+        // 인벤토리 파밍 아이템 수량 산출 (생존 탈출 시에만 반영, 사망 시 0개)
+        // int32 ExtractedItemCount = 0;
+        // if (bPlayerSurvived && PS)
+        // {   
+        //     if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
+        //     {
+        //         ExtractedItemCount = InvenComp->GetTotalItemCount();
+        //     }
+        // }
+
+        // 몬스터 처치 수 조회
+        const int32 Kills = PS ? PS->GetMonsterKillCount() : 0;
+
+        // 정산 DTO 구조체 생성 및 값 초기화 (선언 후 대입)
+        FBaruSettlementReport Report;
+        Report.bSurvived = bPlayerSurvived;
+        Report.AcquiredCurrency = EarnedGold;
+        // Report.ExtractedItemCount = ExtractedItemCount;
+        Report.MonsterKillCount = Kills;
+
+        // 클라이언트에 정산 UI 브로드캐스트 (내부에서 로컬 .sav 저장 동시 진행)
+        BaruPC->Client_ShowSettlementUI(Report);
     }
     
-    // 정산 완료 후 일정 시간 뒤 전원 로비로 복귀시키는 타이머 가동
+    // 탈출 실패(전멸/타임오버) 시 일정 시간 대기 후 로비로 강제 복귀
     if (!bAllExtracted)
     {
         PendingTargetMapURL = DefaultReturnMapURL;

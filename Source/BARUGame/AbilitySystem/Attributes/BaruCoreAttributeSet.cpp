@@ -111,11 +111,11 @@ void UBaruCoreAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCa
                 }
                 else
                 {
-                    // 첫 체력 0 도달 -> 다운(DBNO) 상태 진입 (TODO : BaruCharacter에서 EnterDBNO 구현 되면 주석 해제)
-                    // if (ABaruCharacter* BaruChar = Cast<ABaruCharacter>(TargetActor))
-                    // {
-                    //     BaruChar->EnterDBNO(SourceActor);
-                    // }
+                    // 첫 체력 0 도달 -> 다운(DBNO) 상태 진입
+                    if (ABaruCharacter* BaruChar = Cast<ABaruCharacter>(TargetActor))
+                    {
+                        BaruChar->EnterDBNO(SourceActor);
+                    }
                 }
             }
         }
