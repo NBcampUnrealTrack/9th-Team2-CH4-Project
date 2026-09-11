@@ -27,6 +27,8 @@
 #include "Components/SpotLightComponent.h" 
 #include "DrawDebugHelpers.h"
 #include "BaruLog.h"
+#include "Components/BaruTensionComponent.h"
+#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 
 ABaruCharacter::ABaruCharacter()
 {
@@ -56,6 +58,9 @@ ABaruCharacter::ABaruCharacter()
     GetCharacterMovement()->bOrientRotationToMovement = false; 
    
    EquipmentComponent = CreateDefaultSubobject<UBaruEquipmentComponent>(TEXT("EquipmentComponent"));
+   
+   // 긴장도 컴포넌트 부착
+   TensionComponent = CreateDefaultSubobject<UBaruTensionComponent>(TEXT("TensionComponent"));
    
    // [추가] 헤드라이트.
    //   카메라에 붙이면 시선 방향과 정확히 일치하고,
@@ -459,10 +464,9 @@ void ABaruCharacter::HandleWeaponSlotInput(EBaruEquipmentSlot DesiredSlot)
    {
       return;
    }
-
+   
    if (EquipmentComponent->GetActiveWeaponSlot() == DesiredSlot)
    {
-      Server_RequestUnequipWeapon(DesiredSlot);
       return;
    }
 
@@ -482,7 +486,16 @@ void ABaruCharacter::Server_RequestSelectWeaponSlot_Implementation(EBaruEquipmen
    {
       return;
    }
+   
+   // 1. 해당 슬롯에 이미 장착된 무기가 있다면 활성 슬롯(손 <-> 홀스터)만 전환
+   if (EquipmentComponent->GetEquippedWeaponItem(DesiredSlot) != nullptr)
+   {
+      EquipmentComponent->RequestSetActiveWeaponSlot(DesiredSlot);
+      BARU_NET_LOG(this, LogBaruItem, Log, TEXT("무기 슬롯 전환: Slot=%d"), static_cast<int32>(DesiredSlot));
+      return;
+   }
 
+   // 2. 슬롯이 비어 있을 때만 인벤토리에서 검색 후 신규 장착(UseItem) 진행
    ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
    UBaruInventoryComponent* Inventory = BaruPS ? BaruPS->GetInventoryComponent() : nullptr;
    if (!Inventory)
@@ -494,18 +507,14 @@ void ABaruCharacter::Server_RequestSelectWeaponSlot_Implementation(EBaruEquipmen
    if (!TargetItem)
    {
       BARU_NET_LOG(this, LogBaruItem, Log,
-         TEXT("슬롯 %d 에 맞는 무기가 인벤토리에 없습니다."), static_cast<int32>(DesiredSlot));
+          TEXT("슬롯 %d 에 맞는 무기가 인벤토리에 없습니다."), static_cast<int32>(DesiredSlot));
       return;
-   }
-   
-   const EBaruEquipmentSlot CurrentSlot = EquipmentComponent->GetActiveWeaponSlot();
-   if (CurrentSlot != EBaruEquipmentSlot::None)
-   {
-      EquipmentComponent->UnequipWeapon(CurrentSlot);
    }
 
    // UseItem() 이 아이템 타입을 보고 EquipWeapon() 까지 이어줍니다.
+   // 장착 후 즉시 해당 무기를 손에 쥐도록 활성 슬롯으로 전환
    Inventory->UseItem(TargetItem);
+   EquipmentComponent->RequestSetActiveWeaponSlot(DesiredSlot);
 }
 
 // [추가] 무기 해제
@@ -715,6 +724,9 @@ void ABaruCharacter::EnterDBNO(AActor* DownCauser)
    {
       ASC->CancelAllAbilities();
       ASC->AddLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+      
+      // 09.11 DBNO 세부 로직 추가
+      ASC->AddLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
    }
 
    // 상태 확정. 복제되어 각 클라의 HandleDBNOStatusChanged 를 깨웁니다.
@@ -725,11 +737,56 @@ void ABaruCharacter::EnterDBNO(AActor* DownCauser)
    {
       World->GetTimerManager().SetTimer(
          BleedOutTimerHandle, this, &ABaruCharacter::OnBleedOutExpired, BleedOutDuration, false);
+      
+      // 09.11 DBNO 세부 로직 추가. 2.5초 후 무적 해제 타이머 시작
+      World->GetTimerManager().SetTimer(
+          DBNOImmunityTimerHandle, this, &ABaruCharacter::EndDBNOImmunity, DBNOImmunityDuration, false);
    }
 
    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s entered DBNO. Causer: %s (bleed out %.0fs)"),
      *GetName(), DownCauser ? *DownCauser->GetName() : TEXT("None"), BleedOutDuration);
 }
+
+// 09.11 DBNO 세부 로직 추가. 2.5초 무적 해제 콜백
+void ABaruCharacter::EndDBNOImmunity()
+{
+   if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+   {
+      ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+      BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s DBNO immunity expired."), *GetName());
+   }
+}
+
+// 09.11 DBNO 세부 로직 추가. 다운 상태에서 맞았을 때 즉사 대신 출혈 시간 단축
+void ABaruCharacter::NotifyHitWhileDBNO(float DamageAmount, AActor* Attacker)
+{
+   if (!HasAuthority() || bIsDead) return;
+
+   LastKiller = Attacker;
+
+   if (UWorld* World = GetWorld())
+   {
+      const float RemainingTime = World->GetTimerManager().GetTimerRemaining(BleedOutTimerHandle);
+      const float NewTime = RemainingTime - DBNODamageBleedReduction;
+
+      BARU_NET_LOG(this, LogBaruCombat, Warning, 
+          TEXT("Character %s hit while DBNO! BleedOut reduced: %.1fs -> %.1fs"), *GetName(), RemainingTime, NewTime);
+
+      // 남은 시간이 0 이하면 출혈사(완전 사망) 처리
+      if (NewTime <= 0.0f)
+      {
+         World->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+         OnBleedOutExpired();
+      }
+      else
+      {
+         // 잔여 시간 갱신
+         World->GetTimerManager().SetTimer(
+             BleedOutTimerHandle, this, &ABaruCharacter::OnBleedOutExpired, NewTime, false);
+      }
+   }
+}
+
 
 // ★[추가 09.10] 소생. 서버 전용.
 //   HealthRatio 만큼 체력을 회복시키며 일어납니다.
@@ -817,15 +874,8 @@ void ABaruCharacter::HandleDBNOStatusChanged(bool bNewDBNO)
 }
 void ABaruCharacter::Die_Implementation(AActor* Killer)
 {
-   if (bIsDead)
-   {
-      return;   // 중복 사망 방지
-   }
-
-   if (!HasAuthority())
-   {
-      return;   // 사망 확정은 서버만. 클라는 bIsDead 복제를 받아 연출만 재생.
-   }
+   // 09.11 DBNO 세부 로직 추가 및 정리
+   if (bIsDead || !HasAuthority()) return;
 
    bIsDead = true;
    CancelPendingInteraction();
@@ -835,11 +885,25 @@ void ABaruCharacter::Die_Implementation(AActor* Killer)
    if (UWorld* World = GetWorld())
    {
       World->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+      
+      // 09.11 DBNO 세부 로직 추가
+      World->GetTimerManager().ClearTimer(DBNOImmunityTimerHandle);
    }
    if (UAbilitySystemComponent* DBNOASC = GetAbilitySystemComponent())
    {
       DBNOASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+      
+      // 09.11 DBNO 세부 로직 추가
+      DBNOASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
    }
+   
+   // PlayerState 에 사망 상태 기록
+   if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
+   {
+      BaruPS->SetDBNOState(false); // 사망 시 다운 상태 플래그 해제
+      BaruPS->SetDeadState(true, Killer);
+   }
+   
    // 서버에서는 OnRep 이 자동 호출되지 않으므로 직접 호출(리슨서버 호스트 화면 연출용)
    OnRep_IsDead();
 
@@ -857,12 +921,6 @@ void ABaruCharacter::Die_Implementation(AActor* Killer)
    if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
    {
       ASC->CancelAllAbilities();
-   }
-
-   // PlayerState 에 사망 상태 기록 (GameMode 의 생존자 집계가 PS를 봅니다)
-   if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
-   {
-      BaruPS->SetDeadState(true, Killer);
    }
 
    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s has died. Killer: %s"),

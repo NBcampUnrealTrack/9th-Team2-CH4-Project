@@ -9,6 +9,7 @@ class UInputAction;
 class UInputMappingContext; 
 class UCommonActivatableWidget;   // [추가] 인벤토리 위젯
 // Todo : 별도의 DatabaseType으로 분리 예정
+
 USTRUCT(BlueprintType)
 struct FBaruSettlementReport
 {
@@ -22,6 +23,10 @@ struct FBaruSettlementReport
 
 	UPROPERTY(BlueprintReadOnly, Category = "Settlement")
 	int32 ExtractedItemCount = 0;
+	
+	// 09.11 추가 요청(충돌시 같이 검토)
+	UPROPERTY(BlueprintReadOnly, Category = "Settlement")
+	int32 MonsterKillCount = 0;
 };
 
 // UI Deligate (Client)

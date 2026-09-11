@@ -47,6 +47,10 @@ void ABaruPlayerState::PostInitializeComponents()
 
     SanityChangedHandle = AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
         UBaruPlayerAttributeSet::GetSanityAttribute()).AddUObject(this, &ABaruPlayerState::HandleSanityChanged);
+    
+    // 긴장도 추가
+    TensionChangedHandle = AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
+        UBaruPlayerAttributeSet::GetTensionAttribute()).AddUObject(this, &ABaruPlayerState::HandleTensionChanged);
 }
 
 // [추가] 델리게이트 해제
@@ -56,6 +60,10 @@ void ABaruPlayerState::EndPlay(const EEndPlayReason::Type EndPlayReason)
     {
         AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
             UBaruPlayerAttributeSet::GetSanityAttribute()).Remove(SanityChangedHandle);
+        
+        // 긴장도 추가
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
+            UBaruPlayerAttributeSet::GetTensionAttribute()).Remove(TensionChangedHandle);
     }
 
     Super::EndPlay(EndPlayReason);
@@ -242,4 +250,10 @@ void ABaruPlayerState::AddMonsterKill()
 void ABaruPlayerState::OnRep_MonsterKillCount()
 {
     OnMonsterKillCountChanged.Broadcast(MonsterKillCount);
+}
+
+// 긴장도 추가
+void ABaruPlayerState::HandleTensionChanged(const FOnAttributeChangeData& ChangeData)
+{
+    OnTensionChanged.Broadcast(ChangeData.NewValue);
 }
