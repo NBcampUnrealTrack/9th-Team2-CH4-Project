@@ -11,6 +11,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDBNOStatusChanged, bool, bIsD
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSanityChanged, float, NewSanity);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruDeadStatusChanged, bool, bIsDead);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruPlayerKillCountChanged, int32, NewKillCount);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruTensionChanged, float, NewTension);
 
 class UAbilitySystemComponent;
 class UBaruAbilitySystemComponent;      
@@ -181,4 +182,16 @@ protected:
     
 private:
     FDelegateHandle SanityChangedHandle;
+    
+    
+// 긴장도 시스템 추가    
+public:
+    
+    UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")
+    FOnBaruTensionChanged OnTensionChanged;
+    
+private:
+    FDelegateHandle TensionChangedHandle;
+    
+    void HandleTensionChanged(const FOnAttributeChangeData& ChangeData);
 };

@@ -168,7 +168,6 @@ void ABaruPlayerController::Server_RequestEquipItem_Implementation(int32 SlotInd
     }
 
     BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Server_RequestEquipItem Approved for Slot: %d"), SlotIndex);
-    // TODO: InventoryComponent / EquipmentComponent 장착 승인 로직 실행
 }
 
 bool ABaruPlayerController::Server_RequestUseItem_Validate(int32 SlotIndex)
@@ -186,7 +185,6 @@ void ABaruPlayerController::Server_RequestUseItem_Implementation(int32 SlotIndex
     }
 
     BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Server_RequestUseItem Approved for Slot: %d"), SlotIndex);
-    // TODO: Item 확인 후 GameplayEffect 적용 및 소모 처리
 }
 
 bool ABaruPlayerController::Server_RequestDropItem_Validate(int32 SlotIndex, int32 Count)
@@ -203,7 +201,6 @@ void ABaruPlayerController::Server_RequestDropItem_Implementation(int32 SlotInde
     }
 
     BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Server_RequestDropItem Approved for Slot: %d, Count: %d"), SlotIndex, Count);
-    // TODO: 인벤토리 아이템 제거 및 필드 월드 액터 드롭 스폰 처리
 }
 
 

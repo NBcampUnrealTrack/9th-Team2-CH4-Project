@@ -20,6 +20,8 @@ class UBaruCharacterAnimSet;
 class UBaruEquipmentComponent; 
 class UBaruItemInstance;   
 class USpotLightComponent;
+class UBaruTensionComponent;
+class UBaruFootstepComponent;
 struct FOnAttributeChangeData;               
 
 UCLASS()
@@ -203,6 +205,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Equipment")
     TObjectPtr<UBaruEquipmentComponent> EquipmentComponent;
     
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Footstep")
+    TObjectPtr<UBaruFootstepComponent> FootstepComponent;
+    
     // [추가 ] 헤드라이트. 세부 값은 BP 에서 조정가능
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Headlight")
     TObjectPtr<USpotLightComponent> Headlight;
@@ -210,6 +215,10 @@ protected:
     // 켜짐 상태. 복제되어야 다른 플레이어 화면에서도 내 불빛이 보임
     UPROPERTY(ReplicatedUsing = OnRep_HeadlightOn, VisibleInstanceOnly, BlueprintReadOnly, Category = "BARU|Headlight")
     bool bHeadlightOn = false;
+    
+    // 긴장도 및 심박수 연출 컴포넌트
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+    TObjectPtr<UBaruTensionComponent> TensionComponent;
     
     // 크라우치를 넣을 때 반드시 다시 손대게 됩니다
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
@@ -296,4 +305,27 @@ private:
 
     UPROPERTY()
     TObjectPtr<AActor> LastKiller; // [추가] 사망처리를 다음 틱으로 넘길때 임시보관
+    
+    
+    // 09.11 DBNO 세부 로직 추가
+public:
+    // [추가] 다운 상태에서 추가 피격을 받았을 때 호출 (출혈시간 단축)
+    void NotifyHitWhileDBNO(float DamageAmount, AActor* Attacker);
+
+protected:
+    // [추가] 다운 직후 무적 해제 타이머 핸들
+    FTimerHandle DBNOImmunityTimerHandle;
+
+    // [추가] 무적 해제 콜백
+    void EndDBNOImmunity();
+
+    // 다운 직후 무적 지속 시간 (기본 2.5초)
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat")
+    float DBNOImmunityDuration = 2.5f;
+
+    // 다운 중 1회 피격 시 차감될 출혈 시간 (초 단위, 기본 15초)
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat")
+    float DBNODamageBleedReduction = 15.0f;
+    
+    
 };

@@ -1,10 +1,14 @@
 // BaruTitleWidget.cpp
 
 #include "UI/Title/BaruTitleWidget.h"
-#include "Components/Button.h"
-#include "Kismet/KismetSystemLibrary.h"
 
 #include "BaruLog.h"
+#include "Components/Button.h"
+#include "Engine/LocalPlayer.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "UI/BaruUITags.h"
+#include "UI/GameMenu/BaruGameMenuWidget.h"
+#include "UI/Subsystem/BaruUIManagerSubsystem.h"
 
 UBaruTitleWidget::UBaruTitleWidget(
 	const FObjectInitializer& ObjectInitializer)
@@ -53,6 +57,13 @@ void UBaruTitleWidget::NativeOnInitialized()
 		Button_StartGame->OnClicked.AddDynamic(this, &UBaruTitleWidget::HandleStartGameClicked);
 	}
 	
+	if (IsValid(Button_Options))
+	{
+		Button_Options->OnClicked.AddUniqueDynamic(
+			this,
+			&ThisClass::HandleOptionsClicked);
+	}
+	
 	if (IsValid(Button_QuitGame))
 	{
 		Button_QuitGame->OnClicked.AddDynamic(this, &ThisClass::HandleQuitGameClicked);
@@ -65,6 +76,70 @@ void UBaruTitleWidget::HandleStartGameClicked()
 	
 	BP_OnEnterLobbyRequested();
 	
+}
+
+void UBaruTitleWidget::HandleOptionsClicked()
+{
+	if (!OptionsWidgetClass)
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("타이틀에 OptionsWidgetClass가 설정되지 않았습니다."));
+		
+		return;
+	}
+	
+	ULocalPlayer* LocalPlayer =
+		GetOwningLocalPlayer();
+	
+	if (!IsValid(LocalPlayer))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("옵션을 열 LocalPlayer를 찾지 못했습니다."));
+		
+		return;
+	}
+	
+	UBaruUIManagerSubsystem* UIManager =
+		LocalPlayer->GetSubsystem<UBaruUIManagerSubsystem>();
+	
+	if (!IsValid(UIManager))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Warning,
+			TEXT("옵션을 열 UIManager를 찾지 못했습니다."));
+		
+		return;
+	}
+	
+	UCommonActivatableWidget* AddedWidget =
+		UIManager->PushWidgetToLayer(
+			BaruUITags::UI_Layer_Menu.GetTag(),
+			OptionsWidgetClass);
+	
+	UBaruGameMenuWidget* OptionsWidget =
+		Cast<UBaruGameMenuWidget>(AddedWidget);
+	
+	if (!IsValid(OptionsWidget))
+	{
+		BARU_LOG(
+			LogBaruUI,
+			Error,
+			TEXT("타이틀 옵션 위젯 생성에 실패했습니다."));
+		
+		return;
+	}
+	
+	OptionsWidget->OpenOptionsFromTitle();
+	
+	BARU_LOG(
+		LogBaruUI,
+		Log,
+		TEXT("타이틀의 옵션 버튼으로 옵션 UI를 열었습니다."));
 }
 
 void UBaruTitleWidget::HandleQuitGameClicked()

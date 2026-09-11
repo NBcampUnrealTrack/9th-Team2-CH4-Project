@@ -19,10 +19,9 @@ enum class EBaruElevatorTriggerType : uint8
 };
 
 /**
- * 회사 로비 및 지하 탐사 구역 레벨 전환용 엘리베이터 액터
- * - IInteractableInterface 구현 (수동 버튼 상호작용 지원)
- * - 네트워크 복제(RepNotify) 기반 클라이언트 도어/사운드 연출 동기화
- * - GameMode 이중 딜레이 방지 연동
+* 회사 로비 및 지하 탐사 구역 레벨 전환용 엘리베이터 액터
+ * 로비: 전원 탑승 시 정상 이동
+ * 인게임: 콘솔 버튼으로 10초 비상 카운트다운 시작/취소 가능 (외부 인원 즉시 낙오)
  */
 UCLASS()
 class BARUGAME_API ABaruElevatorActor : public AActor, public IInteractableInterface
@@ -111,6 +110,9 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings", meta = (ClampMin = "1.0"))
     float CountdownDuration = 5.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings", meta = (ClampMin = "1.0"))
+    float IngameCountdownDuration = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Settings")
     float ArrivalLockoutDuration = 5.0f;
@@ -137,6 +139,11 @@ private:
     FTimerHandle CountdownTimerHandle;
     FTimerHandle LockoutTimerHandle;
     bool bIsElevatorArmed = false;
+    
+    // 버튼 연타 방지용 타임 스탬프
+    float LastInteractionTime = -10.0f;
+    const float InteractionDebounceDelay = 1.0f;
 
     void EnableElevatorActivation();
+    bool IsPlayerBoarded(const APawn* Interactor) const;
 };

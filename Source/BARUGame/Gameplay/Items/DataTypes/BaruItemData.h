@@ -106,6 +106,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data|Weight",
 	meta = (ClampMin = "0.0", Units = "kg"))
 	float UnitWeightKg = 0.0f;
+
+	// 탈출 정산에 포함할 수 있는 아이템인지 여부입니다.
+	// 무기·소모품 등이 실수로 판매되는 것을 막기 위해 기본값은 false입니다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data|Settlement")
+	bool bCanBeSettled = false;
+
+	// 응시 카드의 분류 문구. 예: "소형 · 전자부품". 비우면 ItemType으로 표시합니다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data|UI")
+	FText PickupCategoryText;
+
+	// 아이템 한 개당 정산 가치입니다. Quantity와 곱해 최종 가치를 계산합니다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data|Settlement",
+		meta = (ClampMin = "0"))
+	int32 SettlementValuePerUnit = 0;
 	
 #pragma region 그리드와 스택 부분들. 아이템 중첩하는 등.
 		// 그리드 때문에 추가하는 부분들.

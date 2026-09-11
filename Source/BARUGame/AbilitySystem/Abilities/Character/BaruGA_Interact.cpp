@@ -1,3 +1,8 @@
+// ==============================================================================
+// Deprecated: Interaction logic is currently unified into ABaruCharacter RPC.
+// (Preserved for future GAS TargetData migration reference)
+// ==============================================================================
+
 #include "AbilitySystem/Abilities/Character/BaruGA_Interact.h"
 #include "Interfaces/InteractableInterface.h"
 #include "GameFramework/PlayerController.h"

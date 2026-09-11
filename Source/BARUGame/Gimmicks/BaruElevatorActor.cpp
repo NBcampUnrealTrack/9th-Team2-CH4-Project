@@ -7,6 +7,8 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Player/BaruPlayerState.h"
+#include "Character/BaruCharacter.h"
+#include "Interfaces/CombatInterface.h"
 #include "Core/BaruGameState.h"
 #include "Core/BaruLobbyGameMode.h"
 #include "Core/BaruGameMode.h"
@@ -78,28 +80,76 @@ void ABaruElevatorActor::EnableElevatorActivation()
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Elevator System Armed & Ready."));
 }
 
-bool ABaruElevatorActor::CanInteract_Implementation(APawn* Interactor) const
+bool ABaruElevatorActor::IsPlayerBoarded(const APawn* Interactor) const
 {
-    if (!bIsElevatorArmed || bIsDeparted || bIsCountingDown)
+    if (!IsValid(Interactor)) return false;
+    
+    if (HasAuthority())
     {
-        return false;
+        return BoardedPlayers.Contains(Interactor);
     }
-
-    if (TriggerType == EBaruElevatorTriggerType::ManualInteract)
+    
+    if (IsValid(BoardingTriggerBox))
     {
-        return CheckAllPlayersBoarded();
+        return BoardingTriggerBox->IsOverlappingActor(Interactor);
     }
 
     return false;
 }
 
+bool ABaruElevatorActor::CanInteract_Implementation(APawn* Interactor) const
+{
+    if (!bIsElevatorArmed || bIsDeparted)
+    {
+        return false;
+    }
+
+    // 발판 위에 서 있는 사람만 조작 허용
+    if (!IsPlayerBoarded(Interactor))
+    {
+        return false;
+    }
+
+    // 로비 레벨: 전원이 탑승해야만 작동 가능
+    if (UWorld* World = GetWorld())
+    {
+        if (Cast<ABaruLobbyGameMode>(World->GetAuthGameMode()))
+        {
+            if (bIsCountingDown) return false;
+            return CheckAllPlayersBoarded();
+        }
+    }
+
+    // 인게임 레벨: 언제든 비상 출발/취소 토글 가능
+    return true;
+}
+
 FText ABaruElevatorActor::GetInteractPromptText_Implementation(APawn* Interactor) const
 {
+    UWorld* World = GetWorld();
+    AGameModeBase* AuthGM = World ? World->GetAuthGameMode() : nullptr;
+
+    if (Cast<ABaruLobbyGameMode>(AuthGM))
+    {
+        if (CheckAllPlayersBoarded())
+        {
+            return FText::FromString(TEXT("F: 탐사 시작"));
+        }
+        return FText::FromString(TEXT("팀원 전원 탑승 대기 중..."));
+    }
+    
+    // 인게임 프롬프트
+    if (bIsCountingDown)
+    {
+        return FText::FromString(TEXT("F: 엘리베이터 출발 취소"));
+    }
+
     if (CheckAllPlayersBoarded())
     {
-        return FText::FromString(TEXT("F: 엘리베이터 가동"));
+        return FText::FromString(TEXT("F: 엘리베이터 출발 (10초)"));
     }
-    return FText::FromString(TEXT("팀원 전원 탑승 대기 중..."));
+
+    return FText::FromString(TEXT("F: 비상 출발 [미탑승 대원 낙오] (10초)"));
 }
 
 FGameplayTag ABaruElevatorActor::GetInteractionTag_Implementation() const
@@ -114,12 +164,42 @@ float ABaruElevatorActor::GetInteractionDuration_Implementation() const
 
 void ABaruElevatorActor::ExecuteInteraction_Implementation(APawn* Interactor)
 {
-    if (!HasAuthority() || bIsDeparted || bIsCountingDown)
+    if (!HasAuthority() || bIsDeparted)
     {
         return;
     }
 
-    if (CheckAllPlayersBoarded())
+    if (!BoardedPlayers.Contains(Interactor))
+    {
+        return;
+    }
+
+    // 버튼 연타 스팸 방지
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastInteractionTime < InteractionDebounceDelay)
+    {
+        return;
+    }
+    LastInteractionTime = CurrentTime;
+
+    AGameModeBase* AuthGM = GetWorld()->GetAuthGameMode();
+
+    // 로비: 전원 탑승 시 시작
+    if (Cast<ABaruLobbyGameMode>(AuthGM))
+    {
+        if (CheckAllPlayersBoarded() && !bIsCountingDown)
+        {
+            StartCountdown();
+        }
+        return;
+    }
+
+    // 인게임: 시작 <-> 취소 토글
+    if (bIsCountingDown)
+    {
+        CancelCountdown();
+    }
+    else
     {
         StartCountdown();
     }
@@ -164,9 +244,26 @@ void ABaruElevatorActor::HandleTriggerEndOverlap(
     BoardedPlayers.Remove(PlayerPawn);
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Player Exited Elevator: %s (Count: %d)"), *PlayerPawn->GetName(), BoardedPlayers.Num());
 
-    if (bIsCountingDown && !CheckAllPlayersBoarded())
+    if (bIsCountingDown)
     {
-        CancelCountdown();
+        AGameModeBase* AuthGM = GetWorld()->GetAuthGameMode();
+        
+        // 로비에서는 1명이라도 이탈 시 취소
+        if (Cast<ABaruLobbyGameMode>(AuthGM))
+        {
+            if (!CheckAllPlayersBoarded())
+            {
+                CancelCountdown();
+            }
+        }
+        else
+        {
+            // 인게임에서는 엘리베이터에 탄 인원이 0명이 되었을 때만 자동 취소 (누군가 타고 있다면 계속 유지)
+            if (BoardedPlayers.Num() == 0)
+            {
+                CancelCountdown();
+            }
+        }
     }
 }
 
@@ -202,8 +299,14 @@ bool ABaruElevatorActor::CheckAllPlayersBoarded() const
 
 void ABaruElevatorActor::StartCountdown()
 {
+    if (bIsCountingDown || bIsDeparted) return;
+
     bIsCountingDown = true;
-    RemainingCountdown = CountdownDuration;
+
+    AGameModeBase* AuthGM = GetWorld()->GetAuthGameMode();
+    const bool bIsLobby = (Cast<ABaruLobbyGameMode>(AuthGM) != nullptr);
+
+    RemainingCountdown = bIsLobby ? CountdownDuration : IngameCountdownDuration;
     OnRep_IsCountingDown();
 
     if (!CachedGameState)
@@ -213,8 +316,11 @@ void ABaruElevatorActor::StartCountdown()
 
     if (CachedGameState)
     {
-        CachedGameState->Multicast_BroadcastNotification(
-            FText::FromString(TEXT("ALL OPERATIVES ONBOARD - DEPARTING IN 5 SECONDS")), 3.0f);
+        const FText StartMsg = FText::Format(
+            FText::FromString(TEXT("{0}초 후 엘리베이터가 출발합니다!")),
+            FText::AsNumber(FMath::RoundToInt(RemainingCountdown))
+        );
+        CachedGameState->Multicast_BroadcastNotification(StartMsg, 2.0f);
     }
 
     GetWorldTimerManager().SetTimer(
@@ -225,11 +331,13 @@ void ABaruElevatorActor::StartCountdown()
         true
     );
 
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Elevator Countdown Started (%.0f sec)."), CountdownDuration);
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Elevator Countdown Started (%.0f sec)."), RemainingCountdown);
 }
 
 void ABaruElevatorActor::CancelCountdown()
 {
+    if (!bIsCountingDown || bIsDeparted) return;
+
     bIsCountingDown = false;
     RemainingCountdown = 0.0f;
     GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
@@ -238,7 +346,7 @@ void ABaruElevatorActor::CancelCountdown()
     if (CachedGameState)
     {
         CachedGameState->Multicast_BroadcastNotification(
-            FText::FromString(TEXT("DEPARTURE CANCELLED - OPERATIVE LEFT")), 2.0f);
+            FText::FromString(TEXT("엘리베이터 출발이 취소되었습니다.")), 2.0f);
     }
 
     BP_OnCountdownCancelled();
@@ -253,8 +361,11 @@ void ABaruElevatorActor::UpdateCountdownTick()
     {
         if (CachedGameState)
         {
-            CachedGameState->Multicast_BroadcastNotification(
-                FText::Format(FText::FromString(TEXT("DEPARTING IN {0}...")), FText::AsNumber(FMath::RoundToInt(RemainingCountdown))), 1.0f);
+            const FText TickMsg = FText::Format(
+                FText::FromString(TEXT("{0}초 후 엘리베이터가 출발합니다!")),
+                FText::AsNumber(FMath::RoundToInt(RemainingCountdown))
+            );
+            CachedGameState->Multicast_BroadcastNotification(TickMsg, 1.0f);
         }
     }
     else
@@ -266,8 +377,16 @@ void ABaruElevatorActor::UpdateCountdownTick()
 
 void ABaruElevatorActor::OnCountdownCompleted()
 {
+    // 중복 실행 차단
+    if (bIsDeparted) return;
+
     bIsCountingDown = false;
     bIsDeparted = true;
+
+    // 출발 확정 즉시 모든 트리거/콘솔 충돌을 꺼서 8초 대기 중 추가 상호작용 및 오버랩 원천 차단
+    if (BoardingTriggerBox) BoardingTriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    if (ConsoleSwitchMesh) ConsoleSwitchMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
     OnRep_IsDeparted();
 
     FString TargetMapURL = TEXT("");
@@ -285,14 +404,55 @@ void ABaruElevatorActor::OnCountdownCompleted()
     AGameModeBase* AuthGameMode = GetWorld()->GetAuthGameMode();
     if (!IsValid(AuthGameMode)) return;
 
+    // 로비 게임모드인 경우
     if (ABaruLobbyGameMode* LobbyGM = Cast<ABaruLobbyGameMode>(AuthGameMode))
     {
         LobbyGM->StartGameRaid(TargetMapURL);
         return;
     }
 
+    // 인게임 게임모드인 경우
     if (ABaruGameMode* IngameGM = Cast<ABaruGameMode>(AuthGameMode))
     {
+        bool bHasLeftBehind = false;
+
+        // 외부 대원 낙오 처리
+        for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+        {
+            APlayerController* PC = It->Get();
+            if (!IsValid(PC) || PC->IsPendingKillPending()) continue;
+
+            APawn* PlayerPawn = PC->GetPawn();
+            ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>();
+
+            // 엘리베이터 탑승 목록에 없는 인원 선별
+            if (!BoardedPlayers.Contains(PlayerPawn))
+            {
+                bHasLeftBehind = true;
+
+                if (IsValid(PlayerPawn) && PlayerPawn->Implements<UCombatInterface>())
+                {
+                    if (!ICombatInterface::Execute_IsDead(PlayerPawn))
+                    {
+                        ICombatInterface::Execute_Die(PlayerPawn, this);
+                        BARU_NET_LOG(this, LogBaruSession, Warning, 
+                            TEXT("Operative left behind: %s (Killed upon elevator departure)"), *PlayerPawn->GetName());
+                    }
+                }
+                else if (PS && !PS->IsDead())
+                {
+                    PS->SetDBNOState(false);
+                    PS->SetDeadState(true);
+                }
+            }
+        }
+
+        if (bHasLeftBehind && CachedGameState)
+        {
+            CachedGameState->Multicast_BroadcastNotification(
+                FText::FromString(TEXT("엘리베이터가 출발했습니다. 미탑승 대원은 낙오되었습니다.")), 4.0f);
+        }
+        
         IngameGM->RequestLevelTransition(TargetMapURL);
         return;
     }
@@ -302,7 +462,8 @@ void ABaruElevatorActor::OnRep_IsCountingDown()
 {
     if (bIsCountingDown)
     {
-        BP_OnCountdownStarted(CountdownDuration);
+        const float SafeDuration = (RemainingCountdown > 0.0f) ? RemainingCountdown : CountdownDuration;
+        BP_OnCountdownStarted(SafeDuration);
     }
     else if (!bIsDeparted)
     {
