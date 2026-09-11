@@ -6,6 +6,7 @@
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Monster/AI/BaruMonsterAIController.h"
 #include "Interfaces/CombatInterface.h"
+#include "GameFramework/Pawn.h"
 #include "BaruLog.h"
 
 
@@ -228,6 +229,9 @@ void ABaruMonsterDirector::EndPlay(
 
         // 디렉터의 원본 목록은 먼저 비움
         RegisteredMonsters.Reset();
+        
+        // 디렉터 종료 시 플레이어별 위협도 기록도 비움
+        PlayerThreatScores.Reset();
 
         for (const TWeakObjectPtr<ABaruMonsterCharacter>& Entry : Monsters)
         {
@@ -253,3 +257,179 @@ void ABaruMonsterDirector::EndPlay(
     
     Super::EndPlay(EndPlayReason);
 }
+
+void ABaruMonsterDirector::SetPlayerThreat(
+    APawn* PlayerPawn,
+    float NewThreat
+)
+{
+    // 위협도 목록은 서버에서만 변경
+    // NaN이나 무한대처럼 계산에 사용할 수 없는 값도 거부
+    if (GetNetMode() == NM_Client ||
+        !FMath::IsFinite(NewThreat))
+    {
+        return;
+    }
+
+    // 값을 기록하기 전에 오래된 플레이어 참조 정리
+    RemoveInvalidPlayerThreats();
+
+    // 실제 플레이어가 조종 중인 Pawn만 기록
+    // 몬스터와 조종되지 않은 Pawn은 대상에서 제외
+    if (!IsValid(PlayerPawn) ||
+        !PlayerPawn->IsPlayerControlled())
+    {
+        return;
+    }
+
+    const TWeakObjectPtr<APawn> PlayerRef(PlayerPawn);
+
+    // 디렉터 위협도는 우선 0~100점으로 사용
+    const float SafeThreat =
+        FMath::Clamp(NewThreat, 0.0f, 100.0f);
+
+    if (SafeThreat <= 0.0f)
+    {
+        // 기록이 없는 플레이어도 조회 시 0점으로 처리하므로
+        // 0점 항목은 따로 보관하지 않음
+        PlayerThreatScores.Remove(PlayerRef);
+        return;
+    }
+
+    // 처음 보는 플레이어면 새 항목 추가
+    // 이미 기록된 플레이어면 기존 점수를 교체
+    PlayerThreatScores.FindOrAdd(PlayerRef) = SafeThreat;
+}
+
+void ABaruMonsterDirector::AddPlayerThreat(
+    APawn* PlayerPawn,
+    float ThreatDelta
+)
+{
+    if (GetNetMode() == NM_Client ||
+        !IsValid(PlayerPawn) ||
+        !PlayerPawn->IsPlayerControlled() ||
+        !FMath::IsFinite(ThreatDelta))
+    {
+        return;
+    }
+
+    // 저장된 점수에 이번 변화량을 더함
+    // 범위 제한과 실제 저장은 SetPlayerThreat에서 공통 처리
+    SetPlayerThreat(
+        PlayerPawn,
+        GetPlayerThreat(PlayerPawn) + ThreatDelta
+    );
+}
+
+float ABaruMonsterDirector::GetPlayerThreat(
+    APawn* PlayerPawn
+) const
+{
+    if (!IsValid(PlayerPawn) ||
+        !PlayerPawn->IsPlayerControlled())
+    {
+        return 0.0f;
+    }
+
+    // Find는 기록이 있으면 그 값의 주소를 반환
+    // 기록이 없으면 nullptr를 반환하며 새 항목을 만들지 않음
+    const float* FoundThreat =
+        PlayerThreatScores.Find(
+            TWeakObjectPtr<APawn>(PlayerPawn)
+        );
+
+    return FoundThreat ? *FoundThreat : 0.0f;
+}
+
+void ABaruMonsterDirector::RemoveInvalidPlayerThreats()
+{
+    // 순회하면서 삭제할 수 있는 Map 반복자 사용
+    for (auto It = PlayerThreatScores.CreateIterator(); It; ++It)
+    {
+        APawn* PlayerPawn = It.Key().Get();
+
+        // 캐릭터가 제거됐거나 더 이상 플레이어가 조종하지 않으면
+        // 해당 캐릭터의 위협도 기록도 제거
+        if (!IsValid(PlayerPawn) ||
+            !PlayerPawn->IsPlayerControlled())
+        {
+            It.RemoveCurrent();
+        }
+    }
+}
+
+int32 ABaruMonsterDirector::GetDesiredMonsterCount(
+    APawn* PlayerPawn
+) const
+{
+    // 자동 배정이 꺼져 있거나 설정값이 잘못됐다면
+    // 몬스터를 배정하지 않음
+    if (MaxMonstersPerPlayer <= 0 ||
+        !FMath::IsFinite(ThreatPerMonster) ||
+        ThreatPerMonster < 1.0f)
+    {
+        return 0;
+    }
+
+    // 앞서 만든 조회 함수 사용
+    // 유효하지 않거나 기록이 없는 플레이어는 0점으로 처리됨
+    const float CurrentThreat = GetPlayerThreat(PlayerPawn);
+
+    // 소수점 이하는 버려 기준 점수에 도달했을 때만 증가
+    //
+    // 예: 기준이 25점일 때
+    // 24 / 25 = 0.96 → 0마리
+    // 25 / 25 = 1.00 → 1마리
+    // 60 / 25 = 2.40 → 2마리
+    const int32 DesiredCount =
+        FMath::FloorToInt(CurrentThreat / ThreatPerMonster);
+
+    // 위협도가 높더라도 플레이어별 최대 배정 수를 넘지 않음
+    return FMath::Clamp(
+        DesiredCount,
+        0,
+        MaxMonstersPerPlayer
+    );
+}
+
+void ABaruMonsterDirector::SetDirectorState(
+    EBaruDirectorState NewState
+)
+{
+    // 디렉터의 운영 판단은 서버에서만 처리
+    if (GetNetMode() == NM_Client)
+    {
+        return;
+    }
+
+    // 이미 같은 상태라면 중복 처리하지 않음
+    if (CurrentDirectorState == NewState)
+    {
+        return;
+    }
+
+    const EBaruDirectorState PreviousState =
+        CurrentDirectorState;
+
+    CurrentDirectorState = NewState;
+
+    // 상태 전환이 실제로 발생했을 때만 기록
+    // 로그에서 읽기 쉽도록 열거형 값을 이름으로 변환
+    const UEnum* StateEnum =
+        StaticEnum<EBaruDirectorState>();
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT("Director state changed: %s -> %s"),
+        *StateEnum->GetNameStringByValue(
+            static_cast<int64>(PreviousState)
+        ),
+        *StateEnum->GetNameStringByValue(
+            static_cast<int64>(CurrentDirectorState)
+        )
+    );
+}
+
