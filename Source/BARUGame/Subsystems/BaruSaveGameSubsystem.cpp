@@ -32,6 +32,38 @@ namespace BaruSaveCrypto
         uint8 Checksum[20] = {0};
     };
     #pragma pack(pop)
+    
+    static bool EncryptAndWriteToFile(TArray<uint8>& InRawBytes, const FString& FilePath, const FString& SlotName)
+    {
+        const int32 OriginalSize = InRawBytes.Num();
+
+        // 16바이트 정렬 패딩
+        const int32 PaddedSize = FMath::DivideAndRoundUp(OriginalSize, 16) * 16;
+        InRawBytes.SetNumZeroed(PaddedSize);
+
+        // AES-256 암호화
+        FAES::EncryptData(InRawBytes.GetData(), static_cast<uint32>(PaddedSize), AES_KEY, 32);
+
+        // SHA-1 체크섬 계산
+        FSHAHash Checksum;
+        FSHA1::HashBuffer(InRawBytes.GetData(), static_cast<uint64>(PaddedSize), Checksum.Hash);
+
+        // 헤더 패킷 구성
+        FBaruSaveHeader Header;
+        Header.OriginalSize = OriginalSize;
+        FMemory::Memcpy(Header.Checksum, Checksum.Hash, sizeof(Header.Checksum));
+
+        TArray<uint8> FileData;
+        FileData.Reserve(sizeof(FBaruSaveHeader) + PaddedSize);
+        FileData.Append(reinterpret_cast<const uint8*>(&Header), sizeof(FBaruSaveHeader));
+        FileData.Append(InRawBytes);
+
+        const bool bSuccess = FFileHelper::SaveArrayToFile(FileData, *FilePath);
+        BARU_LOG(LogBaruSession, Log, TEXT("Encrypted Save to '%s': %s (Payload: %d bytes)"),
+            *SlotName, bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"), FileData.Num());
+
+        return bSuccess;
+    }
 }
 
 UBaruSaveGameSubsystem::UBaruSaveGameSubsystem()
@@ -119,7 +151,6 @@ bool UBaruSaveGameSubsystem::SaveEncryptedSlotInternal(UBaruSaveGame* SaveObject
         return false;
     }
 
-    // 메모리로 직렬화
     TArray<uint8> RawBytes;
     if (!UGameplayStatics::SaveGameToMemory(SaveObject, RawBytes))
     {
@@ -127,36 +158,8 @@ bool UBaruSaveGameSubsystem::SaveEncryptedSlotInternal(UBaruSaveGame* SaveObject
         return false;
     }
 
-    const int32 OriginalSize = RawBytes.Num();
-
-    // AES-256 블록(16바이트) 단위 패딩
-    const int32 PaddedSize = FMath::DivideAndRoundUp(OriginalSize, 16) * 16;
-    RawBytes.SetNumZeroed(PaddedSize);
-
-    // AES-256 데이터 암호화
-    FAES::EncryptData(RawBytes.GetData(), static_cast<uint32>(PaddedSize), BaruSaveCrypto::AES_KEY, 32);
-
-    // 암호화된 데이터의 SHA-256 체크섬 계산 (Encrypt-then-MAC)
-    FSHAHash Checksum;
-    FSHA1::HashBuffer(RawBytes.GetData(), static_cast<uint64>(PaddedSize), Checksum.Hash);
-    
-    // FBaruSaveHeader 구조체를 활용한 단일 블록 패킷 조립
-    BaruSaveCrypto::FBaruSaveHeader Header;
-    Header.OriginalSize = OriginalSize;
-    FMemory::Memcpy(Header.Checksum, Checksum.Hash, sizeof(Header.Checksum));
-    
-    TArray<uint8> FileData;
-    FileData.Reserve(sizeof(BaruSaveCrypto::FBaruSaveHeader) + PaddedSize);
-    FileData.Append(reinterpret_cast<const uint8*>(&Header), sizeof(BaruSaveCrypto::FBaruSaveHeader));
-    FileData.Append(RawBytes);
-
     const FString FilePath = GetSaveFilePath(SlotName);
-    const bool bSuccess = FFileHelper::SaveArrayToFile(FileData, *FilePath);
-
-    BARU_LOG(LogBaruSession, Log, TEXT("Encrypted Save to '%s': %s (Payload: %d bytes)"), 
-        *SlotName, bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"), FileData.Num());
-
-    return bSuccess;
+    return BaruSaveCrypto::EncryptAndWriteToFile(RawBytes, FilePath, SlotName);
 }
 
 UBaruSaveGame* UBaruSaveGameSubsystem::LoadEncryptedSlotInternal(const FString& SlotName)
@@ -184,6 +187,13 @@ UBaruSaveGame* UBaruSaveGameSubsystem::LoadEncryptedSlotInternal(const FString& 
     if (Header.Magic != BaruSaveCrypto::SAVE_MAGIC)
     {
         BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Invalid magic code in '%s'."), *SlotName);
+        return nullptr;
+    }
+    
+    // 세이브 파일 버전 검사
+    if (Header.Version != BaruSaveCrypto::CURRENT_CRYPTO_VERSION)
+    {
+        BARU_LOG(LogBaruSession, Error, TEXT("LoadEncrypted Failed: Unsupported save version (%d) in '%s'."), Header.Version, *SlotName);
         return nullptr;
     }
     
@@ -255,18 +265,26 @@ void UBaruSaveGameSubsystem::SaveGameBySlotAsync(const FString& InSlotName)
         OnSaveCompletedEvent.Broadcast(InSlotName, false);
         return;
     }
-    
-    // Race Condition 방지
-    UBaruSaveGame* SaveSnapshot = DuplicateObject<UBaruSaveGame>(FoundSave->Get(), this);
 
-    // ThreadPool 비동기 실행 (메인 스레드 렌더링 히치 제거)
+    // UObject 직렬화는 메인 게임 스레드에서 즉시 수행
+    TArray<uint8> RawBytes;
+    if (!UGameplayStatics::SaveGameToMemory(FoundSave->Get(), RawBytes))
+    {
+        BARU_LOG(LogBaruSession, Error, TEXT("SaveGameBySlotAsync Failed: SaveGameToMemory failed for slot '%s'."), *InSlotName);
+        OnSaveCompletedEvent.Broadcast(InSlotName, false);
+        return;
+    }
+
+    // 저장 경로는 메인 스레드에서 미리 확보
+    const FString FilePath = GetSaveFilePath(InSlotName);
     TWeakObjectPtr<UBaruSaveGameSubsystem> WeakThis(this);
 
-    Async(EAsyncExecution::ThreadPool, [WeakThis, SaveSnapshot, InSlotName]()
+    // 바이트 데이터만 스레드 풀로 넘겨 암호화 및 파일 쓰기 수행 (mutable 필수)
+    Async(EAsyncExecution::ThreadPool, [WeakThis, RawBytes = MoveTemp(RawBytes), InSlotName, FilePath]() mutable
     {
-        UBaruSaveGameSubsystem* StrongThis = WeakThis.Get();
-        const bool bSuccess = StrongThis ? StrongThis->SaveEncryptedSlotInternal(SaveSnapshot, InSlotName) : false;
+        const bool bSuccess = BaruSaveCrypto::EncryptAndWriteToFile(RawBytes, FilePath, InSlotName);
 
+        // 작업 완료 후 메인 게임 스레드로 복귀하여 안전하게 델리게이트 브로드캐스트
         Async(EAsyncExecution::TaskGraphMainThread, [WeakThis, InSlotName, bSuccess]()
         {
             if (UBaruSaveGameSubsystem* Subsystem = WeakThis.Get())

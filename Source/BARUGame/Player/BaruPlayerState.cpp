@@ -80,12 +80,11 @@ void ABaruPlayerState::CopyProperties(APlayerState* PlayerState)
     {
         // 새 레벨 진입 시 레디 상태 초기화
         NewPS->bIsReady = false;
-
-        // // TODO : 인벤토리 서버 전용 함수 구현 시 주석 해제하여 데이터 인수인계
-        // if (InventoryComponent && NewPS->InventoryComponent)
-        // {
-        //     NewPS->InventoryComponent->CopyInventoryFrom(InventoryComponent);
-        // }
+        
+        if (InventoryComponent && NewPS->InventoryComponent)
+        {
+            NewPS->InventoryComponent->CopyInventoryFrom(InventoryComponent);
+        }
     }
 }
 

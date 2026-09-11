@@ -268,8 +268,8 @@ void ABaruGameMode::RequestLevelTransition(const FString& TargetMapURL)
         }
     }
 
-    // 연출 시간 대기 후 실제 ServerTravel 실행 : 5초 대기
-    const float SafeTransitionDelay = FMath::Max(TransitionDelayDuration, 5.0f);
+    // 연출 시간 대기 후 실제 ServerTravel 실행 : 8초 대기
+    const float SafeTransitionDelay = FMath::Max(TransitionDelayDuration, 8.0f);
 
     BARU_NET_LOG(this, LogBaruSession, Log, 
         TEXT("Level transition requested. Traveling to '%s' in %.1f seconds..."), 
@@ -461,46 +461,83 @@ void ABaruGameMode::ProcessSettlement(bool bAllExtracted)
 {
     SetMatchPhase(EBaruMatchState::PostGame);
 
-    const int32 TotalValue = CachedBaruGameState ? CachedBaruGameState->GetTeamScrapValue() : 0;
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Processing Settlement (Survived: %d, Total Team Value: %d)"), bAllExtracted, TotalValue);
-
     // 데디케이티드 서버라면 GameMode에서 세이브를 관리하지만, 로컬 .sav 저장 시스템에서는 GameMode가 저장을 해서는 안됨
     // UBaruSaveGameSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
 
-    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    // 팀 스크랩 가치 기반 시작
+    int32 FinalTeamTotalValue = CachedBaruGameState ? CachedBaruGameState->GetTeamScrapValue() : 0;
+
+    // 생존 탈출에 성공한 대원들이 들고 온 인벤토리 아이템 가치(SettlementValue) 총합 합산
+    if (bAllExtracted)
     {
-        if (ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get()))
+        for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
         {
-            if (!IsValid(BaruPC) || BaruPC->IsPendingKillPending()) continue;
+           if (APlayerController* PC = It->Get())
+           {
+                const ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>();
+                if (PS && PS->IsAlive())
+                {
+                    if (const UBaruInventoryComponent* Inven = PS->GetInventoryComponent())
+                    {
+                        FinalTeamTotalValue += Inven->GetTotalSettlementValue();
+                    }
+                }
+            }
+        }
 
-            const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
-            const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
-            const int32 EarnedGold = bPlayerSurvived ? TotalValue : FMath::RoundToInt(TotalValue * 0.1f);
-
-            FBaruSettlementReport Report;
-            Report.bSurvived = bPlayerSurvived;
-            Report.AcquiredCurrency = EarnedGold;
-
-            // Todo : 인벤토리 컴포넌트에서 GetTotalItemCount() 함수 구현되면 주석 해제
-            // if (bPlayerSurvived && PS)
-            // {
-            //     if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
-            //     {
-            //         Report.ExtractedItemCount = InvenComp->GetTotalItemCount();
-            //     }
-            // }
-
-            // Todo : BaruPlayerController.h의 FBaruSettlementReport에 MonsterKillCount 필드가 추가되면 주석 해제
-            // if (PS)
-            // {
-            //     Report.MonsterKillCount = PS->GetMonsterKillCount();
-            // }
-
-            BaruPC->Client_ShowSettlementUI(Report);
+        // 합산된 최종 수집품 가치를 GameState에도 동기화 갱신
+        if (CachedBaruGameState)
+        {
+            CachedBaruGameState->SetTeamScrapValue(FinalTeamTotalValue);
         }
     }
     
-    // 정산 완료 후 일정 시간 뒤 전원 로비로 복귀시키는 타이머 가동
+    BARU_NET_LOG(this, LogBaruSession, Log, 
+        TEXT("Processing Settlement (Survived: %d, Final Total Team Value: %d)"), 
+        bAllExtracted, FinalTeamTotalValue);
+    
+    // 3. 각 플레이어별 정산 리포트 생성 및 클라이언트 전송
+    for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    {
+        ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(Iterator->Get());
+        if (!IsValid(BaruPC) || BaruPC->IsPendingKillPending())
+        {
+            continue;
+        }
+
+        const ABaruPlayerState* PS = BaruPC->GetPlayerState<ABaruPlayerState>();
+        
+        // 생존 여부 판정
+        const bool bPlayerSurvived = bAllExtracted && (PS && PS->IsAlive());
+        
+        // 생존 시 100% 분배, 사망/낙오 시 10% 위로금 지급
+        const int32 EarnedGold = bPlayerSurvived ? FinalTeamTotalValue : FMath::RoundToInt(FinalTeamTotalValue * 0.1f);
+
+        // 파밍 아이템 총 개수 집계
+        int32 ExtractedItemCount = 0;
+        if (bPlayerSurvived && PS)
+        {
+            if (const UBaruInventoryComponent* InvenComp = PS->GetInventoryComponent())
+            {
+                ExtractedItemCount = InvenComp->GetTotalItemCount();
+            }
+        }
+
+        // 몬스터 처치 수 조회
+        const int32 Kills = PS ? PS->GetMonsterKillCount() : 0;
+
+        // 정산 DTO 구조체 생성 및 값 초기화 (선언 후 대입)
+        FBaruSettlementReport Report;
+        Report.bSurvived = bPlayerSurvived;
+        Report.AcquiredCurrency = EarnedGold;
+        Report.ExtractedItemCount = ExtractedItemCount;
+        Report.MonsterKillCount = Kills;
+
+        // 클라이언트에 정산 UI 브로드캐스트 (내부에서 로컬 .sav 저장 동시 진행)
+        BaruPC->Client_ShowSettlementUI(Report);
+    }
+    
+    // 탈출 실패(전멸/타임오버) 시 일정 시간 대기 후 로비로 강제 복귀
     if (!bAllExtracted)
     {
         PendingTargetMapURL = DefaultReturnMapURL;
