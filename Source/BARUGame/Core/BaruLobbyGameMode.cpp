@@ -186,6 +186,12 @@ void ABaruLobbyGameMode::StartGameRaid(const FString& OverrideTargetMapURL)
     {
         DestinationMap = DefaultRaidMapURL;
     }
+    
+    int32 DotIndex = INDEX_NONE;
+    if (DestinationMap.FindChar(TEXT('.'), DotIndex))
+    {
+        DestinationMap.LeftInline(DotIndex);
+    }
 
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Initiating Seamless Travel to: %s"), *DestinationMap);
     GetWorld()->ServerTravel(DestinationMap + TEXT("?listen"));
