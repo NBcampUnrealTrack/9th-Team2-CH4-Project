@@ -7,6 +7,7 @@
 
 #include "BaruTitleWidget.generated.h"
 
+class UBaruGameMenuWidget;
 class UButton;
 
 /**
@@ -38,6 +39,12 @@ protected:
 	void HandleStartGameClicked();
 	
 	/**
+	 *	옵션 버튼이 클릭되었을 때 호출된다.
+	 */
+	UFUNCTION()
+	void HandleOptionsClicked();
+	
+	/**
 	 *	게임 종료 버튼이 클릭되었을 때 호출된다.
 	 */
 	UFUNCTION()
@@ -51,10 +58,24 @@ protected:
 		BlueprintImplementableEvent, Category = "BARU|UI|Title")
 	void BP_OnEnterLobbyRequested();
 	
+protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Button_StartGame;
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Button_Options;
 	
 	// 게임 종료 버튼
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Button_QuitGame;
+	
+	/**
+	 *	타이틀의 옵션 버튼으로 열 위젯 클래스.
+	 *	WBP_Title의 Class Defaults에서 WBP_GameMenu를 지정한다.
+	 */
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "BARU|UI|Title")
+	TSubclassOf<UBaruGameMenuWidget> OptionsWidgetClass;
 };
