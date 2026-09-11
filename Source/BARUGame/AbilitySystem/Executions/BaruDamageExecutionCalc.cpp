@@ -55,6 +55,14 @@ void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCusto
     UAbilitySystemComponent* TargetASC = ExecutionParams.GetTargetAbilitySystemComponent();
     UAbilitySystemComponent* SourceASC = ExecutionParams.GetSourceAbilitySystemComponent();
     
+    // 피격 대상의 State.Immune 상태 검사
+    if (TargetASC && TargetASC->HasMatchingGameplayTag(FBaruGameplayTags::Get().State_Immune))
+    {
+        BARU_NET_LOG(TargetASC->GetAvatarActor(), LogBaruCombat, Verbose, 
+            TEXT("Target is IMMUNE. Damage ignored."));
+        return; // 데미지 계산 중단 (피해 0)
+    }
+    
     if (TargetASC && SourceASC && TargetASC != SourceASC)
     {
         const UBaruPlayerAttributeSet* TargetPlayerSet = TargetASC->GetSet<UBaruPlayerAttributeSet>();
@@ -168,7 +176,7 @@ void UBaruDamageExecutionCalc::Execute_Implementation(const FGameplayEffectCusto
         BaseSuppressionDamage = FinalPhysicalDamage * 0.5f;
     }
 
-    if (BaseSuppressionDamage > 0.0f)
+    if (BaseSuppressionDamage > 0.0f && TargetASC && TargetASC->GetSet<UBaruMonsterAttributeSet>())
     {
         OutExecutionOutput.AddOutputModifier(
             FGameplayModifierEvaluatedData(DamageStatics().IncomingSuppressionDamageProperty, EGameplayModOp::Additive, BaseSuppressionDamage)

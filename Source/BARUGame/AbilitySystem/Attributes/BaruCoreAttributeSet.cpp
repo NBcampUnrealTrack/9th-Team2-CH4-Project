@@ -1,4 +1,5 @@
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
+#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "Net/UnrealNetwork.h"
 #include "GameplayEffectExtension.h"
 #include "Interfaces/CombatInterface.h"
@@ -81,6 +82,16 @@ void UBaruCoreAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCa
                 // GameplayCue로 피격 신음/피격 화면 연출 브로드캐스트
                 if (UAbilitySystemComponent* TargetASC = GetOwningAbilitySystemComponent())
                 {
+                    if (const UBaruPlayerAttributeSet* PlayerSet = TargetASC->GetSet<UBaruPlayerAttributeSet>())
+                    {
+                        const float CurrentTension = PlayerSet->GetTension();
+                        const float AddedTension = LocalIncomingDamage * 0.5f;
+                        TargetASC->SetNumericAttributeBase(
+                            UBaruPlayerAttributeSet::GetTensionAttribute(),
+                            FMath::Clamp(CurrentTension + AddedTension, 0.0f, PlayerSet->GetMaxTension())
+                        );
+                    }
+                    
                     FGameplayCueParameters CueParams;
                     CueParams.RawMagnitude = LocalIncomingDamage;
                     CueParams.EffectCauser = SourceActor;
@@ -91,27 +102,27 @@ void UBaruCoreAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCa
             // 사망 검증 및 1회만 Die 인터페이스 호출
             if (NewHealth <= 0.0f && TargetActor && TargetActor->Implements<UCombatInterface>())
             {
-                // 이미 완전 사망한 액터는 무시
-                if (ICombatInterface::Execute_IsDead(TargetActor))
-                {
-                    return;
-                }
+                if (ICombatInterface::Execute_IsDead(TargetActor)) return;
 
-                // 몬스터는 DBNO 없이 즉시 사망
+                // 몬스터는 즉시 사망
                 if (TargetActor->IsA(APawn::StaticClass()) && !Cast<APawn>(TargetActor)->IsPlayerControlled())
                 {
                     ICombatInterface::Execute_Die(TargetActor, SourceActor);
                     return;
                 }
 
-                // 플레이어: 이미 DBNO 상태에서 또 치명상을 입었으면 완전 사망
+                // 플레이어 분기
                 if (ICombatInterface::Execute_IsDBNO(TargetActor))
                 {
-                    ICombatInterface::Execute_Die(TargetActor, SourceActor);
+                    // 즉시 사망 대신 다운 피격 처리 호출 (출혈 시간 단축)
+                    if (ABaruCharacter* BaruChar = Cast<ABaruCharacter>(TargetActor))
+                    {
+                        BaruChar->NotifyHitWhileDBNO(LocalIncomingDamage, SourceActor);
+                    }
                 }
                 else
                 {
-                    // 첫 체력 0 도달 -> 다운(DBNO) 상태 진입
+                    // 첫 체력 소진 -> 다운 진입 (2.5초 무적 자동 적용)
                     if (ABaruCharacter* BaruChar = Cast<ABaruCharacter>(TargetActor))
                     {
                         BaruChar->EnterDBNO(SourceActor);

@@ -99,20 +99,13 @@ bool UBaruHealthComponent::IsDead() const
         return false;
     }
 
-    // 1) 이 컴포넌트가 PlayerState 에 붙어 있는 경우(현재 구조) → 소유 Pawn 을 조회
-    if (const APlayerState* OwnerPS = Cast<APlayerState>(Owner))
+    // 1) PlayerState에 부착된 경우: Pawn 분리(Unpossess) 여부와 무관하게 PlayerState의 상태 플래그 조회
+    if (const ABaruPlayerState* OwnerPS = Cast<ABaruPlayerState>(Owner))
     {
-        if (AActor* OwnerPawn = OwnerPS->GetPawn())
-        {
-            if (OwnerPawn->Implements<UCombatInterface>())
-            {
-                return ICombatInterface::Execute_IsDead(OwnerPawn);
-            }
-        }
-        return false;
+        return OwnerPS->IsDead();
     }
 
-    // 2) 나중에 이 컴포넌트를 Pawn 에 직접 붙이는 경우도 지원
+    // 2) Pawn 또는 몬스터 등 액터 본체에 직접 부착된 경우 (확장성 유지)
     if (Owner->Implements<UCombatInterface>())
     {
         return ICombatInterface::Execute_IsDead(Owner);
