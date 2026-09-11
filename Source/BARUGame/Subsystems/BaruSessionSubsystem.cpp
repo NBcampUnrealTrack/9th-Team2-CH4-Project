@@ -265,9 +265,19 @@ void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatc
 	LastSessionSearch->MaxSearchResults = FMath::Clamp(MaxSearchResults, 50, 500);
 	LastSessionSearch->bIsLanQuery = bIsLANMatch;
 	
+	LastSessionSearch->QuerySettings.Set(FName(TEXT("LOBBIESSEARCH")), true, EOnlineComparisonOp::Equals);
 	LastSessionSearch->QuerySettings.Set(FName(TEXT("PRESENCESEARCH")), true, EOnlineComparisonOp::Equals);
+	
+	if (!bIsLANMatch)
+	{
+		LastSessionSearch->QuerySettings.Set(
+			BaruMatchmakingConstants::SETTING_MATCH_KEY, 
+			BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE, 
+			EOnlineComparisonOp::Equals
+		);
+	}
     
-	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Executing Search with Steam Lobby (PRESENCESEARCH)..."));
+	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Executing Search with Steam Lobby..."));
 
 	if (!SessionInterface->FindSessions(*NetId.GetUniqueNetId(), LastSessionSearch.ToSharedRef()))
 	{
