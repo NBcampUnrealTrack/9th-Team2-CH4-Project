@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UI/Foundation/BaruCommonUserWidget.h"
 #include "Gameplay/Items/DataTypes/BaruItemData.h"
+#include "TimerManager.h"
 #include "BaruInventoryWidget.generated.h"
 
 class UBaruInventoryComponent;
@@ -15,6 +16,8 @@ class USizeBox;
 class UBaruInventoryCellWidget;
 class UCanvasPanel;
 class UBaruInventoryItemWidget;
+class UTextBlock;
+class ABaruGameState;
 
 
 // 인벤토리의 실제 슬롯 데이터를 UI가 읽기 쉬운 형태로 정리한 값.
@@ -82,6 +85,10 @@ public:
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+
+	// WBP_BaruInventoryGrid의 총무게 TextBlock과 연결합니다.
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_Weight;
 	
 	// WBP_BaruInventory Designer의 같은 이름 위젯과 자동 연결됩니다.
 	UPROPERTY(meta = (BindWidget))
@@ -113,6 +120,10 @@ protected:
 	UDragDropOperation* InOperation) override;
 
 private:
+	void RefreshWeightDisplay();
+	void RefreshInventoryBindingAndWeight();
+	FTimerHandle WeightRefreshTimer;
+	FText LastWeightText;
 	void BindInventory();
 	void HandleInventoryUpdated();
 	void RebuildEmptyGrid();
