@@ -78,6 +78,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SanityPostProcessScale = 1.0f;
 
+	// 피격 시 표시되는 화면 효과 강도 (0.0: 효과 없음, 1.0: 기본 강도)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float HitScreenEffectIntensity = 1.0f;
+
 	// 크로스헤어 표시
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
 	bool bShowCrosshair = true;
