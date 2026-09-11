@@ -20,6 +20,7 @@ class UBaruCharacterAnimSet;
 class UBaruEquipmentComponent; 
 class UBaruItemInstance;   
 class USpotLightComponent;
+class UBaruFootstepComponent;
 struct FOnAttributeChangeData;               
 
 UCLASS()
@@ -202,6 +203,9 @@ protected:
     //인벤토리 컴포넌트 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Equipment")
     TObjectPtr<UBaruEquipmentComponent> EquipmentComponent;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Footstep")
+    TObjectPtr<UBaruFootstepComponent> FootstepComponent;
     
     // [추가 ] 헤드라이트. 세부 값은 BP 에서 조정가능
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Headlight")
