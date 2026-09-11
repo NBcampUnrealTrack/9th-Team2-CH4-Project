@@ -21,6 +21,9 @@
 
 #include "Components/CanvasPanel.h"	// 키입력 구현부.
 #include "Components/CanvasPanelSlot.h"
+#include "Components/TextBlock.h"
+#include "Engine/World.h"
+#include "BaruLog.h"
 
 
 
@@ -39,13 +42,30 @@ void UBaruInventoryWidget::NativeConstruct()
 
 	// 그 위에 실제 아이템을 그리도록 BP에 알림.
 	RefreshInventoryView();
+	RefreshWeightDisplay();
+	if (!IsValid(Text_Weight))
+	{
+		BARU_LOG(LogBaruUI, Warning,
+			TEXT("Inventory weight: WBP_BaruInventoryGrid 안의 TextBlock 이름을 Text_Weight로 지정해주세요."));
+	}
+		// PlayerState/아이템 수량이 UI보다 늦게 복제되는 경우도 보정.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(WeightRefreshTimer, this,
+			&UBaruInventoryWidget::RefreshInventoryBindingAndWeight, 0.25f, true);
+	}
 }
 
 
 
 
 void UBaruInventoryWidget::NativeDestruct()
-{
+{	
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(WeightRefreshTimer);
+	}
+	LastWeightText = FText::GetEmpty();
 	if (IsValid(InventoryComponent))
 	{
 		InventoryComponent->OnInventoryUpdated.RemoveAll(this);
@@ -89,6 +109,46 @@ void UBaruInventoryWidget::HandleInventoryUpdated()
 {
 	RebuildItemWidgets();
 	RefreshInventoryView();
+	RefreshWeightDisplay();
+}
+
+void UBaruInventoryWidget::RefreshWeightDisplay()
+{
+	if (!IsValid(Text_Weight)) return;
+	FText Display;
+	if (IsValid(InventoryComponent))
+	{
+		FNumberFormattingOptions Options;
+		Options.SetMinimumFractionalDigits(1);
+		Options.SetMaximumFractionalDigits(1);
+		Display = FText::Format(NSLOCTEXT("BaruInventory", "TotalWeight", "무게: {0} kg"),
+			FText::AsNumber(InventoryComponent->GetTotalCarriedWeightKg(), &Options));
+	}
+	else
+	{
+		Display = NSLOCTEXT("BaruInventory", "WeightWaiting", "무게: -- kg");
+	}
+	if (!Display.EqualTo(LastWeightText) || !Text_Weight->GetText().EqualTo(Display))
+	{
+		Text_Weight->SetText(Display);
+		LastWeightText = Display;
+	}
+}
+
+void UBaruInventoryWidget::RefreshInventoryBindingAndWeight()
+{
+	const ABaruPlayerState* PS = GetOwningPlayerState<ABaruPlayerState>();
+	UBaruInventoryComponent* Current = IsValid(PS) ? PS->GetInventoryComponent() : nullptr;
+	if (InventoryComponent != Current)
+	{
+		BindInventory();
+		RebuildEmptyGrid();
+		HandleInventoryUpdated();
+	}
+	else
+	{
+		RefreshWeightDisplay();
+	}
 }
 
 

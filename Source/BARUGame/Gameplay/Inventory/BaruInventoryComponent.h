@@ -16,6 +16,20 @@ class UBaruItemInstance;
 
 DECLARE_MULTICAST_DELEGATE(FOnInventoryUpdated); // UI(태현님)와 맞춰서 이름 정할 것.
 
+// 현재 인벤토리로부터 계산한 정산 결과입니다.
+// 계산 결과만 담으며 인벤토리 아이템을 제거하거나 변경하지 않습니다.
+USTRUCT(BlueprintType)
+struct BARUGAME_API FBaruInventorySettlementSummary
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Inventory|Settlement")
+	int32 EligibleItemUnitCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "BARU|Inventory|Settlement")
+	int32 TotalValue = 0;
+};
+
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent)) //ClassGroup은 그룹 정리용, meta = 부분은 에디터에서 BP에 붙이기 위함.
 class BARUGAME_API UBaruInventoryComponent : public UActorComponent
 {
@@ -120,10 +134,20 @@ public:
 	// Grid 보관품과 장착품을 합쳐 계산합니다. 같은 아이템을 중복 합산하지 않습니다.
 	UFUNCTION(BlueprintPure, Category = "BARU|Inventory|Weight")
 	float GetTotalCarriedWeightKg() const;
+
+		// Grid 보관품과 장착품을 모두 대상으로 정산 가능 수량과 가치를 계산.
+		// 서버/클라이언트 어느 쪽에서도 읽을 수 있지만 실제 보상 확정은 서버 GameMode가 수행 필요.
+	UFUNCTION(BlueprintPure, Category = "BARU|Inventory|Settlement")
+	FBaruInventorySettlementSummary CalculateSettlementSummary() const;
 	
 	// UI용: 해당 인벤토리 슬롯의 수량 전체를 버리는 요청.
 	UFUNCTION(BlueprintCallable, Category = "BARU|Inventory")
 	void RequestDropEntireItem(UBaruItemInstance* Item);
+	
+		// 장착품을 포함한 전체 보유 아이템의 Quantity 합계.
+		// 정산 대상 여부나 가격과 관계없이 수량만 계산.
+	UFUNCTION(BlueprintPure, Category = "BARU|Inventory")
+	int32 GetTotalItemCount() const;
 
 private:
 		// [진실원(진짜 부분)] 복제 대상
