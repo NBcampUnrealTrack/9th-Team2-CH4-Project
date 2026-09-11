@@ -920,24 +920,71 @@ void UBaruInventoryComponent::CopyInventoryFrom(
 	//무게 추가.
 float UBaruInventoryComponent::GetTotalCarriedWeightKg() const
 {
-	float TotalKg = 0.0f;
+    double TotalKg = 0.0;
+    TSet<const UBaruItemInstance*> CountedItems;
+    for (const FInventorySlot& InventorySlot : SlotList.Slots)
+    {
+        const UBaruItemInstance* Item = InventorySlot.Item;
+        if (!IsValid(Item) || Item->Quantity <= 0 || CountedItems.Contains(Item))
+        {
+            continue;
+        }
+        CountedItems.Add(Item);
+        const FItemData* Data = FindItemData(Item->ItemID);
+        if (!Data || !FMath::IsFinite(Data->UnitWeightKg) || Data->UnitWeightKg <= 0.0f)
+        {
+            continue;
+        }
+        TotalKg = FMath::Min<double>(MAX_flt,
+            TotalKg + static_cast<double>(Data->UnitWeightKg) * Item->Quantity);
+    }
+    return static_cast<float>(TotalKg);
+}
+
+	//정산 부분.
+FBaruInventorySettlementSummary
+UBaruInventoryComponent::CalculateSettlementSummary() const
+{
+	FBaruInventorySettlementSummary Summary;
+	int64 TotalUnitCount = 0;
+	int64 TotalValue = 0;
+	TSet<const UBaruItemInstance*> CountedItems;
+
 	for (const FInventorySlot& InventorySlot : SlotList.Slots)
 	{
-		if (!IsValid(InventorySlot.Item))
+		const UBaruItemInstance* Item = InventorySlot.Item;
+		if (!IsValid(Item) || CountedItems.Contains(Item))
 		{
 			continue;
 		}
 
-		const FItemData* Data = FindItemData(InventorySlot.Item->ItemID);
-		if (!Data)
+		CountedItems.Add(Item);
+
+		const int32 Quantity = FMath::Max(0, Item->Quantity);
+		if (Quantity == 0)
 		{
 			continue;
 		}
 
-		TotalKg += FMath::Max(0.0f, Data->UnitWeightKg)
-			* static_cast<float>(FMath::Max(0, InventorySlot.Item->Quantity));
+		const FItemData* Data = FindItemData(Item->ItemID);
+		if (!Data || !Data->bCanBeSettled)
+		{
+			continue;
+		}
+
+		const int32 UnitValue = FMath::Max(0, Data->SettlementValuePerUnit);
+		TotalUnitCount = FMath::Min<int64>(MAX_int32,
+			TotalUnitCount + static_cast<int64>(Quantity));
+		TotalValue = FMath::Min<int64>(MAX_int32,
+			TotalValue + static_cast<int64>(UnitValue) * static_cast<int64>(Quantity));
 	}
-	return TotalKg;
+
+	Summary.EligibleItemUnitCount = static_cast<int32>(
+		FMath::Min<int64>(TotalUnitCount, MAX_int32));
+	Summary.TotalValue = static_cast<int32>(
+		FMath::Min<int64>(TotalValue, MAX_int32));
+
+	return Summary;
 }
 
 void UBaruInventoryComponent::RequestDropEntireItem(UBaruItemInstance* Item)
@@ -1001,7 +1048,7 @@ bool UBaruInventoryComponent::DropEntireItemOnServer(
         }
     }
 
-    // 클라이언트가 월드 좌표를 보내지 않습니다. 서버가 앞쪽 바닥을 찾습니다.
+	 // 클라이언트가 월드 좌표를 보내지 않습니다. 서버가 앞쪽 바닥을 찾습니다.
     const FVector Start = OwnerPawn->GetActorLocation();
     FVector Forward = OwnerPawn->GetActorForwardVector();
     Forward.Z = 0.0f;
@@ -1108,4 +1155,27 @@ bool UBaruInventoryComponent::DropEntireItemOnServer(
         TEXT("월드 드롭 완료: ItemID=%s Count=%d"),
         *Item->ItemID.ToString(), ExpectedQuantity);
     return true;
+}
+
+	// 아이템 계산부. 아이템의 총 수량.
+int32 UBaruInventoryComponent::GetTotalItemCount() const
+{
+	int64 TotalCount = 0;
+
+	for (const FInventorySlot& Slot : SlotList.Slots)
+	{
+		if (!IsValid(Slot.Item))
+		{
+			continue;
+		}
+
+		TotalCount += FMath::Max(0, Slot.Item->Quantity);
+
+		if (TotalCount >= MAX_int32)
+		{
+			return MAX_int32;
+		}
+	}
+
+	return static_cast<int32>(TotalCount);
 }

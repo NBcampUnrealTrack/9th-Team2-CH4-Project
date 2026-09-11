@@ -20,6 +20,7 @@
 #include "Core/BaruGameMode.h"                                    
 #include "Core/BaruTestGameMode.h"                                
 #include "Components/BaruHealthComponent.h"
+#include "Character/BaruFootstepComponent.h"
 #include "Gameplay/Inventory/BaruInventoryComponent.h"   
 #include "Gameplay/Items/BaruItemInstance.h"             
 #include "Gameplay/Items/DataTypes/BaruItemData.h"       
@@ -58,6 +59,7 @@ ABaruCharacter::ABaruCharacter()
     GetCharacterMovement()->bOrientRotationToMovement = false; 
    
    EquipmentComponent = CreateDefaultSubobject<UBaruEquipmentComponent>(TEXT("EquipmentComponent"));
+   FootstepComponent = CreateDefaultSubobject<UBaruFootstepComponent>(TEXT("FootstepComponent"));
    
    // 긴장도 컴포넌트 부착
    TensionComponent = CreateDefaultSubobject<UBaruTensionComponent>(TEXT("TensionComponent"));

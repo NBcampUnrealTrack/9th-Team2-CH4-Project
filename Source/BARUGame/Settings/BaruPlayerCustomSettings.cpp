@@ -59,6 +59,7 @@ void UBaruPlayerCustomSettings::ResetToDefaults()
 	FieldOfView = 90.0f;
 	CameraShakeIntensity = 1.0f;
 	SanityPostProcessScale = 1.0f;
+	HitScreenEffectIntensity = 1.0f;
 	bShowCrosshair = true;
 	bEnableSubtitles = true;
 }
