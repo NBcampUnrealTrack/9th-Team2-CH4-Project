@@ -1005,6 +1005,9 @@ bool ABaruMonsterAIController::ReceiveDirectorInvestigateCommand(
     {
         return false;
     }
+	
+	// 이전 명령의 완료와 새 명령을 구분
+	++DirectorCommandRevision;
 
     // 새로운 명령으로 기존 명령을 교체
     DirectorCommand = EBaruMonsterDirectorCommand::Investigate;
@@ -1041,6 +1044,9 @@ void ABaruMonsterAIController::ReceiveDirectorHoldCommand()
     {
         return;
     }
+	
+	// 이전 명령의 완료와 새 명령을 구분
+	++DirectorCommandRevision;
 
     DirectorCommand = EBaruMonsterDirectorCommand::Hold;
     DirectorTargetLocation = FVector::ZeroVector;
@@ -1073,6 +1079,9 @@ void ABaruMonsterAIController::ClearDirectorCommand()
     // 해제 전 조사 명령이 있었는지 기억
     const bool bWasInvestigating =
         DirectorCommand == EBaruMonsterDirectorCommand::Investigate;
+	
+	// 이전 명령의 완료와 새 명령을 구분
+	++DirectorCommandRevision;
 
     DirectorCommand = EBaruMonsterDirectorCommand::None;
     DirectorTargetLocation = FVector::ZeroVector;

@@ -14,6 +14,7 @@ class UAbilitySystemComponent;
 class UBaruAbilitySystemComponent;
 class UBaruCoreAttributeSet;
 class UBaruMonsterAttributeSet;
+class ABaruMonsterDirector;
 
 struct FOnAttributeChangeData;
 struct FGameplayTag;
@@ -118,6 +119,16 @@ protected:
 	)
 	bool bAllowIdleFloorTraversal = false;
 
+	// 이 몬스터를 지휘할 디렉터
+	// 지정하지 않으면 디렉터에 등록하지 않고 개별 AI로 행동
+	UPROPERTY(
+	EditInstanceOnly,
+	BlueprintReadOnly,
+	Category = "Monster|AI|Director",
+	meta = (ExposeOnSpawn = "true")
+)
+	TObjectPtr<ABaruMonsterDirector> AssignedDirector;
+	
 public:
 	
 	//이 몬스터가 사용하는 설정표를 반환

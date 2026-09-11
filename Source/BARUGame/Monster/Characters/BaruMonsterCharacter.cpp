@@ -4,6 +4,7 @@
 #include "Monster/Characters/BaruMonsterCharacter.h"
 #include "Monster/AI/BaruMonsterAIController.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
+#include "Monster/AI/BaruMonsterDirector.h"
 
 #include "AbilitySystem/BaruAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"
@@ -219,12 +220,26 @@ void ABaruMonsterCharacter::BeginPlay()
 		);
 	}
 	
+	// 초기화가 끝난 몬스터를 지정된 디렉터에 등록
+	// 디렉터가 없으면 기존 개별 AI만 사용
+	if (HasAuthority() && IsValid(AssignedDirector))
+	{
+		AssignedDirector->RegisterMonster(this);
+	}
+	
 }
 
 void ABaruMonsterCharacter::EndPlay(
 	const EEndPlayReason::Type EndPlayReason
 )
 {
+	// 사망 외에 강제 삭제나 레벨 종료로 제거되는 경우에도 등록 해제
+	// 사망 시 이미 해제했더라도 중복 호출로 다시 추가되지는 않음
+	if (HasAuthority() && IsValid(AssignedDirector))
+	{
+		AssignedDirector->UnregisterMonster(this);
+	}
+	
 	// 몬스터가 제거된 뒤 회복 함수가 실행되지 않도록 예약 취소
 	GetWorldTimerManager().ClearTimer(GroggyRecoveryTimerHandle);
 
@@ -420,6 +435,15 @@ void ABaruMonsterCharacter::Die_Implementation(AActor* Killer)
 	}
 
 	bIsDead = true;
+	
+	// 사망이 확정된 몬스터를 디렉터의 지휘 목록에서 제외
+	// bIsDead를 먼저 설정했으므로 살아 있는 개체로 처리되지 않음
+	//
+	// 시체 액터는 삭제하지 않으며 기존 사망 연출은 이어서 실행
+	if (IsValid(AssignedDirector))
+	{
+		AssignedDirector->UnregisterMonster(this);
+	}
 	
 	// 그로기 도중 사망하면 회복 예약 취소
 	// bIsDead를 먼저 설정해서 이후에도 행동이 재개되지 않도록 함
