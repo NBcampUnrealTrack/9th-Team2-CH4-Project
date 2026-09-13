@@ -1179,3 +1179,34 @@ int32 UBaruInventoryComponent::GetTotalItemCount() const
 
 	return static_cast<int32>(TotalCount);
 }
+
+// [09.13 수정] 인벤토리 완전 초기화 (서버 권한 전용)
+void UBaruInventoryComponent::ClearInventory()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	// 1. 네트워크 복제 서브오브젝트 등록 해제 (GC 메모리 누수 방지)
+	if (IsUsingRegisteredSubObjectList() && IsReadyForReplication())
+	{
+		for (const FInventorySlot& Slot : SlotList.Slots)
+		{
+			if (IsValid(Slot.Item))
+			{
+				RemoveReplicatedSubObject(Slot.Item);
+			}
+		}
+	}
+
+	// 2. 슬롯 데이터 및 2D 격자 캐시 전량 초기화
+	SlotList.Slots.Reset();
+	Cells.Reset();
+	Cells.SetNum(GridWidth * GridHeight);
+
+	// 3. 변경 사항 동기화 및 UI 갱신 방송
+	SlotList.MarkArrayDirty();
+	OnInventoryUpdated.Broadcast();
+	GetOwner()->ForceNetUpdate();
+}
