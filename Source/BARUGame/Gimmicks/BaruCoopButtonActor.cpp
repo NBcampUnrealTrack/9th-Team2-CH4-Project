@@ -5,6 +5,7 @@
 #include "Gimmicks/BaruCoopDoorActor.h"
 #include "GameplayTags/BaruGameplayTags.h"
 #include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
 #include "BaruLog.h"
 
 ABaruCoopButtonActor::ABaruCoopButtonActor()
@@ -115,5 +116,19 @@ void ABaruCoopButtonActor::SetButtonActive(bool bActive)
 
 void ABaruCoopButtonActor::OnRep_IsPressed()
 {
+    USoundBase* SoundToPlay = bIsPressed ? ButtonPressSound : ButtonReleaseSound;
+    if (SoundToPlay && ButtonMesh)
+    {
+        UGameplayStatics::PlaySoundAtLocation(
+            this,
+            SoundToPlay,
+            ButtonMesh->GetComponentLocation(),
+            1.0f,
+            1.0f,
+            0.0f,
+            SoundAttenuation
+        );
+    }
+
     BP_OnButtonPressedStateChanged(bIsPressed);
 }

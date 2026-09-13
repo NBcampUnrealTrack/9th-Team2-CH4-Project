@@ -13,6 +13,7 @@
 #include "Core/BaruLobbyGameMode.h"
 #include "Core/BaruGameMode.h"
 #include "GameplayTags/BaruGameplayTags.h"
+#include "Kismet/GameplayStatics.h"
 #include "BaruLog.h"
 
 ABaruElevatorActor::ABaruElevatorActor()
@@ -27,12 +28,23 @@ ABaruElevatorActor::ABaruElevatorActor()
     PlatformMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlatformMeshComponent"));
     PlatformMeshComponent->SetupAttachment(RootSceneComponent);
     PlatformMeshComponent->SetCollisionProfileName(TEXT("BlockAll"));
+    PlatformMeshComponent->CanCharacterStepUpOn = ECB_Yes;
 
     ConsoleSwitchMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ConsoleSwitchMesh"));
     ConsoleSwitchMesh->SetupAttachment(PlatformMeshComponent);
+    ConsoleSwitchMesh->SetRelativeLocation(FVector(120.0f, 0.0f, 95.0f)); 
+    ConsoleSwitchMesh->SetRelativeRotation(FRotator(0.0f, 180.0f, 0.0f));
     ConsoleSwitchMesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
-    ConsoleSwitchMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block); // Interaction 채널
+    ConsoleSwitchMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);
 
+    FloorGuardCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("FloorGuardCollision"));
+    FloorGuardCollision->SetupAttachment(PlatformMeshComponent);
+    FloorGuardCollision->SetBoxExtent(FVector(180.0f, 180.0f, 25.0f));
+    FloorGuardCollision->SetRelativeLocation(FVector(0.0f, 0.0f, -25.0f));
+    FloorGuardCollision->SetCollisionProfileName(TEXT("BlockAll"));
+    FloorGuardCollision->CanCharacterStepUpOn = ECB_Yes;
+    FloorGuardCollision->SetGenerateOverlapEvents(false);
+    
     BoardingTriggerBox = CreateDefaultSubobject<UBoxComponent>(TEXT("BoardingTriggerBox"));
     BoardingTriggerBox->SetupAttachment(PlatformMeshComponent);
     BoardingTriggerBox->SetBoxExtent(FVector(150.0f, 150.0f, 100.0f));
@@ -182,6 +194,8 @@ void ABaruElevatorActor::ExecuteInteraction_Implementation(APawn* Interactor)
     }
     LastInteractionTime = CurrentTime;
 
+    Multicast_PlayButtonSound();
+    
     AGameModeBase* AuthGM = GetWorld()->GetAuthGameMode();
 
     // 로비: 전원 탑승 시 시작
@@ -202,6 +216,22 @@ void ABaruElevatorActor::ExecuteInteraction_Implementation(APawn* Interactor)
     else
     {
         StartCountdown();
+    }
+}
+
+void ABaruElevatorActor::Multicast_PlayButtonSound_Implementation()
+{
+    if (ButtonInteractSound && ConsoleSwitchMesh)
+    {
+        UGameplayStatics::PlaySoundAtLocation(
+            this,
+            ButtonInteractSound,
+            ConsoleSwitchMesh->GetComponentLocation(),
+            1.0f,
+            1.0f,
+            0.0f,
+            ButtonAudioAttenuation
+        );
     }
 }
 

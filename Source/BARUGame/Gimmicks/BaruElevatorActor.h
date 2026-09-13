@@ -10,6 +10,8 @@ class UBoxComponent;
 class UStaticMeshComponent;
 class ABaruGameState;
 class APawn;
+class USoundBase;
+class USoundAttenuation;
 
 UENUM(BlueprintType)
 enum class EBaruElevatorTriggerType : uint8
@@ -86,6 +88,9 @@ protected:
     void BP_OnDeparted();
 
 protected:
+    UFUNCTION(NetMulticast, Unreliable)
+    void Multicast_PlayButtonSound();
+    
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
     TObjectPtr<USceneComponent> RootSceneComponent;
 
@@ -98,6 +103,15 @@ protected:
     /** 상호작용 가능한 엘리베이터 조종 콘솔 메쉬 (선택 사항) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
     TObjectPtr<UStaticMeshComponent> ConsoleSwitchMesh;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+    TObjectPtr<class UBoxComponent> FloorGuardCollision;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Audio")
+    TObjectPtr<USoundBase> ButtonInteractSound;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|Elevator|Audio")
+    TObjectPtr<USoundAttenuation> ButtonAudioAttenuation;
 
     // ==============================================================================
     // Configurable Settings
