@@ -8,6 +8,7 @@
 class UInputAction;
 class UInputMappingContext; 
 class UCommonActivatableWidget;   // [추가] 인벤토리 위젯
+class UBaruItemFocusComponent;
 // Todo : 별도의 DatabaseType으로 분리 예정
 
 USTRUCT(BlueprintType)
@@ -79,6 +80,9 @@ public:
 
 	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
 	void Client_PlayElevatorCinematic();
+	
+	UFUNCTION(BlueprintPure, Category = "BARU|Components")
+	UBaruItemFocusComponent* GetItemFocusComponent() const { return ItemFocusComponent; }
 
 	
 public:
@@ -130,4 +134,7 @@ protected:
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Inventory")
 	int32 MaxInventorySlotIndex = 100;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+	TObjectPtr<UBaruItemFocusComponent> ItemFocusComponent;
 };

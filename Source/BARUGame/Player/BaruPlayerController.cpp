@@ -14,12 +14,21 @@
 #include "CommonActivatableWidget.h"               // [추가]
 #include "Engine/LocalPlayer.h"                    // [추가] GetSubsystem
 #include "BaruLog.h"
+#include "UI/ItemUI/BaruItemFocusComponent.h"
 
 
 ABaruPlayerController::ABaruPlayerController()
 {
     PrimaryActorTick.bCanEverTick = true;
     PlayerCameraManagerClass = APlayerCameraManager::StaticClass();
+    
+    ItemFocusComponent = CreateDefaultSubobject<UBaruItemFocusComponent>(TEXT("ItemFocusComponent"));
+    if (ItemFocusComponent)
+    {
+        ItemFocusComponent->bEnableItemFocusUI = true;
+        // Character의 InteractionTraceDistance(기본 300.0f)와 동일하게 일치
+        ItemFocusComponent->FocusTraceDistance = 300.0f;
+    }
 }
 
 void ABaruPlayerController::BeginPlay()
