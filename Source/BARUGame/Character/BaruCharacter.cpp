@@ -1202,6 +1202,10 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
 
    if (HoldDuration <= 0.0f)
    {
+      // [09.13] F키를 뗄 때 EndInteraction을 호출할 수 있도록 즉시 실행 대상도 타깃으로 캐싱
+      CancelPendingInteraction();
+      PendingInteractTarget = ClaimedActor;
+
       IInteractableInterface::Execute_ExecuteInteraction(ClaimedActor, this);
       BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *ClaimedActor->GetName());
       return;
@@ -1272,10 +1276,17 @@ bool ABaruCharacter::Server_StopInteraction_Validate()
 
 void ABaruCharacter::Server_StopInteraction_Implementation()
 {
+   // [09.13] F키를 뗄 때 누르고 있던 대상(버튼 등)에게 상호작용 종료 통보
    if (PendingInteractTarget.IsValid())
    {
+      AActor* Target = PendingInteractTarget.Get();
+      if (Target && Target->Implements<UInteractableInterface>())
+      {
+         IInteractableInterface::Execute_EndInteraction(Target, this);
+      }
+
       BARU_NET_LOG(this, LogBaruItem, Log,
-         TEXT("Interaction hold cancelled by input release: %s"), *PendingInteractTarget->GetName());
+          TEXT("Interaction hold cancelled by input release: %s"), *Target->GetName());
    }
    CancelPendingInteraction();
 }

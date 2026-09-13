@@ -51,7 +51,7 @@ FGameplayTag ABaruCoopButtonActor::GetInteractionTag_Implementation() const
 
 float ABaruCoopButtonActor::GetInteractionDuration_Implementation() const
 {
-    return 10.0f;
+    return 0.0f;
 }
 
 void ABaruCoopButtonActor::ExecuteInteraction_Implementation(APawn* Interactor)
