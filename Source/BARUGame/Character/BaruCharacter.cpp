@@ -308,6 +308,11 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
       {
          EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_ToggleCrouch);
       }
+      // [09.13] 재장전 액션 바인딩 (R 키)
+      if (ReloadAction)
+      {
+         EnhancedInputComponent->BindAction(ReloadAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Reload);
+      }
    }
 }
 
@@ -369,7 +374,7 @@ void ABaruCharacter::Input_Interact()
    }
 
    FHitResult HitResult;
-   if (!PerformLineTrace(HitResult, InteractionTraceDistance, /*bDrawDebug=*/true))
+   if (!PerformLineTrace(HitResult, InteractionTraceDistance, /*bDrawDebug=*/false))
    {
       return;
    }
@@ -404,6 +409,21 @@ void ABaruCharacter::Input_ToggleHeadlight()
       return;
    }
    Server_SetHeadlightOn(!bHeadlightOn);
+}
+
+// [09.13] 재장전 입력 처리 함수 추가
+void ABaruCharacter::Input_Reload()
+{
+   if (bIsDead || Execute_IsDBNO(this))
+   {
+      return;
+   }
+
+   // 장비 컴포넌트를 통해 InputTag.Reload 트리거
+   if (EquipmentComponent)
+   {
+      EquipmentComponent->RequestReloadActiveWeapon();
+   }
 }
 
 bool ABaruCharacter::Server_SetHeadlightOn_Validate(bool bNewOn)

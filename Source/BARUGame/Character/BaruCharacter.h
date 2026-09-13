@@ -327,5 +327,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat")
     float DBNODamageBleedReduction = 15.0f;
     
+    // [09.13] R키 수동 재장전 InputAction 에셋 포인터
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+    TObjectPtr<UInputAction> ReloadAction;
     
+    // [09.13] 수동 재장전 입력 핸들러
+    void Input_Reload();
 };

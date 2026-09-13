@@ -82,6 +82,11 @@ void ABaruWeaponBase::InitializeFromData(
 	
 	// 기존 탄창 설정 보존. 현재 탄약 소모 기능과는 별개.
 	MagazineCapacity = WeaponData->MagazineCapacity;
+	
+	
+	// [09.13] 무기 생성 초기화 시 탄창을 가득 채운 상태로 시작
+	CurrentAmmo = MagazineCapacity;
+	
 
 	ForceNetUpdate();
 }
@@ -93,6 +98,9 @@ void ABaruWeaponBase::GetLifetimeReplicatedProps(
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABaruWeaponBase, MagazineCapacity);
+	
+	// [09.13] 탄약 동기화 레플리케이션 등록
+	DOREPLIFETIME(ABaruWeaponBase, CurrentAmmo);
 }
 
 
@@ -126,4 +134,34 @@ ABaruWeaponBase::GetFireEffectAttachComponent() const
 	}
 
 	return nullptr;
+}
+
+// [09.13] 탄약 소비 로직 (서버 전용)
+bool ABaruWeaponBase::ConsumeAmmo(int32 Amount)
+{
+	if (!HasAuthority() || Amount <= 0 || CurrentAmmo < Amount)
+	{
+		return false;
+	}
+
+	CurrentAmmo -= Amount;
+	OnRep_CurrentAmmo();
+	ForceNetUpdate();
+	return true;
+}
+
+// [09.13] 탄창 완충 로직 (서버 전용)
+void ABaruWeaponBase::RestoreFullAmmo()
+{
+	if (!HasAuthority()) return;
+
+	CurrentAmmo = MagazineCapacity;
+	OnRep_CurrentAmmo();
+	ForceNetUpdate();
+}
+
+// [09.13] 클라이언트 동기화 콜백
+void ABaruWeaponBase::OnRep_CurrentAmmo()
+{
+	OnAmmoChanged.Broadcast(CurrentAmmo, MagazineCapacity);
 }
