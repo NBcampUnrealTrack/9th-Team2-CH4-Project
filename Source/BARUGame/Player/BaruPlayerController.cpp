@@ -84,7 +84,64 @@ void ABaruPlayerController::SetupInputComponent()
         {
             EIC->BindAction(ToggleInventoryAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_ToggleInventory);
         }
+        // [09.13] ESC 바인딩
+        if (MenuAction)
+        {
+            EIC->BindAction(MenuAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_ToggleGameMenu);
+        }
     }
+}
+
+// [09.13] 누락되었던 ESC 입력 핸들러 구현부
+void ABaruPlayerController::Input_ToggleGameMenu()
+{
+    ToggleGameMenu();
+}
+
+// [09.13] 게임 메뉴 오픈 및 종료 토글 로직
+void ABaruPlayerController::ToggleGameMenu()
+{
+    if (!IsLocalController()) return;
+
+    UBaruUIManagerSubsystem* UIManager = ULocalPlayer::GetSubsystem<UBaruUIManagerSubsystem>(GetLocalPlayer());
+    if (!UIManager) return;
+
+    // 1. 이미 메뉴 위젯이 존재하고 활성화되어 있다면 레이어에서 팝(닫기)
+    if (IsValid(ActiveGameMenuWidget))
+    {
+        if (ActiveGameMenuWidget->IsActivated())
+        {
+            UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
+            ActiveGameMenuWidget = nullptr;
+            return;
+        }
+        
+        // 내부 버튼(계속하기 등)이나 BackHandler로 이미 비활성화된 상태라면 포인터 정리
+        ActiveGameMenuWidget = nullptr;
+    }
+
+    // 2. 인벤토리가 열려 있는 상태라면 인벤토리만 닫고 즉시 리턴 (메뉴 창 오픈 방지)
+    if (IsValid(ActiveInventoryWidget))
+    {
+        ToggleInventory();
+        return;
+    }
+
+    // 3. 게임 메뉴 위젯 클래스 검증
+    if (!GameMenuWidgetClass)
+    {
+        BARU_LOG(LogBaruUI, Warning, TEXT("ToggleGameMenu: BP_BaruPlayerController에 GameMenuWidgetClass가 비어 있습니다."));
+        return;
+    }
+
+    // 4. UI Manager를 통해 GameMenu 레이어에 푸시
+    ActiveGameMenuWidget = UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_GameMenu.GetTag(), GameMenuWidgetClass);
+}
+
+// [09.13] IsActivated() 분기로 대체되었으므로 비워두거나 안전용으로 유지
+void ABaruPlayerController::HandleGameMenuDeactivated()
+{
+    ActiveGameMenuWidget = nullptr;
 }
 
 // [추가] 입력 핸들러. 클라에서 실행되며 서버에 요청만 보냄
