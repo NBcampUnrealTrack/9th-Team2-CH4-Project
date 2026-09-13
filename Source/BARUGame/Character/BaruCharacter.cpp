@@ -72,10 +72,10 @@ ABaruCharacter::ABaruCharacter()
    Headlight->SetRelativeLocation(FVector(10.0f, 0.0f, 0.0f));   // 몸에 파묻히지 않게 살짝 앞으로
 
    Headlight->SetIntensityUnits(ELightUnits::Lumens);
-   Headlight->SetIntensity(3000.0f);
-   Headlight->SetAttenuationRadius(2000.0f);   // 20m
-   Headlight->SetInnerConeAngle(18.0f);
-   Headlight->SetOuterConeAngle(34.0f);
+   Headlight->SetIntensity(350.0f);
+   Headlight->SetAttenuationRadius(700.0f);   // 7m
+   Headlight->SetInnerConeAngle(15.0f);
+   Headlight->SetOuterConeAngle(28.0f);
    Headlight->SetCastShadows(true);            // 프레임 떨어지면 BP 에서 끄세요
 
    Headlight->SetVisibility(false);            // 시작은 꺼진 상태
