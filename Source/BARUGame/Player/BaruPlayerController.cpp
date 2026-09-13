@@ -113,6 +113,11 @@ void ABaruPlayerController::ToggleGameMenu()
         {
             UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
             ActiveGameMenuWidget = nullptr;
+            
+            FInputModeGameOnly InputMode;
+            InputMode.SetConsumeCaptureMouseDown(true);
+            SetInputMode(InputMode);
+            SetShowMouseCursor(false);
             return;
         }
         
@@ -136,6 +141,21 @@ void ABaruPlayerController::ToggleGameMenu()
 
     // 4. UI Manager를 통해 GameMenu 레이어에 푸시
     ActiveGameMenuWidget = UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_GameMenu.GetTag(), GameMenuWidgetClass);
+    
+    if (IsValid(ActiveGameMenuWidget))
+    {
+        ActiveGameMenuWidget->OnDeactivated().AddWeakLambda(this, [this]()
+        {
+            ActiveGameMenuWidget = nullptr;
+
+            FInputModeGameOnly InputMode;
+            InputMode.SetConsumeCaptureMouseDown(true);
+            SetInputMode(InputMode);
+            SetShowMouseCursor(false);
+
+            BARU_LOG(LogBaruUI, Log, TEXT("GameMenu Deactivated -> Restored InputModeGameOnly."));
+        });
+    }
 }
 
 // [09.13] IsActivated() 분기로 대체되었으므로 비워두거나 안전용으로 유지
