@@ -21,6 +21,22 @@ public:
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+	
+	// 닉네임 유효성 검증 함수 (한글/영문만 허용, 2~12자)
+	UFUNCTION(BlueprintPure, Category = "BARU|SaveGame|Validation")
+	static bool ValidatePlayerNickname(const FString& InNickname, FText& OutErrorMessage);
+
+	// 메인 유저 프로필 세이브 파일 존재 여부
+	UFUNCTION(BlueprintPure, Category = "BARU|SaveGame")
+	bool DoesProfileExist() const;
+	
+	// 신규 프로필 생성 및 디스크 저장
+	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
+	UBaruSaveGame* CreateNewProfile(const FString& InPlayerName);
+
+	// 현재 프로필의 플레이어 닉네임 반환
+	UFUNCTION(BlueprintPure, Category = "BARU|SaveGame")
+	FString GetActiveProfilePlayerName() const;
 
 	// 세이브 데이터 로드 또는 신규 생성
 	UFUNCTION(BlueprintCallable, Category = "BARU|SaveGame")
@@ -63,6 +79,9 @@ protected:
 
 	FString CurrentSlotName;
 	const int32 UserIndex = 0;
+	
+	// 기본 프로필 고정 메타 슬롯 이름
+	const FString PrimaryProfileSlotName = TEXT("SaveSlot_PrimaryUser");
 	
 private:
 	// 슬롯 이름을 디스크의 실제 .sav 파일 절대 경로로 변환

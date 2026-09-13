@@ -6,9 +6,13 @@
 #include "Components/Button.h"
 #include "Engine/LocalPlayer.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Subsystems/BaruSaveGameSubsystem.h"
 #include "UI/BaruUITags.h"
 #include "UI/GameMenu/BaruGameMenuWidget.h"
 #include "UI/Subsystem/BaruUIManagerSubsystem.h"
+#include "UI/Title/BaruCreateIDWidget.h"
+#include "Engine/GameInstance.h"
+
 
 UBaruTitleWidget::UBaruTitleWidget(
 	const FObjectInitializer& ObjectInitializer)
@@ -72,10 +76,42 @@ void UBaruTitleWidget::NativeOnInitialized()
 
 void UBaruTitleWidget::HandleStartGameClicked()
 {
-	BARU_LOG(LogBaruUI, Log, TEXT("게임 시작 버튼이 클릭되었습니다. 로비 이동을 요청합니다"));
-	
-	BP_OnEnterLobbyRequested();
-	
+	// [09.13] 닉네임 생성 및 프로필 검사 분기
+	UGameInstance* GI = GetGameInstance();
+	UBaruSaveGameSubsystem* SaveSubsystem = GI ? GI->GetSubsystem<UBaruSaveGameSubsystem>() : nullptr;
+
+	if (!SaveSubsystem)
+	{
+		BP_OnEnterLobbyRequested();
+		return;
+	}
+
+	// 1. 세이브 파일이 이미 존재하는 경우 -> 로비 즉시 진입
+	if (SaveSubsystem->DoesProfileExist())
+	{
+		BARU_LOG(LogBaruUI, Log, TEXT("프로필 확인 완료 (%s). 로비로 이동합니다."), *SaveSubsystem->GetActiveProfilePlayerName());
+		BP_OnEnterLobbyRequested();
+		return;
+	}
+
+	// 2. 세이브 파일이 없는 경우 -> 아이디 생성 모달 팝업 띄우기
+	if (!CreateIDWidgetClass)
+	{
+		BARU_LOG(LogBaruUI, Error, TEXT("CreateIDWidgetClass가 할당되지 않았습니다."));
+		return;
+	}
+
+	ULocalPlayer* LocalPlayer = GetOwningLocalPlayer();
+	UBaruUIManagerSubsystem* UIManager = LocalPlayer ? LocalPlayer->GetSubsystem<UBaruUIManagerSubsystem>() : nullptr;
+
+	if (UIManager)
+	{
+		UCommonActivatableWidget* Pushed = UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_Modal.GetTag(), CreateIDWidgetClass);
+		if (UBaruCreateIDWidget* IDWidget = Cast<UBaruCreateIDWidget>(Pushed))
+		{
+			IDWidget->OnIDCreationSuccess.AddUniqueDynamic(this, &UBaruTitleWidget::HandleIDCreationCompleted);
+		}
+	}
 }
 
 void UBaruTitleWidget::HandleOptionsClicked()
@@ -167,4 +203,11 @@ void UBaruTitleWidget::HandleQuitGameClicked()
 		OwningPlayerController,
 		EQuitPreference::Quit,
 		false);
+}
+
+// [09.13] 닉네임 생성 완료 후 로비 전이 콜백
+void UBaruTitleWidget::HandleIDCreationCompleted(const FString& NewID)
+{
+	BARU_LOG(LogBaruUI, Log, TEXT("새 아이디 등록 완료: %s -> 로비로 이동합니다."), *NewID);
+	BP_OnEnterLobbyRequested();
 }

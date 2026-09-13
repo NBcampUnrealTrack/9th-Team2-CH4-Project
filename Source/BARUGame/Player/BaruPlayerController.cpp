@@ -45,6 +45,22 @@ void ABaruPlayerController::BeginPlay()
     SetInputMode(InputModeData);
     SetShowMouseCursor(false);
     
+    // [09.13] 세이브 파일에서 확정된 닉네임을 PlayerState에 전달
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UBaruSaveGameSubsystem* SaveSubsystem = GI->GetSubsystem<UBaruSaveGameSubsystem>())
+        {
+            const FString SavedName = SaveSubsystem->GetActiveProfilePlayerName();
+            if (!SavedName.IsEmpty())
+            {
+                if (ABaruPlayerState* PS = GetPlayerState<ABaruPlayerState>())
+                {
+                    PS->Server_UpdateNickname(SavedName);
+                }
+            }
+        }
+    }
+    
     BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
     
 }

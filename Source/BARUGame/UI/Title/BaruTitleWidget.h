@@ -9,6 +9,7 @@
 
 class UBaruGameMenuWidget;
 class UButton;
+class UBaruCreateIDWidget;
 
 /**
  * 게임 실행 후 처음 표시되는 타이틀 화면의 C++ 기반 클래스
@@ -58,6 +59,11 @@ protected:
 		BlueprintImplementableEvent, Category = "BARU|UI|Title")
 	void BP_OnEnterLobbyRequested();
 	
+	// [09.13] 닉네임 생성 핸들러
+	UFUNCTION()
+	void HandleIDCreationCompleted(const FString& NewID);
+	
+	
 protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Button_StartGame;
@@ -78,4 +84,8 @@ protected:
 		BlueprintReadOnly,
 		Category = "BARU|UI|Title")
 	TSubclassOf<UBaruGameMenuWidget> OptionsWidgetClass;
+	
+	// [09.13] Modale로 띄울 아이디 생성 위젯 클래스
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI|Title")
+	TSubclassOf<UBaruCreateIDWidget> CreateIDWidgetClass;
 };
