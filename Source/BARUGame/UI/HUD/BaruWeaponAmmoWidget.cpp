@@ -110,12 +110,12 @@ void UBaruWeaponAmmoWidget::UpdateWeaponDisplay(ABaruWeaponBase* Weapon)
 {
     if (!IsValid(Weapon) || !CachedEquipmentComp.IsValid())
     {
-        if (Text_WeaponName) Text_WeaponName->SetText(FText::FromString(TEXT("비어 있음")));
-        if (Text_Ammo) Text_Ammo->SetText(FText::FromString(TEXT("- / -")));
+        if (Text_WeaponName) Text_WeaponName->SetVisibility(ESlateVisibility::Collapsed);
+        if (Text_Ammo) Text_Ammo->SetVisibility(ESlateVisibility::Collapsed);
         if (Img_WeaponIcon) Img_WeaponIcon->SetVisibility(ESlateVisibility::Collapsed);
         return;
     }
-
+    
     // 활성 슬롯에 장착된 아이템 인스턴스 조회
     const EBaruEquipmentSlot ActiveSlot = CachedEquipmentComp->GetActiveWeaponSlot(); 
     UBaruItemInstance* ItemInstance = CachedEquipmentComp->GetEquippedWeaponItem(ActiveSlot);
@@ -131,6 +131,7 @@ void UBaruWeaponAmmoWidget::UpdateWeaponDisplay(ABaruWeaponBase* Weapon)
             if (Text_WeaponName)
             {
                 Text_WeaponName->SetText(ItemData->ItemName);
+                Text_WeaponName->SetVisibility(ESlateVisibility::HitTestInvisible);
             }
 
             if (Img_WeaponIcon)
@@ -150,13 +151,24 @@ void UBaruWeaponAmmoWidget::UpdateWeaponDisplay(ABaruWeaponBase* Weapon)
     }
 
     // DataTable 조회 실패 시 기본 Fallback
-    if (Text_WeaponName) Text_WeaponName->SetText(FText::FromString(TEXT("무기"))); 
+    if (Text_WeaponName) 
+    {
+        Text_WeaponName->SetText(FText::FromString(TEXT("무기")));
+        Text_WeaponName->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
     if (Img_WeaponIcon) Img_WeaponIcon->SetVisibility(ESlateVisibility::Collapsed);
 }
 
 void UBaruWeaponAmmoWidget::UpdateAmmoDisplay(int32 Current, int32 Max)
 {
     if (!Text_Ammo) return;
+
+    // 무기가 없거나 장착 해제된 경우 숨김
+    if (!CurrentBoundWeapon.IsValid())
+    {
+        Text_Ammo->SetVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
 
     const FText AmmoText = FText::Format(FText::FromString(TEXT("{0} / {1}")), FText::AsNumber(Current), FText::AsNumber(Max));
     Text_Ammo->SetText(AmmoText);
