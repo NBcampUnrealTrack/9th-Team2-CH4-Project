@@ -10,6 +10,31 @@
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "BaruCharacter.generated.h"     
 
+// [09.13] 총기 반동 데이터 구조체
+USTRUCT(BlueprintType)
+struct FBaruRecoilData
+{
+    GENERATED_BODY()
+
+    // 상향(Pitch) 반동 각도 범위 (최소~최대)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil", meta = (ClampMin = "0.0"))
+    float MinPitchRecoil = 0.8f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil", meta = (ClampMin = "0.0"))
+    float MaxPitchRecoil = 1.4f;
+
+    // 좌우(Yaw) 반동 각도 범위 (-좌, +우)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil")
+    float MinYawRecoil = -0.3f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil")
+    float MaxYawRecoil = 0.5f;
+
+    // 반동 회복 속도 (초당 복구되는 각도, 0이면 회복 안 함)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil", meta = (ClampMin = "0.0"))
+    float RecoilRecoverySpeed = 10.0f;
+};
+
 // 전방 선언 
 class UCameraComponent;
 class UInputMappingContext;
@@ -31,6 +56,13 @@ class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInter
 
 public:
     ABaruCharacter();
+    
+    // [09.13] 반동 회복 처리를 위한 Tick 오버라이드
+    virtual void Tick(float DeltaSeconds) override;
+
+    // [09.13] 사격 시 화면 반동 트리거 함수
+    UFUNCTION(BlueprintCallable, Category = "BARU|Combat")
+    void ApplyRecoil(const FBaruRecoilData& InRecoilData);
     
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override; // [추가]
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;                             // [추가]
@@ -306,8 +338,6 @@ private:
     UPROPERTY()
     TObjectPtr<AActor> LastKiller; // [추가] 사망처리를 다음 틱으로 넘길때 임시보관
     
-    
-    // 09.11 DBNO 세부 로직 추가
 public:
     // [추가] 다운 상태에서 추가 피격을 받았을 때 호출 (출혈시간 단축)
     void NotifyHitWhileDBNO(float DamageAmount, AActor* Attacker);
@@ -355,4 +385,9 @@ protected:
     void OnHealthRegenDelayExpired();
     void TickHealthRegen();
     void StopHealthRegen();
+    
+private:
+    // [09.13] Early-Out 반동 복구 상태 변수
+    float RemainingRecoilRecoveryPitch = 0.0f;
+    float CurrentRecoilRecoverySpeed = 0.0f;
 };

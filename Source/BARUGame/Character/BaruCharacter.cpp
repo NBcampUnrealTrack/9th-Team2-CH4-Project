@@ -1365,3 +1365,47 @@ void ABaruCharacter::StopHealthRegen()
         World->GetTimerManager().ClearTimer(HealthRegenTickTimerHandle);
     }
 }
+
+// [09.13] Early-Out 구조의 반동 회복 틱
+void ABaruCharacter::Tick(float DeltaSeconds)
+{
+   Super::Tick(DeltaSeconds);
+
+   // 복구할 반동이 없거나 로컬 플레이어가 아니라면 1클럭 만에 즉시 탈출
+   if (RemainingRecoilRecoveryPitch <= 0.0f || !IsLocallyControlled())
+   {
+      return;
+   }
+
+   const float RecoveryDelta = FMath::Min(RemainingRecoilRecoveryPitch, CurrentRecoilRecoverySpeed * DeltaSeconds);
+   AddControllerPitchInput(RecoveryDelta);
+   RemainingRecoilRecoveryPitch -= RecoveryDelta;
+
+   if (RemainingRecoilRecoveryPitch <= 0.0f)
+   {
+      RemainingRecoilRecoveryPitch = 0.0f;
+   }
+}
+
+// [09.13] 사격 시 카메라 킥 및 복구량 계산
+void ABaruCharacter::ApplyRecoil(const FBaruRecoilData& InRecoilData)
+{
+   if (!IsLocallyControlled() || !Controller)
+   {
+      return;
+   }
+
+   const float PitchKick = FMath::RandRange(InRecoilData.MinPitchRecoil, InRecoilData.MaxPitchRecoil);
+   const float YawKick = FMath::RandRange(InRecoilData.MinYawRecoil, InRecoilData.MaxYawRecoil);
+
+   // 카메라 즉각 킥 (-Pitch: 상향 앙각, Yaw: 좌우 수평 흔들림)
+   AddControllerPitchInput(-PitchKick);
+   AddControllerYawInput(YawKick);
+
+   // 복구 속도가 0보다 클 때만 복구 수치 누적
+   if (InRecoilData.RecoilRecoverySpeed > 0.0f)
+   {
+      RemainingRecoilRecoveryPitch += PitchKick;
+      CurrentRecoilRecoverySpeed = InRecoilData.RecoilRecoverySpeed;
+   }
+}

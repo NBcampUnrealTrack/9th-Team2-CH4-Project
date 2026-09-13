@@ -108,14 +108,10 @@ void UBaruGA_FireHitscan::PerformFire()
     const FVector FireDir = FMath::VRandCone(ViewRot.Vector(), SpreadHalfAngleRad);
     const FVector TraceEnd = ViewLoc + (FireDir * MaxRange);
 
-    // 로컬 화면 반동(FBaruRecoilData 만들어지면 주석 해제)
-    // if (ABaruCharacter* BaruChar = GetBaruCharacterFromActorInfo())
-    // {
-    //     if (BaruChar->IsLocallyControlled())
-    //     {
-    //         BaruChar->ApplyRecoil(RecoilData);
-    //     }
-    // }
+    if (BaruChar && BaruChar->IsLocallyControlled())
+    {
+        BaruChar->ApplyRecoil(RecoilData);
+    }
     
     // 라인트레이스 및 충돌 연산
     FCollisionQueryParams Params(TEXT("FireHitscanTrace"), true, AvatarPawn);
