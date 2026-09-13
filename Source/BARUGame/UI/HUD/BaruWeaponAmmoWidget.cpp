@@ -16,6 +16,12 @@ void UBaruWeaponAmmoWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
+    // 생성 즉시 기본 상태를 숨김(Collapsed)으로 초기화하여 더미 위젯 노출 방지
+    SetVisibility(ESlateVisibility::Collapsed);
+    if (Text_WeaponName) Text_WeaponName->SetVisibility(ESlateVisibility::Collapsed);
+    if (Text_Ammo) Text_Ammo->SetVisibility(ESlateVisibility::Collapsed);
+    if (Img_WeaponIcon) Img_WeaponIcon->SetVisibility(ESlateVisibility::Collapsed);
+
     InitEquipmentBinding();
     BindToActiveWeapon();
 }
@@ -52,11 +58,14 @@ void UBaruWeaponAmmoWidget::InitEquipmentBinding()
         if (CachedEquipmentComp.IsValid())
         {
             CachedEquipmentComp->OnEquipmentUpdated.AddUniqueDynamic(this, &UBaruWeaponAmmoWidget::HandleEquipmentUpdated);
+            
+            // 컴포넌트를 찾은 즉시 무기 상태를 반영하도록 호출
+            BindToActiveWeapon();
             return;
         }
     }
 
-    // 복제 지연으로 Pawn이나 컴포넌트가 아직 준비되지 않았다면 0.1초 뒤 재시도
+    // 복제 지연으로 아직 준비되지 않았다면 0.1초 뒤 재시도
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().SetTimer(RetryInitTimerHandle, this, &UBaruWeaponAmmoWidget::InitEquipmentBinding, 0.1f, false);
@@ -73,13 +82,18 @@ void UBaruWeaponAmmoWidget::BindToActiveWeapon()
     if (!CachedEquipmentComp.IsValid())
     {
         InitEquipmentBinding();
-        if (!CachedEquipmentComp.IsValid()) return;
+        if (!CachedEquipmentComp.IsValid())
+        {
+            UpdateWeaponDisplay(nullptr);
+            return;
+        }
     }
 
     ABaruWeaponBase* NewWeapon = CachedEquipmentComp->GetActiveWeapon();
 
-    // 동일한 무기를 계속 쥐고 있다면 바인딩 갱신 생략
-    if (NewWeapon == CurrentBoundWeapon.Get())
+    // 무기를 들고 있고 기존과 동일한 무기인 경우에만 스킵
+    // (맨손인 NewWeapon == nullptr 상태에서는 아래 초기화 로직을 반드시 통과해야 함)
+    if (NewWeapon != nullptr && NewWeapon == CurrentBoundWeapon.Get())
     {
         return;
     }
@@ -95,7 +109,6 @@ void UBaruWeaponAmmoWidget::BindToActiveWeapon()
 
     if (IsValid(NewWeapon))
     {
-        // 새 무기 이벤트 바인딩
         NewWeapon->OnAmmoChanged.AddUniqueDynamic(this, &UBaruWeaponAmmoWidget::HandleAmmoChanged);
         UpdateAmmoDisplay(NewWeapon->GetCurrentAmmo(), NewWeapon->GetMagazineCapacity());
     }
@@ -108,14 +121,19 @@ void UBaruWeaponAmmoWidget::HandleAmmoChanged(int32 CurrentAmmo, int32 MaxCapaci
 
 void UBaruWeaponAmmoWidget::UpdateWeaponDisplay(ABaruWeaponBase* Weapon)
 {
+    // 맨손 상태이거나 유효하지 않은 무기인 경우 -> 배경 박스 및 모든 자식 위젯을 숨김
     if (!IsValid(Weapon) || !CachedEquipmentComp.IsValid())
     {
+        SetVisibility(ESlateVisibility::Collapsed);
         if (Text_WeaponName) Text_WeaponName->SetVisibility(ESlateVisibility::Collapsed);
         if (Text_Ammo) Text_Ammo->SetVisibility(ESlateVisibility::Collapsed);
         if (Img_WeaponIcon) Img_WeaponIcon->SetVisibility(ESlateVisibility::Collapsed);
         return;
     }
-    
+
+    // 무기가 존재하므로 위젯 전체를 표시
+    SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+
     // 활성 슬롯에 장착된 아이템 인스턴스 조회
     const EBaruEquipmentSlot ActiveSlot = CachedEquipmentComp->GetActiveWeaponSlot(); 
     UBaruItemInstance* ItemInstance = CachedEquipmentComp->GetEquippedWeaponItem(ActiveSlot);
@@ -163,7 +181,6 @@ void UBaruWeaponAmmoWidget::UpdateAmmoDisplay(int32 Current, int32 Max)
 {
     if (!Text_Ammo) return;
 
-    // 무기가 없거나 장착 해제된 경우 숨김
     if (!CurrentBoundWeapon.IsValid())
     {
         Text_Ammo->SetVisibility(ESlateVisibility::Collapsed);
@@ -172,8 +189,6 @@ void UBaruWeaponAmmoWidget::UpdateAmmoDisplay(int32 Current, int32 Max)
 
     const FText AmmoText = FText::Format(FText::FromString(TEXT("{0} / {1}")), FText::AsNumber(Current), FText::AsNumber(Max));
     Text_Ammo->SetText(AmmoText);
-
-    // 0발일 경우 빨간색 경고 색상 적용
     Text_Ammo->SetColorAndOpacity(Current <= 0 ? EmptyAmmoColor : NormalAmmoColor); 
     Text_Ammo->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
