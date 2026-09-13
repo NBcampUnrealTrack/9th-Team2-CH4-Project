@@ -333,4 +333,26 @@ protected:
     
     // [09.13] 수동 재장전 입력 핸들러
     void Input_Reload();
+    
+    
+    // [09.13] 자연 회복 파이프라인 설정 및 타이머 핸들
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float HealthRegenDelay = 10.0f;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float MaxRegenHealth = 80.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float HealthRegenRatePerSecond = 5.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float HealthRegenTickInterval = 0.5f;
+
+    FTimerHandle HealthRegenDelayTimerHandle;
+    FTimerHandle HealthRegenTickTimerHandle;
+
+    void StartHealthRegenDelay();
+    void OnHealthRegenDelayExpired();
+    void TickHealthRegen();
+    void StopHealthRegen();
 };

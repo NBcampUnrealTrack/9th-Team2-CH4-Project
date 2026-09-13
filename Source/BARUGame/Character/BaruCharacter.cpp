@@ -173,6 +173,9 @@ void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& Change
 
 void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+   // [09.13] 타이머 메모리 정리
+   StopHealthRegen();
+   
    if (UAbilitySystemComponent* ASC = CachedASC.Get())
    {
       ASC->GetGameplayAttributeValueChangeDelegate(
@@ -726,6 +729,9 @@ void ABaruCharacter::EnterDBNO(AActor* DownCauser)
    {
       return;
    }
+   
+   // [09.13] 다운 시 회복 즉시 중단
+   StopHealthRegen();
 
    ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
    if (!BaruPS || BaruPS->IsDBNO())
@@ -899,6 +905,9 @@ void ABaruCharacter::Die_Implementation(AActor* Killer)
    // 09.11 DBNO 세부 로직 추가 및 정리
    if (bIsDead || !HasAuthority()) return;
 
+   // [09.13] 사망 시 회복 즉시 중단
+   StopHealthRegen();
+   
    bIsDead = true;
    CancelPendingInteraction();
    LastKiller = Killer;
@@ -1068,6 +1077,13 @@ float ABaruCharacter::GetSuppressionRatio_Implementation() const
 
 void ABaruCharacter::ApplyCombatDamage_Implementation(float DamageAmount, const FHitResult& HitResult, AActor* DamageCauser, AController* InstigatedBy)
 {
+   // [09.13] 피격 시 기존 회복을 중단하고 10초 대기 타이머 리셋
+   if (HasAuthority() && !bIsDead && !Execute_IsDBNO(this))
+   {
+      StartHealthRegenDelay();
+   }
+   
+   
    // 여기서 체력을 직접 깎으면 GAS 를 우회하게 되어 서버/클라 값이 어긋남
    // 데미지는 반드시 GameplayEffect(BaruDamageExecutionCalc)로만 적용하도록 해야함
    // 이 함수는 피격 리액션 몽타주 / 히트 사운드 같은 연출 훅으로만 사용함
@@ -1272,4 +1288,80 @@ UAbilitySystemComponent* ABaruCharacter::GetAbilitySystemComponent() const
       return BaruPS->GetAbilitySystemComponent();
    }
    return nullptr;
+}
+
+// [09.13] 체력 자연 회복 로직 추가
+// 10초 대기 타이머 시작 (피격마다 호출되어 타이머가 갱신됨)
+void ABaruCharacter::StartHealthRegenDelay()
+{
+    if (!HasAuthority()) return;
+
+    StopHealthRegen();
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            HealthRegenDelayTimerHandle,
+            this,
+            &ABaruCharacter::OnHealthRegenDelayExpired,
+            HealthRegenDelay,
+            false
+        );
+    }
+}
+
+// 10초간 추가 피격이 없었을 때 회복 틱 시작
+void ABaruCharacter::OnHealthRegenDelayExpired()
+{
+    if (!HasAuthority() || bIsDead || Execute_IsDBNO(this)) return;
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            HealthRegenTickTimerHandle,
+            this,
+            &ABaruCharacter::TickHealthRegen,
+            HealthRegenTickInterval,
+            true
+        );
+    }
+}
+
+// 회복 틱: 최대 80.0f 한도까지 체력 점진 회복
+void ABaruCharacter::TickHealthRegen()
+{
+    if (!HasAuthority() || bIsDead || Execute_IsDBNO(this))
+    {
+        StopHealthRegen();
+        return;
+    }
+
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC) return;
+
+    const float CurrentHealth = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetHealthAttribute());
+    const float MaxHealth = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
+    const float TargetLimit = FMath::Min(MaxRegenHealth, MaxHealth);
+
+    // 80 이상 도달 시 회복 종료
+    if (CurrentHealth >= TargetLimit)
+    {
+        StopHealthRegen();
+        return;
+    }
+
+    const float HealAmount = HealthRegenRatePerSecond * HealthRegenTickInterval;
+    const float NewHealth = FMath::Min(CurrentHealth + HealAmount, TargetLimit);
+
+    ASC->SetNumericAttributeBase(UBaruCoreAttributeSet::GetHealthAttribute(), NewHealth);
+}
+
+// 모든 회복 타이머 초기화
+void ABaruCharacter::StopHealthRegen()
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(HealthRegenDelayTimerHandle);
+        World->GetTimerManager().ClearTimer(HealthRegenTickTimerHandle);
+    }
 }
