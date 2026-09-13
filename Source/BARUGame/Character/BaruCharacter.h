@@ -390,4 +390,57 @@ private:
     // [09.13] Early-Out 반동 복구 상태 변수
     float RemainingRecoilRecoveryPitch = 0.0f;
     float CurrentRecoilRecoverySpeed = 0.0f;
+
+    
+public:
+    // [09.13] 조준(ADS) 집중 상태 온/오프 (GAS Ability 및 캐릭터 직접 입력 공용)
+    UFUNCTION(BlueprintCallable, Category = "BARU|Camera")
+    void SetAiming(bool bNewAiming);
+
+    UFUNCTION(BlueprintPure, Category = "BARU|Camera")
+    bool IsAiming() const { return bIsAiming; }
+  
+protected:
+    // =========================================================================
+    // 조준(ADS) & 호러 터널비전 연출 파라미터
+    // =========================================================================
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float DefaultFOV = 90.0f;
+
+    // 왜곡이 생기지 않도록 살짝만 축소 (78~80도 권장)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimFOV = 78.0f;
+
+    // 평상시 외곽 어두움 -> 조준 시 짙은 터널 비전
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float DefaultVignette = 0.35f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimVignette = 0.75f;
+
+    // 조준 시 렌즈 외곽 색수차 왜곡 (공포/어지러움 극대화)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float DefaultFringe = 0.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimFringe = 1.5f;
+
+    // 줌 및 후처리 보간 속도
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimInterpSpeed = 12.0f;
+
+    // 우클릭 조준 InputAction 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+    TObjectPtr<UInputAction> AimAction;
+
+    void Input_AimStart();
+    void Input_AimStop();
+
+private:
+    bool bIsAiming = false;
+    float CurrentTargetFOV = 90.0f;
+    float CurrentTargetVignette = 0.35f;
+    float CurrentTargetFringe = 0.0f;
+
+    void UpdateAimingEffects(float DeltaSeconds);
 };

@@ -51,16 +51,13 @@ void UBaruGA_AimDownSights::ActivateAbility(
         );
     }
 
-    // 2. 로컬 화면 카메라 FOV 변경 연동 (클라이언트/호스트 즉시 반영)
-    // if (ABaruCharacter* Character = GetBaruCharacterFromActorInfo())
-    // {
-    //     if (Character->IsLocallyControlled())
-    //     {
-    //         Character->SetTargetCameraFOV(AimTargetFOV);
-    //     }
-    // }
-    //
-    // BARU_NET_LOG(GetAvatarActorFromActorInfo(), LogBaruCombat, Verbose, TEXT("AimDownSights Activated. TargetFOV: %.1f"), AimTargetFOV);
+    if (ABaruCharacter* Character = GetBaruCharacterFromActorInfo())
+    {
+        if (Character->IsLocallyControlled())
+        {
+            Character->SetAiming(true);
+        }
+    }
 }
 
 void UBaruGA_AimDownSights::EndAbility(
@@ -77,14 +74,13 @@ void UBaruGA_AimDownSights::EndAbility(
         ActiveAimingEffectHandle.Invalidate();
     }
 
-    // 2. 기본 시야각(90)으로 복구
-    // if (ABaruCharacter* Character = GetBaruCharacterFromActorInfo())
-    // {
-    //     if (Character->IsLocallyControlled())
-    //     {
-    //         Character->ResetCameraFOV();
-    //     }
-    // }
+    if (ABaruCharacter* Character = GetBaruCharacterFromActorInfo())
+    {
+        if (Character->IsLocallyControlled())
+        {
+            Character->SetAiming(false);
+        }
+    }
 
     BARU_NET_LOG(GetAvatarActorFromActorInfo(), LogBaruCombat, Verbose, TEXT("AimDownSights Deactivated. Reset FOV."));
 

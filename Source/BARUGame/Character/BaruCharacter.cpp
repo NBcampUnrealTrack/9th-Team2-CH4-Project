@@ -33,7 +33,7 @@
 
 ABaruCharacter::ABaruCharacter()
 {
-    PrimaryActorTick.bCanEverTick = true;
+   PrimaryActorTick.bCanEverTick = true;
    bReplicates = true;
    SetReplicateMovement(true);
    
@@ -43,6 +43,13 @@ ABaruCharacter::ABaruCharacter()
     FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, CameraEyeHeight)); // [수정] 60.0f 하드코딩제거
     FollowCamera->bUsePawnControlRotation = true; // 마우스 회전에 따라 카메라 회전
 
+   // [09.13] 카메라 렌더링 후처리 오버라이드 활성화(조준 기능)
+   FollowCamera->PostProcessBlendWeight = 1.0f;
+   FollowCamera->PostProcessSettings.bOverride_VignetteIntensity = true;
+   FollowCamera->PostProcessSettings.VignetteIntensity = DefaultVignette;
+   FollowCamera->PostProcessSettings.bOverride_SceneFringeIntensity = true;
+   FollowCamera->PostProcessSettings.SceneFringeIntensity = DefaultFringe;
+   
     Mesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Mesh1P"));
 
    
@@ -285,6 +292,13 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
          EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_Fire);
          EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_StopFire);
          EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Canceled,  this, &ABaruCharacter::Input_StopFire);
+      }
+      // [09.13] 조준 액션 바인딩
+      if (AimAction)
+      {
+         EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_AimStart);
+         EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_AimStop);
+         EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Canceled,  this, &ABaruCharacter::Input_AimStop);
       }
 
       // ★[추가 09.08] 무기 슬롯 전환
@@ -1382,20 +1396,27 @@ void ABaruCharacter::Tick(float DeltaSeconds)
 {
    Super::Tick(DeltaSeconds);
 
-   // 복구할 반동이 없거나 로컬 플레이어가 아니라면 1클럭 만에 즉시 탈출
-   if (RemainingRecoilRecoveryPitch <= 0.0f || !IsLocallyControlled())
+   // 로컬 클라이언트만 연산 (서버 및 원격 프록시 스킵)
+   if (!IsLocallyControlled())
    {
       return;
    }
-
-   const float RecoveryDelta = FMath::Min(RemainingRecoilRecoveryPitch, CurrentRecoilRecoverySpeed * DeltaSeconds);
-   AddControllerPitchInput(RecoveryDelta);
-   RemainingRecoilRecoveryPitch -= RecoveryDelta;
-
-   if (RemainingRecoilRecoveryPitch <= 0.0f)
+   
+   // 1. 총기 반동 회복 (남은 반동이 있을 때만 가산)
+   if (RemainingRecoilRecoveryPitch > 0.0f)
    {
-      RemainingRecoilRecoveryPitch = 0.0f;
+      const float RecoveryDelta = FMath::Min(RemainingRecoilRecoveryPitch, CurrentRecoilRecoverySpeed * DeltaSeconds);
+      AddControllerPitchInput(RecoveryDelta);
+      RemainingRecoilRecoveryPitch -= RecoveryDelta;
+
+      if (RemainingRecoilRecoveryPitch <= 0.0f)
+      {
+         RemainingRecoilRecoveryPitch = 0.0f;
+      }
    }
+
+   // 2. 조준 집중 연출 보간 (FOV, 터널비전 비네팅, 색수차)
+   UpdateAimingEffects(DeltaSeconds);
 }
 
 // [09.13] 사격 시 카메라 킥 및 복구량 계산
@@ -1418,5 +1439,66 @@ void ABaruCharacter::ApplyRecoil(const FBaruRecoilData& InRecoilData)
    {
       RemainingRecoilRecoveryPitch += PitchKick;
       CurrentRecoilRecoverySpeed = InRecoilData.RecoilRecoverySpeed;
+   }
+}
+
+// [09.13] 조준 기능 추가
+void ABaruCharacter::Input_AimStart()
+{
+   if (bIsDead || Execute_IsDBNO(this)) return;
+   SetAiming(true);
+}
+
+void ABaruCharacter::Input_AimStop()
+{
+   SetAiming(false);
+}
+
+void ABaruCharacter::SetAiming(bool bNewAiming)
+{
+   bIsAiming = bNewAiming;
+   CurrentTargetFOV = bIsAiming ? AimFOV : DefaultFOV;
+   CurrentTargetVignette = bIsAiming ? AimVignette : DefaultVignette;
+   CurrentTargetFringe = bIsAiming ? AimFringe : DefaultFringe;
+}
+
+void ABaruCharacter::UpdateAimingEffects(float DeltaSeconds)
+{
+   if (!FollowCamera)
+   {
+      return;
+   }
+
+   // FOV 보간 (목표값 오차 0.05도 이내 도달 시 연산 중단)
+   const float CurrentFOV = FollowCamera->FieldOfView;
+   if (!FMath::IsNearlyEqual(CurrentFOV, CurrentTargetFOV, 0.05f))
+   {
+      FollowCamera->SetFieldOfView(FMath::FInterpTo(CurrentFOV, CurrentTargetFOV, DeltaSeconds, AimInterpSpeed));
+   }
+   else if (CurrentFOV != CurrentTargetFOV)
+   {
+      FollowCamera->SetFieldOfView(CurrentTargetFOV);
+   }
+
+   // 터널비전 비네팅 보간 (오차 0.005 이내 도달 시 연산 중단)
+   float& CurrentVignette = FollowCamera->PostProcessSettings.VignetteIntensity;
+   if (!FMath::IsNearlyEqual(CurrentVignette, CurrentTargetVignette, 0.005f))
+   {
+      CurrentVignette = FMath::FInterpTo(CurrentVignette, CurrentTargetVignette, DeltaSeconds, AimInterpSpeed);
+   }
+   else if (CurrentVignette != CurrentTargetVignette)
+   {
+      CurrentVignette = CurrentTargetVignette;
+   }
+
+   // 렌즈 외곽 색수차 왜곡 보간 (오차 0.005 이내 도달 시 연산 중단)
+   float& CurrentFringe = FollowCamera->PostProcessSettings.SceneFringeIntensity;
+   if (!FMath::IsNearlyEqual(CurrentFringe, CurrentTargetFringe, 0.005f))
+   {
+      CurrentFringe = FMath::FInterpTo(CurrentFringe, CurrentTargetFringe, DeltaSeconds, AimInterpSpeed);
+   }
+   else if (CurrentFringe != CurrentTargetFringe)
+   {
+      CurrentFringe = CurrentTargetFringe;
    }
 }
