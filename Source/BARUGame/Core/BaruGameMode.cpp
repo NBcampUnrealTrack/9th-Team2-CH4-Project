@@ -11,6 +11,9 @@
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "BaruLog.h"
+#include "GameFramework/PlayerStart.h"
+#include "AbilitySystemComponent.h"
+#include "GameplayTags/BaruGameplayTags.h"
 
 ABaruGameMode::ABaruGameMode()
 {
@@ -40,6 +43,27 @@ void ABaruGameMode::BeginPlay()
     // 인게임 진입 즉시 탐사 상태로 전환 및 레이드 타이머 시작
     SetMatchPhase(EBaruMatchState::InProgress);
     StartRaidTimer();
+}
+
+void ABaruGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+    Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+
+    if (!CachedBaruGameState)
+    {
+        CachedBaruGameState = GetGameState<ABaruGameState>();
+    }
+
+    if (CachedBaruGameState)
+    {
+        const EBaruMatchState CurrentState = CachedBaruGameState->GetMatchState();
+        if (CurrentState == EBaruMatchState::Extraction || CurrentState == EBaruMatchState::PostGame)
+        {
+            ErrorMessage = TEXT("MATCH_ALREADY_ENDED");
+            BARU_LOG(LogBaruSession, Warning, TEXT("PreLogin 거부: 레이드가 이미 종료/탈출 단계입니다."));
+            return;
+        }
+    }
 }
 
 void ABaruGameMode::PostLogin(APlayerController* NewPlayer)
@@ -93,6 +117,39 @@ void ABaruGameMode::PostLogin(APlayerController* NewPlayer)
                 }
                 DisconnectedSnapshots.Remove(IdStr);
             }
+        }
+        else
+        {
+            // 신규 중도 난입자: 인벤토리/스탯 초기화 및 스폰 보장
+            NewPS->ResetPlayerStatusAndInventory();
+
+            if (!NewPlayer->GetPawn())
+            {
+                RestartPlayer(NewPlayer);
+            }
+
+            // 스폰 직후 3초 무적 부여 (난입 즉사 방지)
+            if (APawn* SpawnedPawn = NewPlayer->GetPawn())
+            {
+                if (ABaruCharacter* BaruChar = Cast<ABaruCharacter>(SpawnedPawn))
+                {
+                    if (UAbilitySystemComponent* ASC = BaruChar->GetAbilitySystemComponent())
+                    {
+                        ASC->AddLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+
+                        FTimerHandle ImmuneTimerHandle;
+                        GetWorldTimerManager().SetTimer(ImmuneTimerHandle, [ASC]()
+                        {
+                            if (IsValid(ASC))
+                            {
+                                ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+                            }
+                        }, 3.0f, false);
+                    }
+                }
+            }
+
+            BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("New Join-in-progress Player Initialized with 3s Immunity"));
         }
     }
 
@@ -679,4 +736,53 @@ void ABaruGameMode::OnMonsterDied(ABaruMonsterCharacter* Monster, AActor* Killer
             CachedBaruGameState->Multicast_BroadcastNotification(FText::FromString(TEXT("ALL HOSTILES ELIMINATED")), 5.0f);
         }
     }
+}
+
+// 살아있는 팀원과 가장 가깝고 안전한 PlayerStart 탐색
+AActor* ABaruGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+    TArray<AActor*> FoundStarts;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), FoundStarts);
+
+    if (FoundStarts.Num() == 0)
+    {
+        return Super::ChoosePlayerStart_Implementation(Player);
+    }
+
+    // 살아있는 다른 팀원 찾기
+    APawn* LivingTeammate = nullptr;
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (PC && PC != Player && PC->GetPawn())
+        {
+            ABaruCharacter* Char = Cast<ABaruCharacter>(PC->GetPawn());
+            if (Char && !Char->IsDead_Implementation())
+            {
+                LivingTeammate = Char;
+                break;
+            }
+        }
+    }
+
+    if (!LivingTeammate)
+    {
+        return FoundStarts[0];
+    }
+
+    AActor* BestStart = FoundStarts[0];
+    float BestDistSq = MAX_flt;
+
+    for (AActor* StartActor : FoundStarts)
+    {
+        const float DistSq = FVector::DistSquared(StartActor->GetActorLocation(), LivingTeammate->GetActorLocation());
+        // 팀원과 완전히 겹치지 않는(최소 2.5m 이상) 동시에 가장 가까운 스폰 위치 선정
+        if (DistSq > FMath::Square(250.0f) && DistSq < BestDistSq)
+        {
+            BestDistSq = DistSq;
+            BestStart = StartActor;
+        }
+    }
+
+    return BestStart;
 }

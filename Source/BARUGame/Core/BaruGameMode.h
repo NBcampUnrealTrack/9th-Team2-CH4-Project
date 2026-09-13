@@ -36,6 +36,7 @@ public:
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void BeginPlay() override;
+	virtual void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
 
@@ -80,9 +81,10 @@ public:
 	void RegisterExpectedSpawns(int32 ExpectedCount);
 
 protected:
-	void CheckTeamWipe();
 	virtual void UpdateAlivePlayerCount();
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 
+	void CheckTeamWipe();
 	void StartRaidTimer();
 	void UpdateRaidCountdown();
 	void OnRaidTimeout();

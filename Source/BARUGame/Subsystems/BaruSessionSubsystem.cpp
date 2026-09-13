@@ -168,6 +168,7 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
 	LastSessionSettings->bAllowJoinInProgress = true;
 	LastSessionSettings->bAllowJoinViaPresence = true;
 	
+	LastSessionSettings->bAllowInvites = true;
 	LastSessionSettings->bAllowJoinViaPresenceFriendsOnly = false;
 
 	LastSessionSettings->bShouldAdvertise = true;

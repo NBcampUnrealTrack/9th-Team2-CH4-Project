@@ -34,6 +34,9 @@ void ABaruLobbyGameMode::PostLogin(APlayerController* NewPlayer)
         
         if (ABaruPlayerState* PS = NewPlayer->GetPlayerState<ABaruPlayerState>())
         {
+            // 이전 판 사망 잔재(bIsDead, DBNO, 남은 소지품) 전량 리셋 및 레디 초기화
+            PS->ResetPlayerStatusAndInventory();
+
             PS->OnReadyStatusChanged.RemoveDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
             PS->OnReadyStatusChanged.AddDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
         }
