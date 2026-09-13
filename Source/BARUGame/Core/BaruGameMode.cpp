@@ -43,6 +43,8 @@ void ABaruGameMode::BeginPlay()
     // 인게임 진입 즉시 탐사 상태로 전환 및 레이드 타이머 시작
     SetMatchPhase(EBaruMatchState::InProgress);
     StartRaidTimer();
+    
+    UpdateAlivePlayerCount();
 }
 
 void ABaruGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
@@ -136,13 +138,14 @@ void ABaruGameMode::PostLogin(APlayerController* NewPlayer)
                     if (UAbilitySystemComponent* ASC = BaruChar->GetAbilitySystemComponent())
                     {
                         ASC->AddLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
-
+                        
+                        TWeakObjectPtr<UAbilitySystemComponent> WeakASC(ASC);
                         FTimerHandle ImmuneTimerHandle;
-                        GetWorldTimerManager().SetTimer(ImmuneTimerHandle, [ASC]()
+                        GetWorldTimerManager().SetTimer(ImmuneTimerHandle, [WeakASC]()
                         {
-                            if (IsValid(ASC))
+                            if (UAbilitySystemComponent* StrongASC = WeakASC.Get())
                             {
-                                ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+                                StrongASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
                             }
                         }, 3.0f, false);
                     }
@@ -741,6 +744,12 @@ void ABaruGameMode::OnMonsterDied(ABaruMonsterCharacter* Monster, AActor* Killer
 // 살아있는 팀원과 가장 가깝고 안전한 PlayerStart 탐색
 AActor* ABaruGameMode::ChoosePlayerStart_Implementation(AController* Player)
 {
+    const bool bIsMatchInProgress = CachedBaruGameState && (CachedBaruGameState->GetMatchState() == EBaruMatchState::InProgress);
+    if (!bIsMatchInProgress)
+    {
+        return Super::ChoosePlayerStart_Implementation(Player);
+    }
+
     TArray<AActor*> FoundStarts;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), FoundStarts);
 
