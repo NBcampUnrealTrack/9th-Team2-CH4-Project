@@ -382,6 +382,62 @@ void ABaruMonsterDirector::AddPlayerThreat(
     );
 }
 
+void ABaruMonsterDirector::ReportPlayerDamageThreat(
+    APawn* PlayerPawn,
+    float DamageAmount
+)
+{
+    // 피해 기반 디렉터 위협도는 서버에서만 계산
+    // 플레이어와 피해량이 유효하지 않으면 처리하지 않음
+    if (GetNetMode() == NM_Client ||
+        !IsValid(PlayerPawn) ||
+        !PlayerPawn->IsPlayerControlled() ||
+        !FMath::IsFinite(DamageAmount) ||
+        DamageAmount <= 0.0f ||
+        !FMath::IsFinite(ThreatGainPerDamage) ||
+        ThreatGainPerDamage <= 0.0f)
+    {
+        return;
+    }
+
+    // 실제 피해량을 디렉터 위협도 증가량으로 변환
+    const float ThreatGain =
+        DamageAmount * ThreatGainPerDamage;
+
+    if (!FMath::IsFinite(ThreatGain) ||
+        ThreatGain <= 0.0f)
+    {
+        return;
+    }
+
+    const float PreviousThreat =
+        GetPlayerThreat(PlayerPawn);
+
+    // 기존 위협도에 피해 기반 증가량 누적
+    // 최종 0~100 제한은 AddPlayerThreat 내부에서 처리
+    AddPlayerThreat(
+        PlayerPawn,
+        ThreatGain
+    );
+
+    const float NewThreat =
+        GetPlayerThreat(PlayerPawn);
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT(
+            "Player damage threat reported: %s / "
+            "Damage=%.1f, Threat=%.1f -> %.1f"
+        ),
+        *GetNameSafe(PlayerPawn),
+        DamageAmount,
+        PreviousThreat,
+        NewThreat
+    );
+}
+
 float ABaruMonsterDirector::GetPlayerThreat(
     APawn* PlayerPawn
 ) const
@@ -416,6 +472,44 @@ void ABaruMonsterDirector::RemoveInvalidPlayerThreats()
         {
             It.RemoveCurrent();
         }
+    }
+}
+
+void ABaruMonsterDirector::DecayPlayerThreats(
+    float DeltaSeconds
+)
+{
+    // 위협도 감소는 서버에서만 처리
+    // 시간이나 감소 설정값이 유효하지 않으면 처리하지 않음
+    if (GetNetMode() == NM_Client ||
+        !FMath::IsFinite(DeltaSeconds) ||
+        DeltaSeconds <= 0.0f ||
+        !FMath::IsFinite(PlayerThreatDecayPerSecond) ||
+        PlayerThreatDecayPerSecond <= 0.0f)
+    {
+        return;
+    }
+
+    // 감소 계산 전에 파괴되거나 조종이 해제된
+    // 플레이어 위협도 기록을 먼저 제거
+    RemoveInvalidPlayerThreats();
+
+    const float ThreatDecay =
+        PlayerThreatDecayPerSecond * DeltaSeconds;
+
+    for (auto It = PlayerThreatScores.CreateIterator(); It; ++It)
+    {
+        const float NewThreat =
+            FMath::Max(0.0f, It.Value() - ThreatDecay);
+
+        // 0까지 감소한 위협도는 별도로 보관하지 않음
+        if (NewThreat <= 0.0f)
+        {
+            It.RemoveCurrent();
+            continue;
+        }
+
+        It.Value() = NewThreat;
     }
 }
 

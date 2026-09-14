@@ -100,6 +100,18 @@ public:
 		APawn* PlayerPawn,
 		float ThreatDelta
 	);
+	
+	// 플레이어가 몬스터에게 피해를 줬을 때 호출
+	// 실제 피해량을 디렉터 위협도로 변환하여 누적
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director|Threat"
+	)
+	void ReportPlayerDamageThreat(
+		APawn* PlayerPawn,
+		float DamageAmount
+	);
 
 	// 저장된 위협도를 반환
 	// 기록이 없거나 유효하지 않은 플레이어라면 0 반환
@@ -195,6 +207,30 @@ protected:
 		meta = (ClampMin = "1.0")
 	)
 	float ThreatPerMonster = 25.0f;
+	
+	// 플레이어가 몬스터에게 준 피해 1당 증가하는 디렉터 위협도
+	//
+	// 기본값 1:
+	// 피해 30을 주면 위협도도 30 증가
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Threat",
+		meta = (ClampMin = "0.0")
+	)
+	float ThreatGainPerDamage = 1.0f;
+
+	// 전투가 끝난 뒤 1초마다 감소하는 플레이어 위협도
+	//
+	// 기본값 2:
+	// 위협도 50이라면 추가 행동이 없을 때 약 25초 후 0이 됨
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Threat",
+		meta = (ClampMin = "0.0")
+	)
+	float PlayerThreatDecayPerSecond = 2.0f;
 
 	// 디렉터가 플레이어 한 명에게 배정할 수 있는 최대 수
 	// 0이면 해당 디렉터의 자동 배정을 하지 않음
@@ -266,6 +302,10 @@ private:
 
 	// 파괴됐거나 조종이 해제된 플레이어의 기록을 제거
 	void RemoveInvalidPlayerThreats();
+	
+	// 경과 시간에 따라 모든 플레이어의 디렉터 위협도 감소
+	// 0까지 감소한 기록은 목록에서 제거
+	void DecayPlayerThreats(float DeltaSeconds);
 	
 	// 플레이어 팀 전체가 현재 얼마나 벅찬지를 나타내는 값
 	// 0에 가까움:
