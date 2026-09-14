@@ -45,6 +45,31 @@ namespace BaruMonsterBlackboardKeys
 		TEXT("DirectorTargetLocation")
 	);
 	
+	// 디렉터의 매복 명령이 활성화되어 있는지
+	const FName HasAmbushOrder(
+		TEXT("HasAmbushOrder")
+	);
+
+	// 시야가 끊겨도 유지할 매복 목표
+	const FName AmbushTargetActor(
+		TEXT("AmbushTargetActor")
+	);
+
+	// EQS가 선택할 은폐 위치
+	const FName AmbushLocation(
+		TEXT("AmbushLocation")
+	);
+
+	// 몬스터가 은폐 위치에 도착해 대기 중인지
+	const FName IsAmbushReady(
+		TEXT("IsAmbushReady")
+	);
+
+	// 목표가 가까워져 기습을 시작해야 하는지
+	const FName ShouldSpringAmbush(
+		TEXT("ShouldSpringAmbush")
+	);
+	
 }
 
 ABaruMonsterAIController::ABaruMonsterAIController()
@@ -245,6 +270,20 @@ void ABaruMonsterAIController::ApplySightSettings(
 	SightConfig->SetMaxAge(
 		SightMemoryDuration
 	);
+	
+	// 근접 전투 중 순간적인 시야 손실을 보정할 거리
+	CombatTargetRetentionDistance =
+		FMath::Max(
+			0.0f,
+			MonsterDataAsset.CombatTargetRetentionDistance
+		);
+
+	// 거리와 벽 상태를 다시 검사하는 간격
+	CombatTargetRetentionCheckInterval =
+		FMath::Max(
+			0.05f,
+			MonsterDataAsset.CombatTargetRetentionCheckInterval
+		);
 
 	// 실행 중인 감각 시스템이 변경된 설정을 재설정
 	MonsterPerceptionComponent->RequestStimuliListenerUpdate();
@@ -387,24 +426,84 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 	// 플레이어를 현재 정상적으로 보고 있는 경우
 	if (Stimulus.WasSuccessfullySensed())
 	{
+		// 이전 프레임에 같은 플레이어의 시야 손실을 보류하고 있었다면
+		// 다시 발견된 것이므로 손실 검사를 취소
+		CancelCombatTargetRetention(SensedPawn);
+		
 		// 현재 보이는 플레이어가 있으므로
 		// 이전 수색에 사용하던 마지막 목격 기억을 제거
 		ClearLastKnownTargetLocation();
-		
+
 		// 발견한 플레이어를 추적 후보 목록에 추가
 		// 현재 보이는 플레이어 중 위협도 점수가 가장 높은 대상 선택
 		AddVisiblePlayerCandidate(SensedPawn);
-		
-		// 새로 선택된 타깃을 블랙보드에 반영
+
+		/*
+		 * 매복 중 플레이어를 직접 발견했다면
+		 * 먼저 선택된 추적 대상을 Blackboard에 반영
+		 *
+		 * TargetActor가 먼저 설정되어야 매복 명령이 해제될 때
+		 * Behavior Tree가 대기 상태를 거치지 않고
+		 * 바로 Chase Player 분기로 전환할 수 있음
+		 */
 		UpdateBlackboardFromPerceptionState();
-		
+
+		/*
+		* 플레이어를 직접 발견했다면 현재 추적 행동으로 전환
+		* Investigate:
+		* 지정 위치를 확인하라는 명령의 목적을 달성했으므로 해제
+		* Ambush:
+		* 숨어서 기다리는 단계가 끝났으므로 해제
+		* Hold:
+		* 전투가 끝난 뒤 원래 위치로 복귀해야 하므로 유지
+		*/
+		if (IsValid(CurrentTarget.Get()))
+		{
+			switch (DirectorCommand)
+			{
+			case EBaruMonsterDirectorCommand::Investigate:
+				BARU_NET_LOG(
+					this,
+					LogBaruAI,
+					Log,
+					TEXT(
+						"Director investigation completed by detection: "
+						"Target=%s"
+					),
+					*GetNameSafe(CurrentTarget.Get())
+				);
+
+				ClearDirectorCommand();
+				break;
+
+			case EBaruMonsterDirectorCommand::Ambush:
+				BARU_NET_LOG(
+					this,
+					LogBaruAI,
+					Log,
+					TEXT(
+						"Ambush converted to normal chase: "
+						"Detected target=%s"
+					),
+					*GetNameSafe(CurrentTarget.Get())
+				);
+
+				ClearDirectorCommand();
+				break;
+
+			default:
+				break;
+			}
+		}
+
 		BARU_NET_LOG(
 			this,
 			LogBaruAI,
 			Log,
-			TEXT("Player detected: %s / "
-			"Visible candidates: %d / "
-			"Current target: %s"
+			TEXT(
+				"Player detected: %s / "
+				"Visible candidates: %d / "
+				"Current target: %s"
 			),
 			*GetNameSafe(Actor),
 			VisiblePlayerCandidates.Num(),
@@ -414,49 +513,306 @@ void ABaruMonsterAIController::HandleTargetPerceptionUpdated(
 		return;
 	}
 	
-	// 후보 목록에서 제거하기 전에
-	// 놓친 플레이어가 현재 추적 대상이었는지 기억
-	const bool bLostCurrentTarget = CurrentTarget.Get() == SensedPawn;
-	
-	// 플레이어를 마지막으로 감지한 위치를 보관
-	const FVector LostTargetLocation = Stimulus.StimulusLocation;
-	
-	// 시야에서 놓친 플레이어를 후보 목록에서 제거
-	// 이 과정에서 남은 후보 중 새로운 대상이 선택될 수 있음
-	RemoveVisiblePlayerCandidate(SensedPawn);
+	// 플레이어를 마지막으로 실제 감지한 위치
+	const FVector LostTargetLocation =
+		Stimulus.StimulusLocation;
 
-	// 이전에 발견한 플레이어를 시야에서 놓친 경우
-	// 대신 추적할 다른 플레이어도 없는 경우에만 위치를 기억
+	// 현재 전투 중인 플레이어를 놓친 경우
+	const bool bLostCurrentTarget =
+		CurrentTarget.Get() == SensedPawn;
+
+	/*
+	 * 현재 추적 대상이고 가까운 거리이며
+	 * 플레이어와 몬스터 사이에 건물 벽이 없다면
+	 * 순간적인 Perception 손실로 판단하고 추적을 유지
+	 */
 	if (bLostCurrentTarget &&
-		!IsValid(GetCurrentTarget()))
+		CanRetainCombatTarget(SensedPawn))
 	{
-		RememberLastKnownTargetLocation(
+		BeginCombatTargetRetention(
+			SensedPawn,
 			LostTargetLocation
 		);
+
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Verbose,
+			TEXT(
+				"Combat target sight loss deferred: "
+				"Target=%s / Location=%s"
+			),
+			*GetNameSafe(SensedPawn),
+			*LostTargetLocation.ToString()
+		);
+
+		return;
 	}
-	
-	// 남은 타깃 또는 마지막 목격 위치를 블랙보드에 반영
-	UpdateBlackboardFromPerceptionState();
-	
-	BARU_NET_LOG(
-		this,
-		LogBaruAI,
-		Log,
-		TEXT(
-			"Player lost: %s / "
-			"Visible candidates: %d / "
-			"Current target: %s / "
-			"Last stimulus location: %s / "
-			"Memory stored: %s"
-		),
-		*GetNameSafe(Actor),
-		VisiblePlayerCandidates.Num(),
-		*GetNameSafe(CurrentTarget.Get()),
-		*LostTargetLocation.ToString(),
-		bHasLastKnownTargetLocation
-		? TEXT("true")
-		: TEXT("false")
+
+	// 벽에 가려졌거나 유지 거리 밖이라면
+	// 정상적인 시야 손실로 확정
+	ConfirmPlayerLost(
+		SensedPawn,
+		LostTargetLocation
 	);
+}
+
+bool ABaruMonsterAIController::CanRetainCombatTarget(
+    APawn* TargetPawn
+) const
+{
+    if (!IsValid(TargetPawn) ||
+        !IsValid(GetPawn()) ||
+        CombatTargetRetentionDistance <= 0.0f)
+    {
+        return false;
+    }
+
+    // 죽은 플레이어는 전투 대상으로 유지하지 않음
+    if (TargetPawn->Implements<UCombatInterface>() &&
+        ICombatInterface::Execute_IsDead(TargetPawn))
+    {
+        return false;
+    }
+
+    const FVector MonsterLocation =
+        GetPawn()->GetActorLocation();
+
+    const FVector TargetLocation =
+        TargetPawn->GetActorLocation();
+
+    // 지정한 전투 유지 거리 밖이라면 정상적으로 놓침
+    if (FVector::DistSquared(
+            MonsterLocation,
+            TargetLocation
+        ) >
+        FMath::Square(
+            CombatTargetRetentionDistance
+        ))
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+
+    if (!IsValid(World))
+    {
+        return false;
+    }
+
+    FVector MonsterViewLocation;
+    FRotator MonsterViewRotation;
+
+    // 몬스터의 눈 위치에서 검사 시작
+    GetPawn()->GetActorEyesViewPoint(
+        MonsterViewLocation,
+        MonsterViewRotation
+    );
+
+    // 플레이어 몸통에 가까운 위치를 검사 대상으로 사용
+    const FVector TargetViewLocation =
+        TargetPawn->GetPawnViewLocation();
+
+    FCollisionObjectQueryParams ObjectQueryParams;
+
+    /*
+     * 다른 몬스터나 플레이어가 잠깐 사이를 지나가는 것은 무시하고
+     * 건물 벽과 고정된 구조물만 시야 차단물로 취급
+     */
+    ObjectQueryParams.AddObjectTypesToQuery(
+        ECC_WorldStatic
+    );
+
+    FCollisionQueryParams QueryParams(
+        SCENE_QUERY_STAT(
+            BaruCombatTargetRetentionTrace
+        ),
+        false,
+        GetPawn()
+    );
+
+    QueryParams.AddIgnoredActor(TargetPawn);
+
+    const bool bBlockedByStaticObject =
+        World->LineTraceTestByObjectType(
+            MonsterViewLocation,
+            TargetViewLocation,
+            ObjectQueryParams,
+            QueryParams
+        );
+
+    return !bBlockedByStaticObject;
+}
+
+void ABaruMonsterAIController::
+BeginCombatTargetRetention(
+    APawn* TargetPawn,
+    const FVector& LastVisibleLocation
+)
+{
+    if (!IsValid(TargetPawn))
+    {
+        return;
+    }
+
+    // 이전 대상에 대한 보류 검사가 남아 있다면 먼저 정리
+    CancelCombatTargetRetention();
+
+    PendingLostCombatTarget = TargetPawn;
+    PendingLostCombatTargetLocation =
+        LastVisibleLocation;
+
+    /*
+     * 반복 타이머 대신 한 번만 예약
+     * 매 검사에서 조건이 유지될 때 다음 검사를 다시 예약
+     */
+    GetWorldTimerManager().SetTimer(
+        CombatTargetRetentionTimerHandle,
+        this,
+        &ABaruMonsterAIController::
+            ReevaluateCombatTargetRetention,
+        CombatTargetRetentionCheckInterval,
+        false
+    );
+}
+
+void ABaruMonsterAIController::
+ReevaluateCombatTargetRetention()
+{
+    APawn* TargetPawn =
+        PendingLostCombatTarget.Get();
+
+    // 대상이 제거된 경우 저장된 마지막 위치를 이용해 손실 확정
+    if (!IsValid(TargetPawn))
+    {
+        const FVector LastVisibleLocation =
+            PendingLostCombatTargetLocation;
+
+        CancelCombatTargetRetention();
+
+        RemoveInvalidPlayerCandidates();
+        SelectHighestThreatVisiblePlayer();
+
+        if (!IsValid(CurrentTarget.Get()))
+        {
+            RememberLastKnownTargetLocation(
+                LastVisibleLocation
+            );
+        }
+
+        UpdateBlackboardFromPerceptionState();
+        return;
+    }
+
+    /*
+     * 가까운 거리를 유지하고 건물 벽도 없다면
+     * 플레이어가 옆이나 뒤에 있더라도 계속 전투 대상으로 유지
+     */
+    if (CanRetainCombatTarget(TargetPawn))
+    {
+        // 현재까지 벽 없이 추적한 위치를 최신 상태로 갱신
+        PendingLostCombatTargetLocation =
+            TargetPawn->GetActorLocation();
+
+        GetWorldTimerManager().SetTimer(
+            CombatTargetRetentionTimerHandle,
+            this,
+            &ABaruMonsterAIController::
+                ReevaluateCombatTargetRetention,
+            CombatTargetRetentionCheckInterval,
+            false
+        );
+
+        return;
+    }
+
+    // 벽이 생겼거나 플레이어가 멀어진 순간 손실 확정
+    const FVector LastVisibleLocation =
+        PendingLostCombatTargetLocation;
+
+    ConfirmPlayerLost(
+        TargetPawn,
+        LastVisibleLocation
+    );
+}
+
+void ABaruMonsterAIController::ConfirmPlayerLost(
+    APawn* LostPlayer,
+    const FVector& LastVisibleLocation
+)
+{
+    if (!IsValid(LostPlayer))
+    {
+        return;
+    }
+
+    // 후보 목록에서 제거하기 전에 현재 대상이었는지 기록
+    const bool bLostCurrentTarget =
+        CurrentTarget.Get() == LostPlayer;
+
+    // 해당 플레이어의 보류 타이머가 있다면 함께 정리
+    CancelCombatTargetRetention(LostPlayer);
+
+    // 실제 시야 후보 목록에서 제거
+    RemoveVisiblePlayerCandidate(LostPlayer);
+
+    /*
+     * 현재 대상을 놓쳤고 대신 추적할 다른 플레이어도 없다면
+     * 마지막으로 벽 없이 확인했던 위치를 수색
+     */
+    if (bLostCurrentTarget &&
+        !IsValid(GetCurrentTarget()))
+    {
+        RememberLastKnownTargetLocation(
+            LastVisibleLocation
+        );
+    }
+
+    UpdateBlackboardFromPerceptionState();
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT(
+            "Player loss confirmed: %s / "
+            "Visible candidates: %d / "
+            "Current target: %s / "
+            "Last visible location: %s / "
+            "Memory stored: %s"
+        ),
+        *GetNameSafe(LostPlayer),
+        VisiblePlayerCandidates.Num(),
+        *GetNameSafe(CurrentTarget.Get()),
+        *LastVisibleLocation.ToString(),
+        bHasLastKnownTargetLocation
+            ? TEXT("true")
+            : TEXT("false")
+    );
+}
+
+void ABaruMonsterAIController::
+CancelCombatTargetRetention(
+    APawn* TargetPawn
+)
+{
+    /*
+     * 특정 플레이어에 대한 취소 요청인데
+     * 현재 보류 중인 대상과 다르다면 건드리지 않음
+     */
+    if (IsValid(TargetPawn) &&
+        PendingLostCombatTarget.Get() != TargetPawn)
+    {
+        return;
+    }
+
+    GetWorldTimerManager().ClearTimer(
+        CombatTargetRetentionTimerHandle
+    );
+
+    PendingLostCombatTarget.Reset();
+    PendingLostCombatTargetLocation =
+        FVector::ZeroVector;
 }
 
 APawn* ABaruMonsterAIController::GetCurrentTarget() const
@@ -557,16 +913,13 @@ void ABaruMonsterAIController::RememberLastKnownTargetLocation(
 	LastKnownTargetLocation = TargetLocation;
 	bHasLastKnownTargetLocation = true;
 
-	// 기억시간이 지나면 마지막 목격 정보를 자동으로 제거
-	GetWorldTimerManager().SetTimer(
-		SightMemoryTimerHandle,
-		this,
-		&ABaruMonsterAIController::
-			ClearLastKnownTargetLocation,
-		SightMemoryDuration,
-		false
-	);
-
+	/*
+	* SightMemoryDuration은 이제 위치를 잃은 순간부터가 아니라
+	* 마지막 목격 위치에 도착한 뒤 주변을 수색하는 시간으로 사용
+	* 수색 종료는 Behavior Tree의 전용 수색 태스크가
+	* CompleteLastKnownTargetSearch를 호출하여 처리
+	*/
+	
 	BARU_NET_LOG(
 		this,
 		LogBaruAI,
@@ -606,6 +959,29 @@ void ABaruMonsterAIController::ClearLastKnownTargetLocation()
 		TEXT("Last known target location forgotten.")
 	);
 			
+}
+
+void ABaruMonsterAIController::CompleteLastKnownTargetSearch()
+{
+	// 마지막 목격 위치 판단과 Blackboard 변경은
+	// 서버에서만 처리
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	BARU_NET_LOG(
+		this,
+		LogBaruAI,
+		Log,
+		TEXT(
+			"Last known target area search completed: %s"
+		),
+		*LastKnownTargetLocation.ToString()
+	);
+
+	// 위치, 유효 여부, 타이머 및 Blackboard 값을 한 번에 정리
+	ClearLastKnownTargetLocation();
 }
 
 void ABaruMonsterAIController::UpdateBlackboardFromPerceptionState()
@@ -889,6 +1265,31 @@ void ABaruMonsterAIController::RegisterDamageThreat(
     {
         return;
     }
+	
+	/*
+	* 매복 중 피해를 받았다면 이미 위치가 노출된 것으로 판단
+	* 현재 매복 명령을 해제하고 기존 피격 대응 로직으로 전환
+	*
+	* 아래의 기존 코드가 공격자의 위치를 마지막 목격 위치로
+	* 저장하고 피해 위협도도 정상적으로 누적함
+	*/
+	if (DirectorCommand ==
+		EBaruMonsterDirectorCommand::Ambush)
+	{
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Log,
+			TEXT(
+				"Ambush cancelled by damage: "
+				"Attacker=%s / Damage=%.1f"
+			),
+			*GetNameSafe(AttackerPawn),
+			DamageAmount
+		);
+
+		ClearDirectorCommand();
+	}
 
     const UBaruMonsterDataAsset* MonsterData =
         MonsterCharacter->GetMonsterDataAsset();
@@ -957,6 +1358,10 @@ void ABaruMonsterAIController::OnUnPossess()
 	DamageThreatByPlayer.Reset();
 	VisiblePlayerCandidates.Reset();
 	CurrentTarget.Reset();
+	AmbushTarget.Reset();
+	
+	// 보류 중인 전투 대상 유지 검사 정리
+	CancelCombatTargetRetention();
 
 	LastKnownTargetLocation = FVector::ZeroVector;
 	bHasLastKnownTargetLocation = false;
@@ -1001,6 +1406,9 @@ void ABaruMonsterAIController::EndPlay(
 	DamageThreatByPlayer.Reset();
 	VisiblePlayerCandidates.Reset();
 	CurrentTarget.Reset();
+	
+	// Controller가 제거된 뒤 전투 대상 검사 콜백이 실행되지 않도록 정리
+	CancelCombatTargetRetention();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -1008,6 +1416,69 @@ void ABaruMonsterAIController::EndPlay(
 //----------------
 // 디렉터 명령
 //----------------
+
+bool ABaruMonsterAIController::ReceiveDirectorAmbushCommand(
+	APawn* TargetPlayer
+)
+{
+	// 매복 명령은 서버에서만 처리
+	if (!HasAuthority() ||
+		!IsValid(TargetPlayer) ||
+		!TargetPlayer->IsPlayerControlled())
+	{
+		return false;
+	}
+
+	// 사망한 플레이어는 매복 대상으로 사용하지 않음
+	if (TargetPlayer->Implements<UCombatInterface>() &&
+		ICombatInterface::Execute_IsDead(TargetPlayer))
+	{
+		return false;
+	}
+
+	ABaruMonsterCharacter* MonsterCharacter =
+		Cast<ABaruMonsterCharacter>(GetPawn());
+
+	// 조종 중인 몬스터가 없거나 사망했다면 명령 거부
+	if (!IsValid(MonsterCharacter) ||
+		ICombatInterface::Execute_IsDead(MonsterCharacter))
+	{
+		return false;
+	}
+
+	const UBaruMonsterDataAsset* MonsterData =
+		MonsterCharacter->GetMonsterDataAsset();
+
+	// DataAsset에서 매복이 허용된 몬스터만 명령 접수
+	if (!IsValid(MonsterData) ||
+		!MonsterData->bCanAmbush)
+	{
+		return false;
+	}
+
+	// 이전 명령과 새로운 매복 명령을 구분
+	++DirectorCommandRevision;
+
+	DirectorCommand =
+		EBaruMonsterDirectorCommand::Ambush;
+
+	AmbushTarget = TargetPlayer;
+	DirectorTargetLocation = FVector::ZeroVector;
+
+	// 기존 조사 명령을 해제하고
+	// 매복 목표와 초기 상태를 Blackboard에 반영
+	UpdateBlackboardFromDirectorState();
+
+	BARU_NET_LOG(
+		this,
+		LogBaruAI,
+		Log,
+		TEXT("Director ambush command received: Target=%s"),
+		*GetNameSafe(TargetPlayer)
+	);
+
+	return true;
+}
 
 bool ABaruMonsterAIController::ReceiveDirectorInvestigateCommand(
     const FVector& TargetLocation
@@ -1035,6 +1506,9 @@ bool ABaruMonsterAIController::ReceiveDirectorInvestigateCommand(
     // 새로운 명령으로 기존 명령을 교체
     DirectorCommand = EBaruMonsterDirectorCommand::Investigate;
     DirectorTargetLocation = TargetLocation;
+	
+	// 새 조사 명령이 매복 명령을 교체하므로 이전 목표 제거
+	AmbushTarget.Reset();
 
     // 추적·수색을 강제로 중단하지 않고 명령 상태만 전달
     // 실제 실행 우선순위는 Behavior Tree에서 결정
@@ -1073,6 +1547,8 @@ void ABaruMonsterAIController::ReceiveDirectorHoldCommand()
 
     DirectorCommand = EBaruMonsterDirectorCommand::Hold;
     DirectorTargetLocation = FVector::ZeroVector;
+	
+	AmbushTarget.Reset();
 
     // 조사 분기를 해제해서 대기 분기로 넘어가도록 요청
     UpdateBlackboardFromDirectorState();
@@ -1108,6 +1584,8 @@ void ABaruMonsterAIController::ClearDirectorCommand()
 
     DirectorCommand = EBaruMonsterDirectorCommand::None;
     DirectorTargetLocation = FVector::ZeroVector;
+	
+	AmbushTarget.Reset();
 
     UpdateBlackboardFromDirectorState();
 
@@ -1137,19 +1615,29 @@ void ABaruMonsterAIController::UpdateBlackboardFromDirectorState()
     UBlackboardComponent* MonsterBlackboard =
         GetBlackboardComponent();
 
-    // BT 초기화 전이면 명령은 멤버 변수에 보관
-    // 초기화가 끝날 때 다시 반영
+    // BT 초기화 전이면 명령은 멤버 변수에 보관하고,
+    // 초기화가 끝난 뒤 이 함수를 다시 호출하여 반영
     if (!IsValid(MonsterBlackboard))
     {
         return;
     }
 
     const bool bHasInvestigation =
-        DirectorCommand == EBaruMonsterDirectorCommand::Investigate;
+        DirectorCommand ==
+            EBaruMonsterDirectorCommand::Investigate;
+
+    const bool bHasAmbush =
+        DirectorCommand ==
+            EBaruMonsterDirectorCommand::Ambush &&
+        AmbushTarget.IsValid();
+
+    // ---------------------------------------------------------
+    // 조사 명령
+    // ---------------------------------------------------------
 
     if (bHasInvestigation)
     {
-        // 목적지를 먼저 설정하고 실행 조건을 활성화
+        // 목적지를 먼저 기록한 뒤 조사 조건 활성화
         MonsterBlackboard->SetValueAsVector(
             BaruMonsterBlackboardKeys::DirectorTargetLocation,
             DirectorTargetLocation
@@ -1162,7 +1650,7 @@ void ABaruMonsterAIController::UpdateBlackboardFromDirectorState()
     }
     else
     {
-        // 조사 분기를 먼저 비활성화하고 목적지 제거
+        // 조사 조건을 끈 뒤 기존 목적지 제거
         MonsterBlackboard->SetValueAsBool(
             BaruMonsterBlackboardKeys::HasDirectorInvestigation,
             false
@@ -1170,6 +1658,67 @@ void ABaruMonsterAIController::UpdateBlackboardFromDirectorState()
 
         MonsterBlackboard->ClearValue(
             BaruMonsterBlackboardKeys::DirectorTargetLocation
+        );
+    }
+
+    // ---------------------------------------------------------
+    // 매복 명령
+    // ---------------------------------------------------------
+
+    if (bHasAmbush)
+    {
+        // 목표를 먼저 기록한 뒤 매복 분기 활성화
+        MonsterBlackboard->SetValueAsObject(
+            BaruMonsterBlackboardKeys::AmbushTargetActor,
+            AmbushTarget.Get()
+        );
+
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::HasAmbushOrder,
+            true
+        );
+
+        // 새로운 매복 명령은 아직 위치를 찾거나
+        // 기습 준비를 완료하지 않은 상태로 시작
+        MonsterBlackboard->ClearValue(
+            BaruMonsterBlackboardKeys::AmbushLocation
+        );
+
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::IsAmbushReady,
+            false
+        );
+
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::ShouldSpringAmbush,
+            false
+        );
+    }
+    else
+    {
+        // 매복 분기를 먼저 비활성화
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::HasAmbushOrder,
+            false
+        );
+
+        // 이전 매복에서 사용한 모든 값 제거
+        MonsterBlackboard->ClearValue(
+            BaruMonsterBlackboardKeys::AmbushTargetActor
+        );
+
+        MonsterBlackboard->ClearValue(
+            BaruMonsterBlackboardKeys::AmbushLocation
+        );
+
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::IsAmbushReady,
+            false
+        );
+
+        MonsterBlackboard->SetValueAsBool(
+            BaruMonsterBlackboardKeys::ShouldSpringAmbush,
+            false
         );
     }
 }
