@@ -54,7 +54,7 @@ void UBaruCharacterEquipmentWidget::NativeDestruct()
 {
     if (IsValid(EquipmentComponent))
     {
-        EquipmentComponent->OnEquipmentUpdated.RemoveAll(this);
+        EquipmentComponent->OnEquipmentUpdated.RemoveDynamic(this, &UBaruCharacterEquipmentWidget::HandleEquipmentUpdated);
     }
 
     EquipmentComponent = nullptr;
@@ -81,7 +81,7 @@ void UBaruCharacterEquipmentWidget::BindEquipment()
 {
     if (IsValid(EquipmentComponent))
     {
-        EquipmentComponent->OnEquipmentUpdated.RemoveAll(this);
+        EquipmentComponent->OnEquipmentUpdated.RemoveDynamic(this, &UBaruCharacterEquipmentWidget::HandleEquipmentUpdated);
     }
 
     EquipmentComponent = nullptr;
@@ -106,10 +106,9 @@ void UBaruCharacterEquipmentWidget::BindEquipment()
 
     if (IsValid(EquipmentComponent))
     {
-        EquipmentComponent->OnEquipmentUpdated.AddUObject(
+        EquipmentComponent->OnEquipmentUpdated.AddDynamic(
             this,
-            &UBaruCharacterEquipmentWidget::
-                HandleEquipmentUpdated);
+            &UBaruCharacterEquipmentWidget::HandleEquipmentUpdated);
     }
 }
 

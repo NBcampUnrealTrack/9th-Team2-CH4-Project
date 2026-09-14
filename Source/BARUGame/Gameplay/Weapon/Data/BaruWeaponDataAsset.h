@@ -76,4 +76,9 @@ public:
 		meta = (ClampMin = "1"))
 	int32 MagazineCapacity = 6;
 	
+	
+	// [09.13] 재장전 Ability 클래스 추가
+public:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Weapon|Abilities")
+	TSubclassOf<UGameplayAbility> ReloadAbilityClass;
 };

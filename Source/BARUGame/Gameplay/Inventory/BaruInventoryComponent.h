@@ -166,6 +166,10 @@ public:
 		// 정산 대상 여부나 가격과 관계없이 수량만 계산.
 	UFUNCTION(BlueprintPure, Category = "BARU|Inventory")
 	int32 GetTotalItemCount() const;
+	
+	// [09.13] 인벤토리 내 모든 아이템 및 격자 점유 초기화 (사망/세션 리셋용)
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Inventory")
+	void ClearInventory();
 
 private:
 		// [진실원(진짜 부분)] 복제 대상

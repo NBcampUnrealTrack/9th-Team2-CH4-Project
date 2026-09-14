@@ -11,6 +11,7 @@ class USkeletalMeshComponent;
 class USceneComponent;	// 무기 액터 때문에.
 class UBaruWeaponDataAsset;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruAmmoChangedSignature, int32, CurrentAmmo, int32, MaxCapacity);
 
 UCLASS()
 class BARUGAME_API ABaruWeaponBase : public AActor
@@ -101,5 +102,39 @@ protected:
 	virtual void BeginPlay() override;
 	
 
+	// [09.13] 탄창 관련 프로퍼티 및 함수 추가
+public:
+	
+	// 현재 탄창에 남아있는 탄약 수 (네트워크 동기화)
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentAmmo, Category = "BARU|Weapon|Runtime")
+	int32 CurrentAmmo = 0;
+
+	// 탄약 제어 및 상태 조회 함수
+	UFUNCTION(BlueprintPure, Category = "BARU|Weapon|Runtime")
+	int32 GetCurrentAmmo() const { return CurrentAmmo; }
+
+	UFUNCTION(BlueprintPure, Category = "BARU|Weapon|Runtime")
+	int32 GetMagazineCapacity() const { return MagazineCapacity; }
+
+	UFUNCTION(BlueprintPure, Category = "BARU|Weapon|Runtime")
+	bool IsMagazineFull() const { return CurrentAmmo >= MagazineCapacity; }
+
+	UFUNCTION(BlueprintPure, Category = "BARU|Weapon|Runtime")
+	bool IsMagazineEmpty() const { return CurrentAmmo <= 0; }
+
+	// 1발(또는 지정 수량) 사격 소비 (서버 전용)
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Weapon|Runtime")
+	bool ConsumeAmmo(int32 Amount = 1);
+
+	// 탄창 완충 (재장전 완료 시 호출, 서버 전용)
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Weapon|Runtime")
+	void RestoreFullAmmo();
+
+	// 탄약 UI 갱신용 RepNotify
+	UFUNCTION()
+	void OnRep_CurrentAmmo();
+
+	UPROPERTY(BlueprintAssignable, Category = "BARU|Weapon|Events")
+	FOnBaruAmmoChangedSignature OnAmmoChanged;
 
 };

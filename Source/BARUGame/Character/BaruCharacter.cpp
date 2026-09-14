@@ -33,7 +33,7 @@
 
 ABaruCharacter::ABaruCharacter()
 {
-    PrimaryActorTick.bCanEverTick = true;
+   PrimaryActorTick.bCanEverTick = true;
    bReplicates = true;
    SetReplicateMovement(true);
    
@@ -43,6 +43,13 @@ ABaruCharacter::ABaruCharacter()
     FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, CameraEyeHeight)); // [수정] 60.0f 하드코딩제거
     FollowCamera->bUsePawnControlRotation = true; // 마우스 회전에 따라 카메라 회전
 
+   // [09.13] 카메라 렌더링 후처리 오버라이드 활성화(조준 기능)
+   FollowCamera->PostProcessBlendWeight = 1.0f;
+   FollowCamera->PostProcessSettings.bOverride_VignetteIntensity = true;
+   FollowCamera->PostProcessSettings.VignetteIntensity = DefaultVignette;
+   FollowCamera->PostProcessSettings.bOverride_SceneFringeIntensity = true;
+   FollowCamera->PostProcessSettings.SceneFringeIntensity = DefaultFringe;
+   
     Mesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Mesh1P"));
 
    
@@ -72,10 +79,10 @@ ABaruCharacter::ABaruCharacter()
    Headlight->SetRelativeLocation(FVector(10.0f, 0.0f, 0.0f));   // 몸에 파묻히지 않게 살짝 앞으로
 
    Headlight->SetIntensityUnits(ELightUnits::Lumens);
-   Headlight->SetIntensity(3000.0f);
-   Headlight->SetAttenuationRadius(2000.0f);   // 20m
-   Headlight->SetInnerConeAngle(18.0f);
-   Headlight->SetOuterConeAngle(34.0f);
+   Headlight->SetIntensity(350.0f);
+   Headlight->SetAttenuationRadius(700.0f);   // 7m
+   Headlight->SetInnerConeAngle(15.0f);
+   Headlight->SetOuterConeAngle(28.0f);
    Headlight->SetCastShadows(true);            // 프레임 떨어지면 BP 에서 끄세요
 
    Headlight->SetVisibility(false);            // 시작은 꺼진 상태
@@ -173,6 +180,9 @@ void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& Change
 
 void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+   // [09.13] 타이머 메모리 정리
+   StopHealthRegen();
+   
    if (UAbilitySystemComponent* ASC = CachedASC.Get())
    {
       ASC->GetGameplayAttributeValueChangeDelegate(
@@ -283,6 +293,13 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
          EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_StopFire);
          EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Canceled,  this, &ABaruCharacter::Input_StopFire);
       }
+      // [09.13] 조준 액션 바인딩
+      if (AimAction)
+      {
+         EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started,   this, &ABaruCharacter::Input_AimStart);
+         EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &ABaruCharacter::Input_AimStop);
+         EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Canceled,  this, &ABaruCharacter::Input_AimStop);
+      }
 
       // ★[추가 09.08] 무기 슬롯 전환
       if (SelectPrimaryWeaponAction)
@@ -307,6 +324,11 @@ void ABaruCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
       if (CrouchAction)
       {
          EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_ToggleCrouch);
+      }
+      // [09.13] 재장전 액션 바인딩 (R 키)
+      if (ReloadAction)
+      {
+         EnhancedInputComponent->BindAction(ReloadAction, ETriggerEvent::Started, this, &ABaruCharacter::Input_Reload);
       }
    }
 }
@@ -369,7 +391,7 @@ void ABaruCharacter::Input_Interact()
    }
 
    FHitResult HitResult;
-   if (!PerformLineTrace(HitResult, InteractionTraceDistance, /*bDrawDebug=*/true))
+   if (!PerformLineTrace(HitResult, InteractionTraceDistance, /*bDrawDebug=*/false))
    {
       return;
    }
@@ -404,6 +426,21 @@ void ABaruCharacter::Input_ToggleHeadlight()
       return;
    }
    Server_SetHeadlightOn(!bHeadlightOn);
+}
+
+// [09.13] 재장전 입력 처리 함수 추가
+void ABaruCharacter::Input_Reload()
+{
+   if (bIsDead || Execute_IsDBNO(this))
+   {
+      return;
+   }
+
+   // 장비 컴포넌트를 통해 InputTag.Reload 트리거
+   if (EquipmentComponent)
+   {
+      EquipmentComponent->RequestReloadActiveWeapon();
+   }
 }
 
 bool ABaruCharacter::Server_SetHeadlightOn_Validate(bool bNewOn)
@@ -706,6 +743,9 @@ void ABaruCharacter::EnterDBNO(AActor* DownCauser)
    {
       return;
    }
+   
+   // [09.13] 다운 시 회복 즉시 중단
+   StopHealthRegen();
 
    ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
    if (!BaruPS || BaruPS->IsDBNO())
@@ -879,6 +919,9 @@ void ABaruCharacter::Die_Implementation(AActor* Killer)
    // 09.11 DBNO 세부 로직 추가 및 정리
    if (bIsDead || !HasAuthority()) return;
 
+   // [09.13] 사망 시 회복 즉시 중단
+   StopHealthRegen();
+   
    bIsDead = true;
    CancelPendingInteraction();
    LastKiller = Killer;
@@ -1048,6 +1091,13 @@ float ABaruCharacter::GetSuppressionRatio_Implementation() const
 
 void ABaruCharacter::ApplyCombatDamage_Implementation(float DamageAmount, const FHitResult& HitResult, AActor* DamageCauser, AController* InstigatedBy)
 {
+   // [09.13] 피격 시 기존 회복을 중단하고 10초 대기 타이머 리셋
+   if (HasAuthority() && !bIsDead && !Execute_IsDBNO(this))
+   {
+      StartHealthRegenDelay();
+   }
+   
+   
    // 여기서 체력을 직접 깎으면 GAS 를 우회하게 되어 서버/클라 값이 어긋남
    // 데미지는 반드시 GameplayEffect(BaruDamageExecutionCalc)로만 적용하도록 해야함
    // 이 함수는 피격 리액션 몽타주 / 히트 사운드 같은 연출 훅으로만 사용함
@@ -1166,6 +1216,10 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
 
    if (HoldDuration <= 0.0f)
    {
+      // [09.13] F키를 뗄 때 EndInteraction을 호출할 수 있도록 즉시 실행 대상도 타깃으로 캐싱
+      CancelPendingInteraction();
+      PendingInteractTarget = ClaimedActor;
+
       IInteractableInterface::Execute_ExecuteInteraction(ClaimedActor, this);
       BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *ClaimedActor->GetName());
       return;
@@ -1236,10 +1290,17 @@ bool ABaruCharacter::Server_StopInteraction_Validate()
 
 void ABaruCharacter::Server_StopInteraction_Implementation()
 {
+   // [09.13] F키를 뗄 때 누르고 있던 대상(버튼 등)에게 상호작용 종료 통보
    if (PendingInteractTarget.IsValid())
    {
+      AActor* Target = PendingInteractTarget.Get();
+      if (Target && Target->Implements<UInteractableInterface>())
+      {
+         IInteractableInterface::Execute_EndInteraction(Target, this);
+      }
+
       BARU_NET_LOG(this, LogBaruItem, Log,
-         TEXT("Interaction hold cancelled by input release: %s"), *PendingInteractTarget->GetName());
+          TEXT("Interaction hold cancelled by input release: %s"), *Target->GetName());
    }
    CancelPendingInteraction();
 }
@@ -1252,4 +1313,192 @@ UAbilitySystemComponent* ABaruCharacter::GetAbilitySystemComponent() const
       return BaruPS->GetAbilitySystemComponent();
    }
    return nullptr;
+}
+
+// [09.13] 체력 자연 회복 로직 추가
+// 10초 대기 타이머 시작 (피격마다 호출되어 타이머가 갱신됨)
+void ABaruCharacter::StartHealthRegenDelay()
+{
+    if (!HasAuthority()) return;
+
+    StopHealthRegen();
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            HealthRegenDelayTimerHandle,
+            this,
+            &ABaruCharacter::OnHealthRegenDelayExpired,
+            HealthRegenDelay,
+            false
+        );
+    }
+}
+
+// 10초간 추가 피격이 없었을 때 회복 틱 시작
+void ABaruCharacter::OnHealthRegenDelayExpired()
+{
+    if (!HasAuthority() || bIsDead || Execute_IsDBNO(this)) return;
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            HealthRegenTickTimerHandle,
+            this,
+            &ABaruCharacter::TickHealthRegen,
+            HealthRegenTickInterval,
+            true
+        );
+    }
+}
+
+// 회복 틱: 최대 80.0f 한도까지 체력 점진 회복
+void ABaruCharacter::TickHealthRegen()
+{
+    if (!HasAuthority() || bIsDead || Execute_IsDBNO(this))
+    {
+        StopHealthRegen();
+        return;
+    }
+
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC) return;
+
+    const float CurrentHealth = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetHealthAttribute());
+    const float MaxHealth = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
+    const float TargetLimit = FMath::Min(MaxRegenHealth, MaxHealth);
+
+    // 80 이상 도달 시 회복 종료
+    if (CurrentHealth >= TargetLimit)
+    {
+        StopHealthRegen();
+        return;
+    }
+
+    const float HealAmount = HealthRegenRatePerSecond * HealthRegenTickInterval;
+    const float NewHealth = FMath::Min(CurrentHealth + HealAmount, TargetLimit);
+
+    ASC->SetNumericAttributeBase(UBaruCoreAttributeSet::GetHealthAttribute(), NewHealth);
+}
+
+// 모든 회복 타이머 초기화
+void ABaruCharacter::StopHealthRegen()
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(HealthRegenDelayTimerHandle);
+        World->GetTimerManager().ClearTimer(HealthRegenTickTimerHandle);
+    }
+}
+
+// [09.13] Early-Out 구조의 반동 회복 틱
+void ABaruCharacter::Tick(float DeltaSeconds)
+{
+   Super::Tick(DeltaSeconds);
+
+   // 로컬 클라이언트만 연산 (서버 및 원격 프록시 스킵)
+   if (!IsLocallyControlled())
+   {
+      return;
+   }
+   
+   // 1. 총기 반동 회복 (남은 반동이 있을 때만 가산)
+   if (RemainingRecoilRecoveryPitch > 0.0f)
+   {
+      const float RecoveryDelta = FMath::Min(RemainingRecoilRecoveryPitch, CurrentRecoilRecoverySpeed * DeltaSeconds);
+      AddControllerPitchInput(RecoveryDelta);
+      RemainingRecoilRecoveryPitch -= RecoveryDelta;
+
+      if (RemainingRecoilRecoveryPitch <= 0.0f)
+      {
+         RemainingRecoilRecoveryPitch = 0.0f;
+      }
+   }
+
+   // 2. 조준 집중 연출 보간 (FOV, 터널비전 비네팅, 색수차)
+   UpdateAimingEffects(DeltaSeconds);
+}
+
+// [09.13] 사격 시 카메라 킥 및 복구량 계산
+void ABaruCharacter::ApplyRecoil(const FBaruRecoilData& InRecoilData)
+{
+   if (!IsLocallyControlled() || !Controller)
+   {
+      return;
+   }
+
+   const float PitchKick = FMath::RandRange(InRecoilData.MinPitchRecoil, InRecoilData.MaxPitchRecoil);
+   const float YawKick = FMath::RandRange(InRecoilData.MinYawRecoil, InRecoilData.MaxYawRecoil);
+
+   // 카메라 즉각 킥 (-Pitch: 상향 앙각, Yaw: 좌우 수평 흔들림)
+   AddControllerPitchInput(-PitchKick);
+   AddControllerYawInput(YawKick);
+
+   // 복구 속도가 0보다 클 때만 복구 수치 누적
+   if (InRecoilData.RecoilRecoverySpeed > 0.0f)
+   {
+      RemainingRecoilRecoveryPitch += PitchKick;
+      CurrentRecoilRecoverySpeed = InRecoilData.RecoilRecoverySpeed;
+   }
+}
+
+// [09.13] 조준 기능 추가
+void ABaruCharacter::Input_AimStart()
+{
+   if (bIsDead || Execute_IsDBNO(this)) return;
+   SetAiming(true);
+}
+
+void ABaruCharacter::Input_AimStop()
+{
+   SetAiming(false);
+}
+
+void ABaruCharacter::SetAiming(bool bNewAiming)
+{
+   bIsAiming = bNewAiming;
+   CurrentTargetFOV = bIsAiming ? AimFOV : DefaultFOV;
+   CurrentTargetVignette = bIsAiming ? AimVignette : DefaultVignette;
+   CurrentTargetFringe = bIsAiming ? AimFringe : DefaultFringe;
+}
+
+void ABaruCharacter::UpdateAimingEffects(float DeltaSeconds)
+{
+   if (!FollowCamera)
+   {
+      return;
+   }
+
+   // FOV 보간 (목표값 오차 0.05도 이내 도달 시 연산 중단)
+   const float CurrentFOV = FollowCamera->FieldOfView;
+   if (!FMath::IsNearlyEqual(CurrentFOV, CurrentTargetFOV, 0.05f))
+   {
+      FollowCamera->SetFieldOfView(FMath::FInterpTo(CurrentFOV, CurrentTargetFOV, DeltaSeconds, AimInterpSpeed));
+   }
+   else if (CurrentFOV != CurrentTargetFOV)
+   {
+      FollowCamera->SetFieldOfView(CurrentTargetFOV);
+   }
+
+   // 터널비전 비네팅 보간 (오차 0.005 이내 도달 시 연산 중단)
+   float& CurrentVignette = FollowCamera->PostProcessSettings.VignetteIntensity;
+   if (!FMath::IsNearlyEqual(CurrentVignette, CurrentTargetVignette, 0.005f))
+   {
+      CurrentVignette = FMath::FInterpTo(CurrentVignette, CurrentTargetVignette, DeltaSeconds, AimInterpSpeed);
+   }
+   else if (CurrentVignette != CurrentTargetVignette)
+   {
+      CurrentVignette = CurrentTargetVignette;
+   }
+
+   // 렌즈 외곽 색수차 왜곡 보간 (오차 0.005 이내 도달 시 연산 중단)
+   float& CurrentFringe = FollowCamera->PostProcessSettings.SceneFringeIntensity;
+   if (!FMath::IsNearlyEqual(CurrentFringe, CurrentTargetFringe, 0.005f))
+   {
+      CurrentFringe = FMath::FInterpTo(CurrentFringe, CurrentTargetFringe, DeltaSeconds, AimInterpSpeed);
+   }
+   else if (CurrentFringe != CurrentTargetFringe)
+   {
+      CurrentFringe = CurrentTargetFringe;
+   }
 }

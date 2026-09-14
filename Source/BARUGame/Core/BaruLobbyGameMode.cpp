@@ -24,19 +24,56 @@ void ABaruLobbyGameMode::InitGame(const FString& MapName, const FString& Options
     BARU_LOG(LogBaruSession, Log, TEXT("ABaruLobbyGameMode Initialized on Map: %s"), *MapName);
 }
 
+void ABaruLobbyGameMode::BeginPlay()
+{
+    Super::BeginPlay();
+
+    if (!CachedLobbyGameState)
+    {
+        CachedLobbyGameState = GetGameState<ABaruLobbyGameState>();
+    }
+
+    // 로비 레벨 로드 시 솔로 플레이어 즉시 시작 가능 상태로 1회 강제 평가
+    OnPlayerReadyStatusChanged();
+}
+
 void ABaruLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 {
     Super::PostLogin(NewPlayer);
 
-    if (IsValid(NewPlayer))
+    // 신규 접속 시 공용 헬퍼 호출
+    InitializeLobbyPlayerState(NewPlayer);
+}
+
+void ABaruLobbyGameMode::HandleSeamlessTravelPlayer(AController*& C)
+{
+    Super::HandleSeamlessTravelPlayer(C);
+
+    if (APlayerController* PC = Cast<APlayerController>(C))
     {
-        BARU_NET_LOG(NewPlayer, LogBaruSession, Log, TEXT("Lobby Player Logged In: %s"), *NewPlayer->GetName());
-        
-        if (ABaruPlayerState* PS = NewPlayer->GetPlayerState<ABaruPlayerState>())
-        {
-            PS->OnReadyStatusChanged.RemoveDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
-            PS->OnReadyStatusChanged.AddDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
-        }
+        InitializeLobbyPlayerState(PC);
+    }
+}
+
+void ABaruLobbyGameMode::PostSeamlessTravel()
+{
+    Super::PostSeamlessTravel();
+
+    OnPlayerReadyStatusChanged();
+}
+
+void ABaruLobbyGameMode::InitializeLobbyPlayerState(APlayerController* PC)
+{
+    if (!IsValid(PC)) return;
+
+    BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("Lobby Player Initialized: %s"), *PC->GetName());
+
+    if (ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
+    {
+        PS->ResetPlayerStatusAndInventory();
+
+        PS->OnReadyStatusChanged.RemoveDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
+        PS->OnReadyStatusChanged.AddDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
     }
 
     if (!CachedLobbyGameState)
@@ -54,7 +91,6 @@ void ABaruLobbyGameMode::PostLogin(APlayerController* NewPlayer)
         CachedLobbyGameState->SetMatchState(EBaruMatchState::WaitingToStart);
     }
 
-    // 신규 인원 접속 시 레디 상태 재평가
     OnPlayerReadyStatusChanged();
 }
 

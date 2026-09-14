@@ -16,7 +16,7 @@ class UBaruItemInstance;
 class UBaruInventoryComponent;
 
 
-DECLARE_MULTICAST_DELEGATE(FOnBaruEquipmentUpdated);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBaruEquipmentUpdated);
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class BARUGAME_API UBaruEquipmentComponent : public UActorComponent
@@ -75,7 +75,8 @@ public:
 	UBaruItemInstance* GetEquippedWeaponItem(
 		EBaruEquipmentSlot WeaponSlot) const;
 
-		// 장착·해제·활성 무기 전환 시 UI에 변경을 알ㄹla.
+		// 장착·해제·활성 무기 전환 시 UI에 변경을 알림
+	UPROPERTY(BlueprintAssignable, Category = "BARU|Equipment")
 	FOnBaruEquipmentUpdated OnEquipmentUpdated;
 
 protected:
@@ -190,4 +191,22 @@ protected:
 	
 	UFUNCTION()
 	void OnRep_EquipmentState();
+	
+	
+	// [09.13] 재장전 GA & ASC 연동 추가
+protected:
+	// 현재 부여된 Reload GA 핸들 및 클래스 보관
+	FGameplayAbilitySpecHandle ActiveReloadAbilityHandle;
+	UPROPERTY(Transient)
+	TSubclassOf<UGameplayAbility> PrimaryReloadAbilityClass;
+	UPROPERTY(Transient)
+	TSubclassOf<UGameplayAbility> SecondaryReloadAbilityClass;
+
+	// 현재 활성 무기의 Reload GA 클래스 반환
+	TSubclassOf<UGameplayAbility> GetActiveWeaponReloadAbilityClass() const;
+
+public:
+	// 재장전 입력 요청 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
+	void RequestReloadActiveWeapon();
 };

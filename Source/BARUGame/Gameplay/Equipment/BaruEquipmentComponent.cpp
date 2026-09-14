@@ -295,12 +295,16 @@ bool UBaruEquipmentComponent::EquipWeapon(
         PrimaryWeapon = NewWeapon;
         PrimaryWeaponItem = SourceItem;
         PrimaryFireAbilityClass = WeaponData->FireAbilityClass;
+        // [09.13] 주무기 장전 어빌리티 보관
+        PrimaryReloadAbilityClass = WeaponData->ReloadAbilityClass;
     }
     else
     {
         SecondaryWeapon = NewWeapon;
         SecondaryWeaponItem = SourceItem;
         SecondaryFireAbilityClass = WeaponData->FireAbilityClass;
+        // [09.13] 보조무기 장전 어빌리티 보관
+        SecondaryReloadAbilityClass = WeaponData->ReloadAbilityClass;
     }
     
     NewWeapon->SetActorHiddenInGame(false);
@@ -847,10 +851,15 @@ void UBaruEquipmentComponent::ClearActiveWeaponFireAbilityOnServer()
 
     const FGameplayAbilitySpecHandle HandleToRemove =
         ActiveFireAbilityHandle;
+    
+    // [09.13] 재장전 핸들러 추가
+    const FGameplayAbilitySpecHandle ReloadHandle = ActiveReloadAbilityHandle;
 
     // 취소 과정에서 다른 처리가 실행되더라도 같은 핸들을 다시 제거하지 않도록
     // 내부 기록부터 비웁니다.
     ActiveFireAbilityHandle = FGameplayAbilitySpecHandle();
+    // [09.13] 재장전 핸들러 추가
+    ActiveReloadAbilityHandle = FGameplayAbilitySpecHandle();
     ActiveFireAbilityASC.Reset();
 
     if (!IsValid(GrantedASC) || !HandleToRemove.IsValid())
@@ -860,6 +869,13 @@ void UBaruEquipmentComponent::ClearActiveWeaponFireAbilityOnServer()
 
     GrantedASC->CancelAbilityHandle(HandleToRemove);
     GrantedASC->ClearAbility(HandleToRemove);
+    
+    // [09.13] Reload 어빌리티 해제
+    if (ReloadHandle.IsValid())
+    {
+        GrantedASC->CancelAbilityHandle(ReloadHandle);
+        GrantedASC->ClearAbility(ReloadHandle);
+    }
 }
 
 void UBaruEquipmentComponent::SyncActiveWeaponFireAbilityOnServer()
@@ -883,6 +899,9 @@ void UBaruEquipmentComponent::SyncActiveWeaponFireAbilityOnServer()
 
     const TSubclassOf<UGameplayAbility> FireClass =
         GetActiveWeaponFireAbilityClass();
+    
+    // [09.13] 재장전 추가
+    const TSubclassOf<UGameplayAbility> ReloadClass = GetActiveWeaponReloadAbilityClass(); // [수정]
 
     if (!FireClass || FireClass->HasAnyClassFlags(CLASS_Abstract))
     {
@@ -906,68 +925,33 @@ void UBaruEquipmentComponent::SyncActiveWeaponFireAbilityOnServer()
         ? PS->GetBaruAbilitySystemComponent()
         : nullptr;
 
+    // [09.13] 복잡한 주석을 정리하고 재장전 로직 추가
     if (!IsValid(ASC))
     {
-        // 새 발사 GA를 연결할 수 없는 상태에서 이전 GA가 남지 않도록 정리.
         ClearActiveWeaponFireAbilityOnServer();
-
-        BARU_NET_LOG(
-            OwnerActor, LogBaruGAS, Warning,
-            TEXT("Fire GA 연결 실패: PlayerState ASC가 없습니다."));
-
         return;
     }
 
-    // ASC, GA 클래스, 원본 무기 Actor가 모두 같으면 중복 부여하지 않음.
-    if (ActiveFireAbilityHandle.IsValid()
-        && ActiveFireAbilityASC.Get() == ASC)
-    {
-        const FGameplayAbilitySpec* ExistingSpec =
-            ASC->FindAbilitySpecFromHandle(ActiveFireAbilityHandle);
-
-        if (ExistingSpec
-            && ExistingSpec->Ability
-            && ExistingSpec->Ability->GetClass() == FireClass.Get()
-            && ExistingSpec->SourceObject.Get() == ActiveWeapon)
-        {
-            return;
-        }
-    }
-
-    // 이전 무기의 GA를 취소·제거한 뒤 새 GA를 부여.
+    // 기존 GA 해제 후 새로 부여
     ClearActiveWeaponFireAbilityOnServer();
 
-    // FireClass는 DA에서 선택한 GA_Revolver_Fire 또는 GA_Rifle_Fire.
-    // SourceObject에는 이번에 실제로 장착된 무기 Actor를 저장.
-    FGameplayAbilitySpec NewSpec(
-        FireClass,
-        1,
-        INDEX_NONE,
-        ActiveWeapon);
-
-    NewSpec.GetDynamicSpecSourceTags().AddTag(
-        FBaruGameplayTags::Get().InputTag_Ability_Primary);
-
-    ActiveFireAbilityHandle = ASC->GiveAbility(NewSpec);
-
-    if (!ActiveFireAbilityHandle.IsValid())
+    // 1. 발사 GA 부여 (InputTag_Ability_Primary)
+    if (FireClass && !FireClass->HasAnyClassFlags(CLASS_Abstract))
     {
-        BARU_NET_LOG(
-            OwnerActor, LogBaruGAS, Warning,
-            TEXT("Fire GA 부여 실패: Weapon=%s GA=%s"),
-            *GetNameSafe(ActiveWeapon),
-            *GetNameSafe(FireClass.Get()));
+        FGameplayAbilitySpec FireSpec(FireClass, 1, INDEX_NONE, ActiveWeapon);
+        FireSpec.GetDynamicSpecSourceTags().AddTag(FBaruGameplayTags::Get().InputTag_Ability_Primary);
+        ActiveFireAbilityHandle = ASC->GiveAbility(FireSpec);
+    }
 
-        return;
+    // 2. 재장전 GA 부여 (InputTag_Reload)
+    if (ReloadClass && !ReloadClass->HasAnyClassFlags(CLASS_Abstract))
+    {
+        FGameplayAbilitySpec ReloadSpec(ReloadClass, 1, INDEX_NONE, ActiveWeapon);
+        ReloadSpec.GetDynamicSpecSourceTags().AddTag(FBaruGameplayTags::Get().InputTag_Reload);
+        ActiveReloadAbilityHandle = ASC->GiveAbility(ReloadSpec);
     }
 
     ActiveFireAbilityASC = ASC;
-
-    BARU_NET_LOG(
-        OwnerActor, LogBaruGAS, Log,
-        TEXT("활성 Fire GA 변경: Weapon=%s GA=%s"),
-        *GetNameSafe(ActiveWeapon),
-        *GetNameSafe(FireClass.Get()));
 }
     // 장비 해제 관련.
 void UBaruEquipmentComponent::RequestUnequipWeapon( EBaruEquipmentSlot WeaponSlot)
@@ -1122,4 +1106,33 @@ bool UBaruEquipmentComponent::ReleaseWeaponForWorldDropOnServer(
     GetOwner()->ForceNetUpdate();
     // OnEquipmentUpdated는 Inventory 삭제 완료 후 호출합니다.
     return true;
+}
+
+// [09.13] 재장전 로직 추가
+
+TSubclassOf<UGameplayAbility> UBaruEquipmentComponent::GetActiveWeaponReloadAbilityClass() const
+{
+    switch (ActiveWeaponSlot)
+    {
+    case EBaruEquipmentSlot::PrimaryWeapon:
+        return PrimaryReloadAbilityClass;
+    case EBaruEquipmentSlot::SecondaryWeapon:
+        return SecondaryReloadAbilityClass;
+    default:
+        return nullptr;
+    }
+}
+
+void UBaruEquipmentComponent::RequestReloadActiveWeapon()
+{
+    APawn* Pawn = Cast<APawn>(GetOwner());
+    if (!IsValid(Pawn) || !Pawn->IsLocallyControlled()) return;
+
+    ABaruPlayerState* PS = Pawn->GetPlayerState<ABaruPlayerState>();
+    UBaruAbilitySystemComponent* ASC = PS ? PS->GetBaruAbilitySystemComponent() : nullptr;
+
+    if (IsValid(ASC))
+    {
+        ASC->AbilityInputTagPressed(FBaruGameplayTags::Get().InputTag_Reload);
+    }
 }

@@ -166,6 +166,67 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
     {
        BARU_LOG(LogBaruSession, Warning, TEXT("CreateSession: OnlineSubsystem unavailable. Fallback to Local Listen Server."));
         
+		if (GetWorld() && GetWorld()->GetNetMode() != NM_ListenServer)
+		{
+			OpenLobbyLevelAsListenServer(StoredLobbyLevel);
+		}
+
+		OnCreateSessionCompleteEvent.Broadcast(true);
+		return;
+	}
+
+	// 이미 열린 세션이 있는 경우
+	if (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
+	{
+		bCreateSessionAfterDestroy = true;
+		DestroySessionCompleteDelegateHandle = SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteDelegate);
+		SessionInterface->DestroySession(NAME_GameSession);
+		return;
+	}
+
+	CreateSessionCompleteDelegateHandle = SessionInterface->AddOnCreateSessionCompleteDelegate_Handle(CreateSessionCompleteDelegate);
+
+	LastSessionSettings = MakeShareable(new FOnlineSessionSettings());
+	LastSessionSettings->bIsLANMatch = bIsLANMatch;
+	LastSessionSettings->NumPublicConnections = NumPublicConnections;
+	LastSessionSettings->bAllowJoinInProgress = true;
+	LastSessionSettings->bAllowJoinViaPresence = true;
+	
+	LastSessionSettings->bAllowInvites = true;
+	LastSessionSettings->bAllowJoinViaPresenceFriendsOnly = false;
+
+	LastSessionSettings->bShouldAdvertise = true;
+	LastSessionSettings->bUsesPresence = true;
+	LastSessionSettings->bUseLobbiesIfAvailable = true;
+
+	FString HostPlayerName = TEXT("Host");
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		if (PC->PlayerState)
+		{
+			HostPlayerName = PC->PlayerState->GetPlayerName();
+		}
+	}
+	
+	const FString MapAssetPath = StoredLobbyLevel.GetAssetName();
+
+	// BARU 게임 Room 식별을 위한 메타데이터 등록
+	LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_MATCH_KEY, BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_SERVER_NAME, ServerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_MAP_NAME, MapAssetPath, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_HOST_NAME, HostPlayerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+	const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
+	FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
+
+	BARU_LOG(LogBaruSession, Log, TEXT("CreateSession: Creating Steam Lobby Session (Presence=1, Lobbies=1, ServerName='%s')"), *ServerName);
+
+	if (!NetId.IsValid() || !NetId.GetUniqueNetId().IsValid() || !SessionInterface->CreateSession(*NetId.GetUniqueNetId(), NAME_GameSession, *LastSessionSettings))
+	{
+		SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(CreateSessionCompleteDelegateHandle);
+		BARU_LOG(LogBaruSession, Error, TEXT("CreateSession failed immediately on execution."));
+		OnCreateSessionCompleteEvent.Broadcast(false);
+	}
        if (GetWorld() && GetWorld()->GetNetMode() != NM_ListenServer)
        {
           OpenLobbyLevelAsListenServer(StoredLobbyLevel);

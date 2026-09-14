@@ -5,6 +5,7 @@
 #include "BaruGA_Reload.generated.h"
 
 class UAnimMontage;
+class ABaruWeaponBase;
 
 UCLASS(Abstract)
 class BARUGAME_API UBaruGA_Reload : public UBaruGameplayAbility
@@ -13,7 +14,14 @@ class BARUGAME_API UBaruGA_Reload : public UBaruGameplayAbility
 
 public:
 	UBaruGA_Reload();
-
+	
+	virtual bool CanActivateAbility(
+		const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayTagContainer* SourceTags = nullptr,
+		const FGameplayTagContainer* TargetTags = nullptr,
+		OUT FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
+	
 	virtual void ActivateAbility(
 		const FGameplayAbilitySpecHandle Handle,
 		const FGameplayAbilityActorInfo* ActorInfo,
@@ -30,6 +38,8 @@ public:
 protected:
 	UFUNCTION()
 	void OnReloadCompleted();
+	
+	ABaruWeaponBase* GetActiveWeaponFromActorInfo() const;
 
 protected:
 	UPROPERTY(EditDefaultsOnly, Category = "BARU|Reload")

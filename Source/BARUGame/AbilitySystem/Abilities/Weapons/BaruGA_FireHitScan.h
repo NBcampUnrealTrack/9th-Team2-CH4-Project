@@ -59,8 +59,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat|Recoil", meta = (ClampMin = "0.0"))
 	float SpreadAngle = 1.0f;
 	
-	// UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat|Recoil")
-	// FBaruRecoilData RecoilData; 
+	// 총기 반동 설정 데이터
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat|Recoil")
+	FBaruRecoilData RecoilData;
 
 private:
 	FTimerHandle FireTimerHandle;

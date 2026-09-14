@@ -8,7 +8,9 @@
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "Core/BaruLobbyGameMode.h"   // 추가 준비 상태 변경 시 로비 재평가 요청
 #include "Components/BaruHealthComponent.h"                       
-#include "Gameplay/Inventory/BaruInventoryComponent.h"          
+#include "Gameplay/Inventory/BaruInventoryComponent.h"      
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"
+#include "GameplayTags/BaruGameplayTags.h"
 #include "BaruLog.h"
 
 ABaruPlayerState::ABaruPlayerState()
@@ -256,4 +258,67 @@ void ABaruPlayerState::OnRep_MonsterKillCount()
 void ABaruPlayerState::HandleTensionChanged(const FOnAttributeChangeData& ChangeData)
 {
     OnTensionChanged.Broadcast(ChangeData.NewValue);
+}
+
+// [09.13] 닉네임/계정 정보는 보존한 채 스탯, 장비, 소지품 초기화
+void ABaruPlayerState::ResetPlayerStatusAndInventory()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// 1. 생존/사망/다운 상태 플래그 초기화 (닉네임/NetID는 유지)
+	SetDeadState(false);
+	SetDBNOState(false);
+	bIsReady = false;
+	MonsterKillCount = 0;
+	OnRep_MonsterKillCount();
+
+	// 2. 인벤토리 소지품 전량 삭제
+	if (InventoryComponent)
+	{
+		InventoryComponent->ClearInventory();
+	}
+
+	// 3. 캐릭터가 장착 중인 주무기/보조무기 액터 제거 및 슬롯 해제
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UBaruEquipmentComponent* EquipComp = ControlledPawn->FindComponentByClass<UBaruEquipmentComponent>())
+		{
+			EquipComp->UnequipWeapon(EBaruEquipmentSlot::PrimaryWeapon);
+			EquipComp->UnequipWeapon(EBaruEquipmentSlot::SecondaryWeapon);
+		}
+	}
+
+	// 4. GAS 어빌리티 중단 및 디버프/상태 태그 정리
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->CancelAllAbilities();
+
+		// 사망, 다운, 무적, 장전, 조준 등 전투 태그 일괄 제거
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Dead);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Combat_Reloading);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Combat_Aiming);
+
+		// Core 스탯 리셋 (체력 = MaxHealth)
+		if (CoreAttributeSet)
+		{
+			const float MaxHP = CoreAttributeSet->GetMaxHealth();
+			AbilitySystemComponent->SetNumericAttributeBase(UBaruCoreAttributeSet::GetHealthAttribute(), MaxHP);
+		}
+
+		// Player 스탯 리셋 (정신력 = MaxSanity, 긴장도 = 0, 소지 무게 = 0)
+		if (PlayerAttributeSet)
+		{
+			const float MaxSanity = PlayerAttributeSet->GetMaxSanity();
+			AbilitySystemComponent->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetSanityAttribute(), MaxSanity);
+			AbilitySystemComponent->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetTensionAttribute(), 0.0f);
+			AbilitySystemComponent->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetCarryWeightAttribute(), 0.0f);
+		}
+	}
+
+	BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Player '%s' reset complete (ID retained, stats/items wiped)."), *GetPlayerName());
 }

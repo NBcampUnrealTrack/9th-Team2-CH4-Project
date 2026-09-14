@@ -1,5 +1,7 @@
 #include "Gimmicks/BaruCoopDoorActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "Gimmicks/BaruCoopButtonActor.h"
@@ -21,6 +23,10 @@ ABaruCoopDoorActor::ABaruCoopDoorActor()
     ShutterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ShutterMesh"));
     ShutterMesh->SetupAttachment(FrameMesh);
     ShutterMesh->SetCollisionProfileName(TEXT("BlockAll"));
+    
+    DoorMovementAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("DoorMovementAudioComp"));
+    DoorMovementAudioComp->SetupAttachment(ShutterMesh);
+    DoorMovementAudioComp->bAutoActivate = false;
 }
 
 void ABaruCoopDoorActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -180,10 +186,40 @@ void ABaruCoopDoorActor::OnRep_DoorState()
     if (DoorState == EBaruCoopDoorState::Stopped)
     {
         SetActorTickEnabled(false);
+
+        // [09.13 수정] 이동 중지 시 루프 사운드 종료 및 3D 쿵 닫힘/정지음 출력
+        if (DoorMovementAudioComp && DoorMovementAudioComp->IsPlaying())
+        {
+            DoorMovementAudioComp->Stop();
+        }
+
+        if (DoorStopSound && ShutterMesh)
+        {
+            UGameplayStatics::PlaySoundAtLocation(
+                this,
+                DoorStopSound,
+                ShutterMesh->GetComponentLocation(),
+                1.0f,
+                1.0f,
+                0.0f,
+                DoorAudioAttenuation
+            );
+        }
     }
     else
     {
         SetActorTickEnabled(true);
+
+        // 문이 열리거나 닫히기 시작할 때 셔터 위치에서 3D 모터/체인 루핑 사운드 시작
+        if (DoorMovementAudioComp && DoorMovingLoopSound)
+        {
+            if (!DoorMovementAudioComp->IsPlaying())
+            {
+                DoorMovementAudioComp->SetSound(DoorMovingLoopSound);
+                DoorMovementAudioComp->AttenuationSettings = DoorAudioAttenuation;
+                DoorMovementAudioComp->Play();
+            }
+        }
     }
 
     BP_OnDoorMovementStateChanged(DoorState);

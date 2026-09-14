@@ -7,6 +7,9 @@
 class UStaticMeshComponent;
 class ABaruCoopButtonActor;
 class APawn;
+class UAudioComponent;
+class USoundBase;
+class USoundAttenuation;
 
 UENUM(BlueprintType)
 enum class EBaruCoopDoorState : uint8
@@ -58,6 +61,18 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
     TObjectPtr<UStaticMeshComponent> ShutterMesh;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+    TObjectPtr<UAudioComponent> DoorMovementAudioComp;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor|Audio")
+    TObjectPtr<USoundBase> DoorMovingLoopSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor|Audio")
+    TObjectPtr<USoundBase> DoorStopSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor|Audio")
+    TObjectPtr<USoundAttenuation> DoorAudioAttenuation;
 
     /** 셔터가 위로 올라갈 최대 높이 (cm) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor|Movement", meta = (ClampMin = "50.0"))

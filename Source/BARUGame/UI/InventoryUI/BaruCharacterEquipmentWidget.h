@@ -97,7 +97,10 @@ protected:
 
 private:
 	void BindEquipment();
+	
+	UFUNCTION()
 	void HandleEquipmentUpdated();
+	
 	void RefreshWeaponSlots();
 
 	void SetWeaponSlotDisplay(
