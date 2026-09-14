@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "TimerManager.h"
 #include "GameFramework/Actor.h"
 #include "BaruMonsterDirector.generated.h"
 
@@ -123,8 +124,62 @@ public:
 	{
 		return CurrentDirectorState;
 	}
+	
+	// =========================================================================
+	// 팀 전체 부담도
+	// =========================================================================
+
+	// 현재 팀이 얼마나 벅찬 상태인지 직접 설정
+	// 0은 매우 여유로운 상태, 100은 매우 위험한 상태
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director|Team Burden"
+	)
+	void SetTeamBurden(float NewBurden);
+
+	// 현재 팀 부담도에 변화량을 더함
+	// 양수는 부담 증가, 음수는 부담 감소
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director|Team Burden"
+	)
+	void AddTeamBurden(float BurdenDelta);
+
+	// 현재 팀 부담도 반환
+	UFUNCTION(
+		BlueprintPure,
+		Category = "Monster|Director|Team Burden"
+	)
+	float GetTeamBurden() const
+	{
+		return TeamBurden;
+	}
+	
+	// 일부 플레이어가 엘리베이터 밖에 남은 상태로
+	// 출발 카운트다운이 진행 중인지 설정
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director|Extraction"
+	)
+	void SetExtractionActive(bool bNewExtractionActive);
+
+	// 현재 탈출 저지 상태가 필요한지 반환
+	UFUNCTION(
+		BlueprintPure,
+		Category = "Monster|Director|Extraction"
+	)
+	bool IsExtractionActive() const
+	{
+		return bExtractionActive;
+	}
 
 protected:
+	
+	// 플레이어 상태가 준비된 후 팀 부담도 자동 계산을 시작
+	virtual void BeginPlay() override;
 	
 	virtual void EndPlay(
 	   const EEndPlayReason::Type EndPlayReason
@@ -153,11 +208,45 @@ protected:
 		meta = (ClampMin = "0")
 	)
 	int32 MaxMonstersPerPlayer = 3;
+	
+	// 플레이어 배정 상태를 다시 확인하는 간격
+	// Actor Tick 대신 타이머로 처리
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Allocation",
+		meta = (ClampMin = "0.1")
+	)
+	float AssignmentUpdateInterval = 2.0f;
 
 private:
 	// 지휘 대상의 수명을 유지하지 않도록 약한 참조로 보관
 	UPROPERTY(Transient)
 	TArray<TWeakObjectPtr<ABaruMonsterCharacter>> RegisteredMonsters;
+	
+	// Key: 배정된 몬스터
+	// Value: 해당 몬스터가 압박하도록 배정된 플레이어
+	//
+	// 약한 참조를 사용하므로 몬스터나 플레이어의 제거를 막지 않음
+	UPROPERTY(Transient)
+	TMap<
+		TWeakObjectPtr<ABaruMonsterCharacter>,
+		TWeakObjectPtr<APawn>
+	> MonsterAssignments;
+
+	// 파괴·사망한 몬스터와 유효하지 않은 플레이어의 배정 제거
+	void RemoveInvalidAssignments();
+
+	// 현재 위협도와 운영 상태를 기준으로 몬스터 배정 갱신
+	void UpdateMonsterAssignments();
+
+	// 해당 플레이어에게 보낼 수 있는 가장 가까운 미배정 몬스터 탐색
+	ABaruMonsterCharacter* FindClosestUnassignedMonster(
+		const APawn* PlayerPawn
+	);
+
+	// Actor Tick 대신 일정 간격으로 배정을 확인하는 타이머
+	FTimerHandle MonsterAssignmentUpdateTimerHandle;
 
 	// 파괴되거나 사망한 몬스터를 목록에서 제거
 	void RemoveInvalidMonsters();
@@ -178,6 +267,23 @@ private:
 	// 파괴됐거나 조종이 해제된 플레이어의 기록을 제거
 	void RemoveInvalidPlayerThreats();
 	
+	// 플레이어 팀 전체가 현재 얼마나 벅찬지를 나타내는 값
+	// 0에 가까움:
+	// 체력이 충분하고 다운된 인원이 없으며 전투를 잘 처리 중
+	// 100에 가까움:
+	// 체력이 부족하거나 다운된 인원이 있고
+	// 많은 몬스터에게 동시에 공격받는 상태
+	// 이 값이 낮으면 Pressure 진입 후보가 되고
+	// 높으면 Relief 진입 후보가 됨
+	UPROPERTY(
+		VisibleInstanceOnly,
+		BlueprintReadOnly,
+		Transient,
+		Category = "Monster|Director|Team Burden",
+		meta = (AllowPrivateAccess = "true")
+	)
+	float TeamBurden = 0.0f;
+	
 	// 현재 적용 중인 디렉터 운영 상태
 	// 게임 시작 시에는 평상시로 시작
 	//
@@ -192,5 +298,22 @@ private:
 	)
 	EBaruDirectorState CurrentDirectorState =
 		EBaruDirectorState::Normal;
+	
+	// 엘리베이터가 보내는 탈출 저지 요청
+	// 서버 StateTree의 Extraction 전환 조건으로 사용
+	UPROPERTY(
+		VisibleInstanceOnly,
+		BlueprintReadOnly,
+		Transient,
+		Category = "Monster|Director|Extraction",
+		meta = (AllowPrivateAccess = "true")
+	)
+	bool bExtractionActive = false;
+	
+	// 현재 PlayerState들을 읽어 팀 부담도를 다시 계산
+	void RecalculateTeamBurden();
+
+	// Actor Tick 대신 1초마다 부담도를 계산하기 위한 타이머
+	FTimerHandle TeamBurdenUpdateTimerHandle;
 	
 };
