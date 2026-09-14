@@ -1,10 +1,11 @@
 ﻿#include "UI/InventoryUI/BaruInventoryScreenWidget.h"
-
 #include "Components/SizeBox.h"
 #include "Player/BaruPlayerState.h"
+#include "Player/BaruPlayerController.h"
 #include "Gameplay/Inventory/BaruInventoryComponent.h"
 #include "Gameplay/Items/BaruItemInstance.h"
 #include "UI/InventoryUI/BaruInventoryDragDropOperation.h"
+#include "Input/Reply.h"
 
 UBaruInventoryScreenWidget::UBaruInventoryScreenWidget(
 	const FObjectInitializer& ObjectInitializer)
@@ -13,10 +14,10 @@ UBaruInventoryScreenWidget::UBaruInventoryScreenWidget(
 	InputConfig = EBaruWidgetInputMode::GameAndMenu;
 	GameMouseCaptureMode = EMouseCaptureMode::NoCapture;
 
-	bSupportsActivationFocus = false;
-	
-	// [09.14] ESC 키를 누르면 CommonUI 기본 뒤로가기(닫기)가 동작하도록 활성화
-	bIsBackHandler = true;
+	// [수정 09.14] 슬레이트 키 입력을 받을 수 있도록 설정
+	SetIsFocusable(true);
+	bSupportsActivationFocus = true;
+	bIsBackHandler = false;
 }
 
 // [09.14] 인벤토리 화면 어디를 클릭해서 UI 포커스가 잡혀 있어도 I 키를 누르면 닫힘
@@ -24,8 +25,11 @@ FReply UBaruInventoryScreenWidget::NativeOnKeyDown(const FGeometry& InGeometry, 
 {
 	if (InKeyEvent.GetKey() == EKeys::I)
 	{
-		DeactivateWidget();
-		return FReply::Handled();
+		if (ABaruPlayerController* PC = Cast<ABaruPlayerController>(GetOwningPlayer()))
+		{
+			PC->ToggleInventory();
+			return FReply::Handled();
+		}
 	}
 
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);

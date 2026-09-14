@@ -15,6 +15,7 @@
 #include "Engine/LocalPlayer.h"
 #include "BaruLog.h"
 #include "UI/ItemUI/BaruItemFocusComponent.h"
+#include "Framework/Application/SlateApplication.h"
 
 ABaruPlayerController::ABaruPlayerController()
 {
@@ -95,6 +96,11 @@ void ABaruPlayerController::Input_ToggleGameMenu()
 void ABaruPlayerController::ToggleGameMenu()
 {
     if (!IsLocalController()) return;
+    
+    // [09.14] UI 키 연타 방지하여 안전성 보장
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    if (CurrentTime - LastGameMenuToggleTime < 0.2f) return;
+    LastGameMenuToggleTime = CurrentTime;
 
     UBaruUIManagerSubsystem* UIManager = ULocalPlayer::GetSubsystem<UBaruUIManagerSubsystem>(GetLocalPlayer());
     if (!UIManager) return;
@@ -112,6 +118,12 @@ void ABaruPlayerController::ToggleGameMenu()
             InputMode.SetConsumeCaptureMouseDown(false);
             SetInputMode(InputMode);
             SetShowMouseCursor(false);
+            
+            // [09.14] 닫힐 때 뷰포트로 키보드 포커스 강제 회수
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().SetAllUserFocusToGameViewport();
+            }
             return;
         }
         
@@ -147,6 +159,12 @@ void ABaruPlayerController::ToggleGameMenu()
             SetInputMode(InputMode);
             SetShowMouseCursor(false);
 
+            // [09.14] 버튼 클릭 후 슬레이트 포커스가 공중에 뜨는 현상 방지
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().SetAllUserFocusToGameViewport();
+            }
+            
             BARU_LOG(LogBaruUI, Log, TEXT("GameMenu Deactivated -> Restored InputModeGameOnly."));
         });
     }
@@ -192,6 +210,14 @@ void ABaruPlayerController::ToggleInventory()
     {
         return;
     }
+    
+    // [09.14] 더블 트리거(0.1초 만에 닫히고 다시 열리는 레이스 컨디션) 방지 쿨타임 (0.25초)
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    if (CurrentTime - LastInventoryToggleTime < 0.25f)
+    {
+        return;
+    }
+    LastInventoryToggleTime = CurrentTime;
 
     UBaruUIManagerSubsystem* UIManager = ULocalPlayer::GetSubsystem<UBaruUIManagerSubsystem>(GetLocalPlayer());
     if (!UIManager)
@@ -214,6 +240,12 @@ void ABaruPlayerController::ToggleInventory()
             SetInputMode(InputMode);
             SetShowMouseCursor(false);
 
+            // [09.14] 1인칭 FPS 뷰포트로 키보드 포커스 즉시 강제 회수
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().SetAllUserFocusToGameViewport();
+            }
+            
             BARU_LOG(LogBaruUI, Log, TEXT("Inventory closed -> Restored FPS InputMode."));
             return;
         }
@@ -245,11 +277,17 @@ void ABaruPlayerController::ToggleInventory()
         SetInputMode(InputMode);
         SetShowMouseCursor(false);
 
-        BARU_LOG(LogBaruUI, Log, TEXT("Inventory Deactivated -> Restored FPS InputMode."));
+        if (FSlateApplication::IsInitialized())
+        {
+            FSlateApplication::Get().SetAllUserFocusToGameViewport();
+        }
+
+        BARU_LOG(LogBaruUI, Log, TEXT("Inventory Deactivated -> Restored FPS Viewport Focus."));
     });
 
     // [수정 09.14] SetWidgetToFocus를 절대 호출하지 않고, 키 입력을 뷰포트에 남겨 'I' 키를 다시 인식하도록 설정
     FInputModeGameAndUI InputMode;
+    InputMode.SetWidgetToFocus(ActiveInventoryWidget->TakeWidget());
     InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
     InputMode.SetHideCursorDuringCapture(false);
     SetInputMode(InputMode);

@@ -159,4 +159,8 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
 	TObjectPtr<UBaruItemFocusComponent> ItemFocusComponent;
+	
+	// [추가 09.14] 키 연타 및 더블 트리거 방지용 타임스탬프
+	float LastInventoryToggleTime = 0.0f;
+	float LastGameMenuToggleTime = 0.0f;
 };
