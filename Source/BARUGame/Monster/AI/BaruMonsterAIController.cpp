@@ -900,6 +900,29 @@ void ABaruMonsterAIController::RegisterDamageThreat(
 
     // 새 피해를 더하기 전에 기존 위협도에 경과시간만큼 감소 적용
     UpdateThreat();
+	
+	// 공격자가 시야에 보이지 않더라도,
+	// 공격받은 몬스터는 공격이 날아온 위치를 조사하도록 처리
+	if (!IsValid(CurrentTarget.Get()))
+	{
+		// 공격자의 현재 위치를 마지막 확인 위치로 기억
+		RememberLastKnownTargetLocation(
+			AttackerPawn->GetActorLocation()
+		);
+
+		// Behavior Tree가 즉시 조사 분기로 넘어갈 수 있도록
+		// 변경된 위치 정보를 Blackboard에 반영
+		UpdateBlackboardFromPerceptionState();
+
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Log,
+			TEXT("Hit source location remembered: %s / Attacker=%s"),
+			*AttackerPawn->GetActorLocation().ToString(),
+			*GetNameSafe(AttackerPawn)
+		);
+	}
 
     float& StoredThreat = DamageThreatByPlayer.FindOrAdd(
         TWeakObjectPtr<APawn>(AttackerPawn)

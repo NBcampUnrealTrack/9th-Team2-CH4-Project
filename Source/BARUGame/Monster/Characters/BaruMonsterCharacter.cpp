@@ -773,18 +773,30 @@ void ABaruMonsterCharacter::ApplyCombatDamage_Implementation(
         return;
     }
 
-    // [추가] 그로기·밀림 검사보다 먼저 피해 위협도 등록
-    if (ABaruMonsterAIController* MonsterController =
-        Cast<ABaruMonsterAIController>(GetController()))
-    {
-        if (APawn* AttackerPawn = Cast<APawn>(AttackOriginActor))
-        {
-            MonsterController->RegisterDamageThreat(
-                AttackerPawn,
-                DamageAmount
-            );
-        }
-    }
+	// 그로기·밀림 검사보다 먼저 공격한 플레이어의 위협도 등록
+	if (APawn* AttackerPawn = Cast<APawn>(AttackOriginActor))
+	{
+		// 개별 몬스터가 누구를 우선 공격할지 결정하는
+		// 기존 AIController 전용 피해 위협도
+		if (ABaruMonsterAIController* MonsterController =
+			Cast<ABaruMonsterAIController>(GetController()))
+		{
+			MonsterController->RegisterDamageThreat(
+				AttackerPawn,
+				DamageAmount
+			);
+		}
+
+		// 전체 Director가 해당 플레이어에게 몇 마리를
+		// 배정할지 판단하기 위한 공용 위협도
+		if (IsValid(AssignedDirector))
+		{
+			AssignedDirector->ReportPlayerDamageThreat(
+				AttackerPawn,
+				DamageAmount
+			);
+		}
+	}
 
     // 그로기 중에는 위협도만 등록하고 밀림 생략
     if (bIsGroggy ||
@@ -824,8 +836,8 @@ void ABaruMonsterCharacter::ApplyCombatDamage_Implementation(
     {
         return;
     }
-
-    MovementComponent->StopMovementImmediately();
+	
+	
 
     MovementComponent->AddImpulse(
         PushDirection * PushSpeed,

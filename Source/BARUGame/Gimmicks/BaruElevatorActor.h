@@ -8,6 +8,7 @@
 
 class UBoxComponent;
 class UStaticMeshComponent;
+class ABaruMonsterDirector;
 class ABaruGameState;
 class APawn;
 class USoundBase;
@@ -35,6 +36,10 @@ public:
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual void BeginPlay() override;
+    
+    virtual void EndPlay(
+    const EEndPlayReason::Type EndPlayReason
+    ) override;
 
     // ==============================================================================
     // IInteractableInterface 구현부 (콘솔 스위치 수동 작동용)
@@ -160,4 +165,14 @@ private:
 
     void EnableElevatorActivation();
     bool IsPlayerBoarded(const APawn* Interactor) const;
+    
+    // 현재 레벨의 몬스터 디렉터
+    UPROPERTY(Transient)
+    TObjectPtr<ABaruMonsterDirector> CachedMonsterDirector;
+
+    // 엘리베이터 외부에 남아 있는 살아 있는 플레이어 탐색
+    APawn* FindLivingPlayerOutsideElevator() const;
+
+    // 현재 카운트다운과 탑승 상태를 디렉터에 전달
+    void RefreshDirectorExtractionState();
 };

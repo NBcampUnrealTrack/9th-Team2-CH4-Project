@@ -8,6 +8,7 @@
 #include "Interfaces/CombatInterface.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/GameStateBase.h"
+#include "Gimmicks/BaruControlRoomSpawner.h"
 #include "Player/BaruPlayerState.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -809,6 +810,40 @@ void ABaruMonsterDirector::AddTeamBurden(
     SetTeamBurden(TeamBurden + BurdenDelta);
 }
 
+void ABaruMonsterDirector::SetExtractionTarget(
+    APawn* TargetPlayer
+)
+{
+    // 탈출 저지 목표는 서버에서만 변경
+    if (GetNetMode() == NM_Client)
+    {
+        return;
+    }
+
+    // nullptr가 전달되면 기존 탈출 목표 제거
+    if (!IsValid(TargetPlayer))
+    {
+        ExtractionTargetPlayer.Reset();
+        return;
+    }
+
+    // 실제 플레이어가 조종하는 Pawn만 목표로 저장
+    if (!TargetPlayer->IsPlayerControlled())
+    {
+        return;
+    }
+
+    ExtractionTargetPlayer = TargetPlayer;
+
+    BARU_NET_LOG(
+        this,
+        LogBaruAI,
+        Log,
+        TEXT("Extraction target changed: %s"),
+        *GetNameSafe(TargetPlayer)
+    );
+}
+
 void ABaruMonsterDirector::SetExtractionActive(
     bool bNewExtractionActive
 )
@@ -826,6 +861,12 @@ void ABaruMonsterDirector::SetExtractionActive(
     }
 
     bExtractionActive = bNewExtractionActive;
+    
+    // 탈출 저지가 종료되면 이전 플레이어 목표도 제거
+    if (!bExtractionActive)
+    {
+        ExtractionTargetPlayer.Reset();
+    }
 
     BARU_NET_LOG(
         this,
@@ -949,154 +990,248 @@ ABaruMonsterDirector::FindClosestUnassignedMonster(
     return ClosestMonster;
 }
 
-void ABaruMonsterDirector::UpdateMonsterAssignments()
+int32 ABaruMonsterDirector::
+GetWaveSizeForCurrentState() const
 {
-    // 몬스터 배정은 서버에서만 수행
-    if (GetNetMode() == NM_Client)
+    switch (CurrentDirectorState)
     {
-        return;
+    case EBaruDirectorState::Normal:
+        // 평상시에는 소규모 조사 웨이브 생성
+        return FMath::Max(1, NormalWaveSize);
+
+    case EBaruDirectorState::Pressure:
+        // 압박 상태에서는 더 큰 웨이브 생성
+        return FMath::Max(1, PressureWaveSize);
+
+    case EBaruDirectorState::Relief:
+        // 완화 상태에서는 새로운 몬스터를 생성하지 않음
+        return 0;
+
+    case EBaruDirectorState::Extraction:
+        // 탈출 중에는 가장 큰 저지 웨이브 생성
+        return FMath::Max(1, ExtractionWaveSize);
+
+    default:
+        return 0;
+    }
+}
+
+bool ABaruMonsterDirector::TrySpawnDirectorWave(
+    APawn* TargetPlayer
+)
+{
+    if (GetNetMode() == NM_Client ||
+        !IsValid(TargetPlayer))
+    {
+        return false;
     }
 
-    // 배정 계산 전에 파괴·사망한 대상과
-    // 오래된 플레이어 위협도 기록을 정리
-    RemoveInvalidMonsters();
-    RemoveInvalidPlayerThreats();
-    RemoveInvalidAssignments();
-
-    // 각 플레이어에게 현재 몇 마리를 유지했는지 기록
-    TMap<TWeakObjectPtr<APawn>, int32> KeptAssignmentCounts;
-
-    // -------------------------------------------------------------------------
-    // 1. 현재 목표 배정 수보다 많아진 몬스터 해제
-    // -------------------------------------------------------------------------
-    for (auto It = MonsterAssignments.CreateIterator(); It; ++It)
+    // 완화 상태에서는 플레이어가 회복할 수 있도록
+    // 새로운 웨이브 생성을 완전히 차단
+    if (CurrentDirectorState == EBaruDirectorState::Relief)
     {
-        ABaruMonsterCharacter* Monster =
-            It.Key().Get();
+        return false;
+    }
 
-        APawn* PlayerPawn =
-            It.Value().Get();
+    UWorld* World = GetWorld();
 
-        const int32 DesiredCount =
-            GetDesiredMonsterCount(PlayerPawn);
+    if (!IsValid(World))
+    {
+        return false;
+    }
 
-        int32& KeptCount =
-            KeptAssignmentCounts.FindOrAdd(It.Value());
+    const double CurrentTime = World->GetTimeSeconds();
+    const double SafeCooldown =
+        FMath::Max(1.0f, WaveSpawnCooldown);
 
-        // 필요한 수만큼의 기존 배정은 그대로 유지
-        if (KeptCount < DesiredCount)
+    // 직전 웨이브 이후 쿨타임이 지나지 않았다면 생성하지 않음
+    if (LastWaveSpawnTime >= 0.0 &&
+        CurrentTime - LastWaveSpawnTime < SafeCooldown)
+    {
+        return false;
+    }
+
+    const int32 WaveSize =
+        GetWaveSizeForCurrentState();
+
+    if (WaveSize <= 0 || WaveSpawners.IsEmpty())
+    {
+        return false;
+    }
+
+    /*
+     * 항상 첫 번째 스포너만 사용하지 않도록
+     * 무작위 위치부터 순서대로 검사합니다.
+     *
+     * 선택된 스포너가 최대 생존 수에 도달했다면
+     * 다음 스포너에서 생성을 시도합니다.
+     */
+    const int32 FirstSpawnerIndex =
+        FMath::RandRange(0, WaveSpawners.Num() - 1);
+
+    for (int32 Attempt = 0;
+         Attempt < WaveSpawners.Num();
+         ++Attempt)
+    {
+        const int32 SpawnerIndex =
+            (FirstSpawnerIndex + Attempt) %
+            WaveSpawners.Num();
+
+        ABaruControlRoomSpawner* Spawner =
+            WaveSpawners[SpawnerIndex];
+
+        if (!IsValid(Spawner) ||
+            !Spawner->IsSpawningEnabled())
         {
-            KeptCount++;
             continue;
         }
 
-        // 목표 배정 수를 초과한 몬스터의 기존 명령 해제
-        if (ABaruMonsterAIController* MonsterController =
-            FindCommandController(Monster))
+        const int32 SpawnedCount =
+            Spawner->SpawnWave(
+                WaveSize,
+                TargetPlayer
+            );
+
+        if (SpawnedCount <= 0)
         {
-            MonsterController->ClearDirectorCommand();
+            continue;
         }
+
+        // 한 마리 이상 실제로 생성된 경우에만
+        // 다음 웨이브를 막는 쿨타임 시작
+        LastWaveSpawnTime = CurrentTime;
 
         BARU_NET_LOG(
             this,
             LogBaruAI,
             Log,
-            TEXT("Monster assignment released: %s -> %s"),
-            *GetNameSafe(Monster),
-            *GetNameSafe(PlayerPawn)
+            TEXT(
+                "Director wave spawned: "
+                "Target=%s, State=%d, Requested=%d, Spawned=%d"
+            ),
+            *GetNameSafe(TargetPlayer),
+            static_cast<int32>(CurrentDirectorState),
+            WaveSize,
+            SpawnedCount
         );
 
-        // 초과 배정 기록 제거
-        It.RemoveCurrent();
+        return true;
     }
 
-    // -------------------------------------------------------------------------
-    // 2. 목표 수보다 부족한 플레이어에게 새 몬스터 배정
-    // -------------------------------------------------------------------------
-    for (const TPair<TWeakObjectPtr<APawn>, float>& ThreatEntry :
-         PlayerThreatScores)
+    return false;
+}
+
+void ABaruMonsterDirector::UpdateMonsterAssignments()
+{
+    // 디렉터 자동 판단은 서버에서만 실행
+    if (GetNetMode() == NM_Client)
     {
-        APawn* PlayerPawn =
-            ThreatEntry.Key.Get();
+        return;
+    }
 
-        if (!IsValid(PlayerPawn) ||
-            !PlayerPawn->IsPlayerControlled())
+    // 파괴된 몬스터와 유효하지 않은 플레이어 기록 정리
+    RemoveInvalidMonsters();
+    RemoveInvalidPlayerThreats();
+    RemoveInvalidAssignments();
+
+    // 기존과 동일하게 타이머 간격만큼
+    // 모든 플레이어의 위협도를 자연 감소
+    const float ThreatDecayDeltaSeconds =
+        FMath::Max(0.1f, AssignmentUpdateInterval);
+
+    DecayPlayerThreats(ThreatDecayDeltaSeconds);
+
+    // 완화 상태에서는 기존 위협도 감소만 처리하고
+    // 새로운 웨이브는 만들지 않음
+    if (CurrentDirectorState == EBaruDirectorState::Relief)
+    {
+        return;
+    }
+
+    APawn* HighestThreatPlayer = nullptr;
+    float HighestThreat = 0.0f;
+
+    /*
+    * 여러 플레이어 중 현재 위협도가 가장 높은
+    * 살아 있는 플레이어를 이번 웨이브 대상으로 선택합니다.
+    * 탈출 저지 상태에서는 일반 위협도보다
+    * 엘리베이터 밖에 남은 플레이어를 먼저 선택합니다.
+    */
+    if (CurrentDirectorState == EBaruDirectorState::Extraction)
+    {
+        APawn* ExtractionTarget =
+            ExtractionTargetPlayer.Get();
+
+        const ABaruPlayerState* ExtractionTargetState =
+            IsValid(ExtractionTarget)
+                ? ExtractionTarget->
+                    GetPlayerState<ABaruPlayerState>()
+                : nullptr;
+
+        if (IsValid(ExtractionTarget) &&
+            ExtractionTarget->IsPlayerControlled() &&
+            IsValid(ExtractionTargetState) &&
+            ExtractionTargetState->IsAlive())
         {
-            continue;
-        }
-
-        // DBNO 또는 사망한 플레이어에게는
-        // 새로운 몬스터를 배정하지 않음
-        const ABaruPlayerState* PlayerState =
-            PlayerPawn->GetPlayerState<ABaruPlayerState>();
-
-        if (!IsValid(PlayerState) ||
-            !PlayerState->IsAlive())
-        {
-            continue;
-        }
-
-        const int32 DesiredCount =
-            GetDesiredMonsterCount(PlayerPawn);
-
-        int32 CurrentCount =
-            KeptAssignmentCounts.FindRef(ThreatEntry.Key);
-
-        // 현재 배정 수가 목표 수에 도달할 때까지 반복
-        while (CurrentCount < DesiredCount)
-        {
-            // 아직 배정되지 않은 몬스터 중
-            // 플레이어에게 가장 가까운 개체 선택
-            ABaruMonsterCharacter* Monster =
-                FindClosestUnassignedMonster(PlayerPawn);
-
-            // 배정할 수 있는 몬스터가 더 이상 없으면 종료
-            if (!IsValid(Monster))
-            {
-                break;
-            }
-
-            // 플레이어의 현재 위치로 조사 명령 전달
-            const bool bCommandAccepted =
-                RequestInvestigation(
-                    Monster,
-                    PlayerPawn->GetActorLocation()
-                );
-
-            // 명령 전달에 실패하면 같은 몬스터를
-            // 반복 선택하지 않도록 이번 플레이어 배정 종료
-            if (!bCommandAccepted)
-            {
-                break;
-            }
-
-            const TWeakObjectPtr<ABaruMonsterCharacter> MonsterRef(
-                Monster
-            );
-
-            // 몬스터와 플레이어의 배정 관계 기록
-            MonsterAssignments.Add(
-                MonsterRef,
-                ThreatEntry.Key
-            );
-
-            CurrentCount++;
-            KeptAssignmentCounts.FindOrAdd(ThreatEntry.Key) =
-                CurrentCount;
-
-            BARU_NET_LOG(
-                this,
-                LogBaruAI,
-                Log,
-                TEXT(
-                    "Monster assigned: %s -> %s / Count=%d, Desired=%d"
-                ),
-                *GetNameSafe(Monster),
-                *GetNameSafe(PlayerPawn),
-                CurrentCount,
-                DesiredCount
-            );
+            HighestThreatPlayer = ExtractionTarget;
         }
     }
+
+    /*
+     * 탈출 목표가 없을 때는 기존 방식대로
+     * 위협도가 가장 높은 살아 있는 플레이어를 선택합니다.
+     */
+    if (!IsValid(HighestThreatPlayer))
+    {
+        for (const TPair<TWeakObjectPtr<APawn>, float>& Entry :
+             PlayerThreatScores)
+        {
+            APawn* PlayerPawn = Entry.Key.Get();
+
+            if (!IsValid(PlayerPawn) ||
+                !PlayerPawn->IsPlayerControlled())
+            {
+                continue;
+            }
+
+            const ABaruPlayerState* PlayerState =
+                PlayerPawn->GetPlayerState<ABaruPlayerState>();
+
+            if (!IsValid(PlayerState) ||
+                !PlayerState->IsAlive())
+            {
+                continue;
+            }
+
+            if (Entry.Value <= HighestThreat)
+            {
+                continue;
+            }
+
+            HighestThreat = Entry.Value;
+            HighestThreatPlayer = PlayerPawn;
+        }
+    }
+
+    if (!IsValid(HighestThreatPlayer))
+    {
+        return;
+    }
+
+    /*
+    * 일반 상태에서는 기존 위협도 조건을 사용합니다.
+    *
+    * 탈출 저지 상태에서는 공격 기록이 없는 플레이어라도
+    * 엘리베이터 밖에 남아 있다면 웨이브를 생성합니다.
+    */
+    if (CurrentDirectorState != EBaruDirectorState::Extraction &&
+        GetDesiredMonsterCount(HighestThreatPlayer) <= 0)
+    {
+        return;
+    }
+
+    // 기존 배치 몬스터를 불러오지 않고
+    // 지정된 스포너에서 새로운 웨이브를 생성
+    TrySpawnDirectorWave(HighestThreatPlayer);
 }
 
