@@ -236,6 +236,13 @@ void UBaruGA_MonsterAttack::PerformMeleeAttackTrace()
     {
         AActor* HitActor = HitResult.GetActor();
         
+        // 같은 몬스터는 공격하지 않음
+        // F-01-01과 미행자 등 BaruMonsterCharacter 파생 클래스 포함
+        if (HitActor->IsA<ABaruMonsterCharacter>())
+        {
+            return;
+        }
+        
         if (ICombatInterface* CombatInterface = Cast<ICombatInterface>(HitActor))
         {
             if (UAbilitySystemComponent* TargetASC = CombatInterface->GetAbilitySystemComponent())
