@@ -16,6 +16,14 @@
 #include "UI/InventoryUI/BaruInventoryDragDropOperation.h"
 #include "Components/Image.h"
 
+	//아이템 툴팁.
+#include "UI/ItemUI/BaruInventoryTooltipWidget.h"
+	// EItemType, EBaruItemRarity, FItemData가 선언된 실제 헤더
+#include "Gameplay/Items/DataTypes/BaruItemData.h"
+
+#include "UObject/UnrealType.h"
+#include "Engine/Texture2D.h"
+
 #include "Gameplay/Inventory/BaruInventoryComponent.h"
 #include "Gameplay/Items/DataTypes/BaruItemData.h"
 
@@ -61,8 +69,18 @@ void UBaruInventoryItemWidget::InitializeItem(
 		}
 	}
 	
-	// 정식 상세 정보창을 만들기 전까지 아이템 이름 확인용입니다.
-	SetToolTipText(InItemName);
+		// 정식 상세 정보창을 만들기 전까지 아이템 이름 확인용입니다.
+	// SetToolTipText(InItemName);
+	
+	// 기본 Tooltip은 사용하지 않고 별도 정보 카드를 사용합니다.
+	SetToolTipText(FText::GetEmpty());
+	SetToolTip(nullptr);
+
+	if (IsValid(Button_Item))
+	{
+		Button_Item->SetToolTipText(FText::GetEmpty());
+		Button_Item->SetToolTip(nullptr);
+	}
 }
 
 	// 클릭 바인딩을 제거하는 변경.
@@ -70,7 +88,7 @@ void UBaruInventoryItemWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	
-	// 이 아이템에 배정된 영역 밖으로 자식 이미지가 그려지지 않도록 제한.
+		// 이 아이템에 배정된 영역 밖으로 자식 이미지가 그려지지 않도록 제한.
 	SetClipping(EWidgetClipping::ClipToBoundsAlways);
 
 	bPendingItemClick = false;
@@ -86,6 +104,9 @@ void UBaruInventoryItemWidget::NativeConstruct()
 
 void UBaruInventoryItemWidget::NativeDestruct()
 {
+		// 파괴(위젯 끄기) 시 툴팁 숨김.
+	HideItemTooltip();
+	
 	if (IsValid(Button_Item))
 	{
 		Button_Item->OnClicked.RemoveDynamic(
@@ -189,6 +210,9 @@ void UBaruInventoryItemWidget::NativeOnDragDetected(
 	const FPointerEvent& InMouseEvent,
 	UDragDropOperation*& OutOperation)
 {
+		// 드래그 시 아이템 툴팁 숨김.
+	HideItemTooltip();
+	
 	Super::NativeOnDragDetected(
 		InGeometry,
 		InMouseEvent,
@@ -231,4 +255,75 @@ void UBaruInventoryItemWidget::NativeOnDragDetected(
 	}
 
 	OutOperation = DragOperation;
+}
+
+	// 아이템 툴팁 호버링을 위해.
+void UBaruInventoryItemWidget::NativeOnMouseEnter(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
+	ShowItemTooltip();
+}
+
+void UBaruInventoryItemWidget::NativeOnMouseLeave(
+	const FPointerEvent& InMouseEvent)
+{
+	HideItemTooltip();
+	Super::NativeOnMouseLeave(InMouseEvent);
+}
+
+void UBaruInventoryItemWidget::ShowItemTooltip()
+{
+	HideItemTooltip();
+
+	if (!IsValid(InventoryComponent)
+		|| !IsValid(InventoryComponent->ItemDataTable)
+		|| !IsValid(ItemInstance)
+		|| !IsValid(GetOwningPlayer()))
+	{
+		return;
+	}
+
+	const FItemData* Data =
+		InventoryComponent->ItemDataTable->FindRow<FItemData>(
+			ItemInstance->ItemID,
+			TEXT("InventoryTooltip"),
+			false);
+
+	if (!Data)
+	{
+		return;
+	}
+
+	ItemTooltip = CreateWidget<UBaruInventoryTooltipWidget>(
+		GetOwningPlayer(),
+		UBaruInventoryTooltipWidget::StaticClass());
+
+	if (!IsValid(ItemTooltip))
+	{
+		return;
+	}
+
+	ItemTooltip->InitializeInfo(*Data, ItemInstance->Quantity);
+	ItemTooltip->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ItemTooltip->SetAlignmentInViewport(FVector2D::ZeroVector);
+
+	// 첫 위치 계산 전 화면 좌상단에 잠깐 보이는 현상 방지.
+	ItemTooltip->SetRenderOpacity(0.0f);
+
+	if (!ItemTooltip->AddToPlayerScreen(100))
+	{
+		ItemTooltip = nullptr;
+	}
+}
+
+void UBaruInventoryItemWidget::HideItemTooltip()
+{
+	if (IsValid(ItemTooltip))
+	{
+		ItemTooltip->RemoveFromParent();
+	}
+
+	ItemTooltip = nullptr;
 }
