@@ -16,6 +16,11 @@ namespace BaruMatchmakingConstants
     const FName SETTING_SERVER_NAME = FName(TEXT("SERVER_NAME"));
     const FName SETTING_MAP_NAME = FName(TEXT("MAP_NAME"));
     const FName SETTING_HOST_NAME = FName(TEXT("HOST_NAME"));
+    
+    // [추가] 우리 게임 전용 식별 키와 고유 값
+    const FName SETTING_PROJECT_ID = FName(TEXT("BARU_PROJECT_ID"));
+    inline const char* RAW_PROJECT_KEY = "BARU_PROJECT_ID";
+    inline const char* RAW_PROJECT_VALUE = "BARU_PROJECT_2026_V1";
 }
 
 USTRUCT(BlueprintType)
