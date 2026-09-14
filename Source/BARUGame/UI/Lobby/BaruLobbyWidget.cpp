@@ -398,6 +398,10 @@ void UBaruLobbyWidget::HandleConfirmContractClicked()
           SelectedContractItem->Difficulty
           );
     }
+
+   UpdateSelectedMapPreview(
+      SelectedContractItem->Thumbnail.Get()
+      );
     
     BARU_LOG(
        LogBaruUI,
@@ -424,7 +428,7 @@ void UBaruLobbyWidget::HandleFindSessionClicked()
           Error,
           TEXT("SessionSubsystem을 찾지 못했습니다.")
           );
-    
+
        return;
     }
     
@@ -655,6 +659,8 @@ void UBaruLobbyWidget::HandleTargetMapChanged(
              );
        }
        
+       UpdateSelectedMapPreview(nullptr);
+
        return;
     }
     
@@ -695,6 +701,10 @@ void UBaruLobbyWidget::HandleTargetMapChanged(
              );
        }
        
+       UpdateSelectedMapPreview(
+          MatchedDefinition->Thumbnail.Get()
+          );
+
        BARU_LOG(
           LogBaruUI,
           Log,
@@ -740,6 +750,8 @@ void UBaruLobbyWidget::HandleTargetMapChanged(
           );
     }
     
+    UpdateSelectedMapPreview(nullptr);
+
     BARU_LOG(
        LogBaruUI,
        Warning,
@@ -1224,4 +1236,30 @@ void UBaruLobbyWidget::RequestSilentSessionRefresh()
     {
        SessionSubsystem->FindSessions(50, false);
     }
+}
+
+void UBaruLobbyWidget::UpdateSelectedMapPreview(
+   UTexture2D* Thumbnail)
+{
+   if (!IsValid(Image_SelectedMapPreview))
+   {
+      return;
+   }
+
+   if (IsValid(Thumbnail))
+   {
+      Image_SelectedMapPreview->SetBrushFromTexture(
+         Thumbnail);
+
+      Image_SelectedMapPreview->SetVisibility(
+         ESlateVisibility::HitTestInvisible);
+
+      return;
+   }
+
+   Image_SelectedMapPreview->SetBrushFromTexture(
+      nullptr);
+
+   Image_SelectedMapPreview->SetVisibility(
+      ESlateVisibility::Collapsed);
 }
