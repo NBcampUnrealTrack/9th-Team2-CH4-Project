@@ -34,6 +34,8 @@ public class BARUGame : ModuleRules
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
 			"OnlineSubsystemSteam",
+			"SteamSockets",
+			"Steamworks",
 			"AIModule",
 			"Niagara",
 			"NavigationSystem",

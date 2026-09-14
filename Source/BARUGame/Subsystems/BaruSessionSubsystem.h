@@ -5,6 +5,7 @@
 #include "Interfaces/OnlineSessionInterface.h"
 #include "UObject/SoftObjectPtr.h"
 #include "Engine/EngineBaseTypes.h"
+#include "steam/steam_api.h"
 #include "BaruSessionSubsystem.generated.h"
 
 class UWorld;
@@ -12,8 +13,6 @@ class UNetDriver;
 
 namespace BaruMatchmakingConstants
 {
-    const FName SETTING_MATCH_KEY = FName(TEXT("BARU_MATCH_KEY"));
-    const FString BARU_MATCH_KEY_VALUE = TEXT("BARU_EXTRACTION_HORROR_V1");
     const FName SETTING_SERVER_NAME = FName(TEXT("SERVER_NAME"));
     const FName SETTING_MAP_NAME = FName(TEXT("MAP_NAME"));
     const FName SETTING_HOST_NAME = FName(TEXT("HOST_NAME"));
@@ -28,10 +27,10 @@ struct FBaruSessionSearchResultInfo
     int32 SessionIndex = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Session")
-    FString ServerName = TEXT("Unknown Room");
+    FString ServerName = TEXT("BARU Room");
 
     UPROPERTY(BlueprintReadOnly, Category = "Session")
-    FString HostPlayerName = TEXT("Unknown Host");
+    FString HostPlayerName = TEXT("Host");
 
     UPROPERTY(BlueprintReadOnly, Category = "Session")
     FString SelectedMapName = TEXT("MainLobbyLevel");
@@ -66,7 +65,7 @@ public:
     void CreateSession(int32 NumPublicConnections = 5, bool bIsLANMatch = false, const FString& ServerName = TEXT("BARU Room"), TSoftObjectPtr<UWorld> OverrideLobbyLevel = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
-    void FindSessions(int32 MaxSearchResults = 50, bool bIsLANMatch = false);
+    void FindSessions(int32 MaxSearchResults = 100, bool bIsLANMatch = false);
 
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void JoinSessionByIndex(int32 SessionIndex);
@@ -101,13 +100,11 @@ private:
     void OpenLobbyLevelAsListenServer(const TSoftObjectPtr<UWorld>& LevelToOpen);
 
     void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
-    // [수정] CreateSession 이후 세션을 InProgress 상태로 확정 짓기 위한 StartSession 콜백 추가
     void OnStartSessionComplete(FName SessionName, bool bWasSuccessful);
     void OnFindSessionsComplete(bool bWasSuccessful);
     void OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
     void OnDestroySessionComplete(FName SessionName, bool bWasSuccessful);
 
-    // [수정 - 신규 추가] 스팀 오버레이(Shift+Tab) 초대 수락 콜백 함수
     void OnSessionUserInviteAccepted(
         const bool bWasSuccessful,
         const int32 ControllerId,
@@ -115,7 +112,6 @@ private:
         const FOnlineSessionSearchResult& InviteResult
     );
 
-    // [수정 - 신규 추가] 인덱스 기반 참가 및 친구 초대 수락 참가를 일원화하는 공용 참가 헬퍼
     bool JoinSessionInternal(const FOnlineSessionSearchResult& SearchResult);
 
     IOnlineSessionPtr GetSessionInterface() const;
@@ -131,7 +127,6 @@ private:
     FOnCreateSessionCompleteDelegate CreateSessionCompleteDelegate;
     FDelegateHandle CreateSessionCompleteDelegateHandle;
 
-    // [수정] StartSession 완료 처리를 위한 델리게이트 및 핸들 추가
     FOnStartSessionCompleteDelegate StartSessionCompleteDelegate;
     FDelegateHandle StartSessionCompleteDelegateHandle;
 
@@ -144,7 +139,6 @@ private:
     FOnDestroySessionCompleteDelegate DestroySessionCompleteDelegate;
     FDelegateHandle DestroySessionCompleteDelegateHandle;
 
-    // [수정 - 신규 추가] 스팀 오버레이 초대 수락 전용 델리게이트 및 안전장치 핸들
     FOnSessionUserInviteAcceptedDelegate OnSessionUserInviteAcceptedDelegate;
     FDelegateHandle OnSessionUserInviteAcceptedDelegateHandle;
 
@@ -160,4 +154,12 @@ private:
 
     bool bCreateSessionAfterDestroy = false;
     bool bPendingReturnToMainMenu = false;
+    
+private:
+    // Steamworks 비동기 로비 검색 콜백
+    CCallResult<UBaruSessionSubsystem, LobbyMatchList_t> SteamLobbyMatchListCallResult;
+    void OnSteamLobbyMatchList(LobbyMatchList_t* pLobbyMatchList, bool bIOFailure);
+
+    // 검색된 로비 SteamID 보관 (Index 매핑용)
+    TArray<CSteamID> FoundSteamLobbyIDs;
 };
