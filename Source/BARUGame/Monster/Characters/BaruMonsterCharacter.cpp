@@ -12,6 +12,7 @@
 
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayTags/BaruGameplayTags.h"
+#include "Gameplay/Items/Spawning/BaruMonsterItemSpawnerComponent.h"
 #include "GameFramework/Controller.h"
 #include "Core/BaruGameMode.h"
 #include "Components/CapsuleComponent.h"
@@ -51,6 +52,12 @@ ABaruMonsterCharacter::ABaruMonsterCharacter()
 	// 제압 게이지와 제압 피해를 보관하는 몬스터 전용 AttributeSet 생성
 	MonsterAttributeSet = CreateDefaultSubobject<UBaruMonsterAttributeSet>(
 			TEXT("MonsterAttributeSet"));
+	
+	// 모든 몬스터가 자신의 시체 전리품 컴포넌트를 가지도록 생성
+	MonsterItemSpawnerComponent =
+		CreateDefaultSubobject<UBaruMonsterItemSpawnerComponent>(
+			TEXT("MonsterItemSpawnerComponent")
+		);
 	
 }
 
@@ -453,6 +460,13 @@ void ABaruMonsterCharacter::Die_Implementation(AActor* Killer)
 	}
 
 	bIsDead = true;
+	
+	// bIsDead가 true로 확정된 뒤 서버에서 전리품을 한 번 생성
+	// 컴포넌트 내부에서도 서버 권한과 중복 호출을 검사함
+	if (IsValid(MonsterItemSpawnerComponent))
+	{
+		MonsterItemSpawnerComponent->GenerateLootOnServer();
+	}
 	
 	// 사망이 확정된 몬스터를 디렉터의 지휘 목록에서 제외
 	// bIsDead를 먼저 설정했으므로 살아 있는 개체로 처리되지 않음

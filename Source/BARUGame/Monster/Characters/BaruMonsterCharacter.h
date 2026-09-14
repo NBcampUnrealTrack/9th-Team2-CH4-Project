@@ -15,6 +15,7 @@ class UBaruAbilitySystemComponent;
 class UBaruCoreAttributeSet;
 class UBaruMonsterAttributeSet;
 class ABaruMonsterDirector;
+class UBaruMonsterItemSpawnerComponent;
 
 struct FOnAttributeChangeData;
 struct FGameplayTag;
@@ -138,6 +139,16 @@ protected:
 		Category = "Monster|AI|Director"
 	)
 	bool bUsesMonsterDirector = false;
+	
+	// 몬스터 사망 시 시체에 전리품 목록과
+	// 상호작용 대상을 생성하는 컴포넌트
+	UPROPERTY(
+		VisibleAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Loot"
+	)
+	TObjectPtr<UBaruMonsterItemSpawnerComponent>
+		MonsterItemSpawnerComponent;
 	
 public:
 	
