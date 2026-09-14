@@ -48,6 +48,15 @@ UCommonActivatableWidget*
 
 		return nullptr;
 	}
+	
+	// [09.14] 위젯 스택 잔류 방지 및 즉시 제거
+	AddedWidget->OnDeactivated().AddWeakLambda(LayerStack, [LayerStack, AddedWidget]()
+	{
+		if (IsValid(LayerStack) && IsValid(AddedWidget))
+		{
+			LayerStack->RemoveWidget(*AddedWidget);
+		}
+	});
 
 	BARU_LOG(
 		LogBaruUI,
@@ -98,6 +107,9 @@ bool UBaruPrimaryGameLayout::PopWidgetFromLayer(
 		*ActiveWidget->GetName());
 
 	ActiveWidget->DeactivateWidget();
+	
+	// [09.14] 위젯 Deactive와 함께 스택에서 제거 
+	LayerStack->RemoveWidget(*ActiveWidget);
 
 	return true;
 }

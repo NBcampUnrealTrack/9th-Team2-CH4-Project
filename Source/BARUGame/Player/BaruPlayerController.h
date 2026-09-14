@@ -8,6 +8,7 @@
 class UInputAction;
 class UInputMappingContext; 
 class UCommonActivatableWidget;   // [추가] 인벤토리 위젯
+class UBaruItemFocusComponent;
 // Todo : 별도의 DatabaseType으로 분리 예정
 
 USTRUCT(BlueprintType)
@@ -61,6 +62,10 @@ public:
 	
 	UFUNCTION(BlueprintCallable, Category = "BARU|UI")
 	void ToggleInventory();
+	
+	// [09.13] ESC 키 게임 메뉴 토글 함수
+	UFUNCTION(BlueprintCallable, Category = "BARU|UI")
+	void ToggleGameMenu();
 
 	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Input")
 	void Server_RequestDropItem(int32 SlotIndex, int32 Count);
@@ -79,6 +84,9 @@ public:
 
 	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
 	void Client_PlayElevatorCinematic();
+	
+	UFUNCTION(BlueprintPure, Category = "BARU|Components")
+	UBaruItemFocusComponent* GetItemFocusComponent() const { return ItemFocusComponent; }
 
 	
 public:
@@ -108,6 +116,24 @@ protected:
 	TObjectPtr<UInputAction> ToggleInventoryAction;
 
 	void Input_ToggleInventory();
+	
+	// [09.13] ESC 메뉴 오픈 인풋 액션 에셋 포인터
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+	TObjectPtr<UInputAction> MenuAction;
+
+	void Input_ToggleGameMenu();
+	
+	// [09.13] ESC 눌렀을 때 띄울 위젯 클래스 (WBP_GameMenu)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
+	TSubclassOf<UCommonActivatableWidget> GameMenuWidgetClass;
+	
+	// [09.13] 게임 메뉴가 닫힐 때(계속하기 클릭, CommonUI 뒤로가기 등) 호출될 콜백
+	UFUNCTION()
+	void HandleGameMenuDeactivated();
+
+	// [09.13] 현재 열려 있는 게임 메뉴 위젯 참조
+	UPROPERTY(Transient)
+	TObjectPtr<UCommonActivatableWidget> ActiveGameMenuWidget;
 
 	// BP_BaruPlayerController 에서 WBP_Inventory 를 지정합니다.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|UI")
@@ -130,4 +156,11 @@ protected:
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Inventory")
 	int32 MaxInventorySlotIndex = 100;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Components")
+	TObjectPtr<UBaruItemFocusComponent> ItemFocusComponent;
+	
+	// [추가 09.14] 키 연타 및 더블 트리거 방지용 타임스탬프
+	float LastInventoryToggleTime = 0.0f;
+	float LastGameMenuToggleTime = 0.0f;
 };

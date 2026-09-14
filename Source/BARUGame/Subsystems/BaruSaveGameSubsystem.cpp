@@ -356,3 +356,94 @@ UBaruSaveGame* UBaruSaveGameSubsystem::GetCachedSaveGameByPlayer(const FString& 
     }
     return nullptr;
 }
+
+bool UBaruSaveGameSubsystem::ValidatePlayerNickname(const FString& InNickname, FText& OutErrorMessage)
+{
+	const FString Trimmed = InNickname.TrimStartAndEnd();
+
+	if (Trimmed.IsEmpty())
+	{
+		OutErrorMessage = FText::FromString(TEXT("닉네임을 입력해주세요."));
+		return false;
+	}
+
+	if (Trimmed.Len() < 2 || Trimmed.Len() > 12)
+	{
+		OutErrorMessage = FText::FromString(TEXT("닉네임은 2자 이상 12자 이하이어야 합니다."));
+		return false;
+	}
+
+	// 문자 하나씩 순회하며 한글 완성형 및 영문 알파벳 검사
+	for (int32 Index = 0; Index < Trimmed.Len(); ++Index)
+	{
+		const TCHAR Char = Trimmed[Index];
+
+		const bool bIsUpperEnglish = (Char >= 'A' && Char <= 'Z');
+		const bool bIsLowerEnglish = (Char >= 'a' && Char <= 'z');
+		const bool bIsCompleteHangul = (Char >= 0xAC00 && Char <= 0xD7A3); // '가' ~ '힣'
+
+		if (!bIsUpperEnglish && !bIsLowerEnglish && !bIsCompleteHangul)
+		{
+			OutErrorMessage = FText::FromString(TEXT("한글 완성형 및 영문 알파벳만 사용할 수 있습니다. (공백, 숫자, 특수문자 불가)"));
+			return false;
+		}
+	}
+
+	OutErrorMessage = FText::GetEmpty();
+	return true;
+}
+
+bool UBaruSaveGameSubsystem::DoesProfileExist() const
+{
+	return DoesEncryptedSaveExist(PrimaryProfileSlotName);
+}
+
+UBaruSaveGame* UBaruSaveGameSubsystem::CreateNewProfile(const FString& InPlayerName)
+{
+	FText ValidationError;
+	if (!ValidatePlayerNickname(InPlayerName, ValidationError))
+	{
+		BARU_LOG(LogBaruSession, Warning, TEXT("CreateNewProfile 거부: %s"), *ValidationError.ToString());
+		return nullptr;
+	}
+
+	const FString ValidatedName = InPlayerName.TrimStartAndEnd();
+	UBaruSaveGame* NewSave = Cast<UBaruSaveGame>(UGameplayStatics::CreateSaveGameObject(UBaruSaveGame::StaticClass()));
+	if (NewSave)
+	{
+		NewSave->PlayerName = ValidatedName;
+		NewSave->TotalGold = 0;
+		NewSave->TotalSurvivals = 0;
+		NewSave->TotalDeaths = 0;
+
+		CachedSaveGames.Add(PrimaryProfileSlotName, NewSave);
+		CurrentSlotName = PrimaryProfileSlotName;
+		SaveEncryptedSlotInternal(NewSave, PrimaryProfileSlotName);
+
+		BARU_LOG(LogBaruSession, Log, TEXT("신규 프로필 생성 및 저장 완료: %s"), *ValidatedName);
+	}
+	return NewSave;
+}
+
+FString UBaruSaveGameSubsystem::GetActiveProfilePlayerName() const
+{
+	if (const TObjectPtr<UBaruSaveGame>* Found = CachedSaveGames.Find(PrimaryProfileSlotName))
+	{
+		if (Found && Found->Get())
+		{
+			return (*Found)->PlayerName;
+		}
+	}
+
+	// 메모리 캐시에 없으면 디스크에서 로드 시도
+	if (DoesProfileExist())
+	{
+		if (UBaruSaveGame* Loaded = const_cast<UBaruSaveGameSubsystem*>(this)->LoadEncryptedSlotInternal(PrimaryProfileSlotName))
+		{
+			const_cast<UBaruSaveGameSubsystem*>(this)->CachedSaveGames.Add(PrimaryProfileSlotName, Loaded);
+			return Loaded->PlayerName;
+		}
+	}
+
+	return FString();
+}

@@ -78,6 +78,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data")
 	FText ItemName;
 
+	// 상세 툴팁의 기능/용도 설명. 비워두면 설명 영역을 숨깁니다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data|UI",
+		meta = (MultiLine = "true"))
+	FText ItemDescription;
+
+	// 상세 툴팁의 배경 이야기. 비워두면 스토리 영역을 숨깁니다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data|UI",
+		meta = (MultiLine = "true"))
+	FText ItemStory;
+
 	// 인벤토리 내의 2D 텍스쳐(썸네일)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item Data")
 	UTexture2D* Thumbnail = nullptr;

@@ -10,6 +10,31 @@
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "BaruCharacter.generated.h"     
 
+// [09.13] 총기 반동 데이터 구조체
+USTRUCT(BlueprintType)
+struct FBaruRecoilData
+{
+    GENERATED_BODY()
+
+    // 상향(Pitch) 반동 각도 범위 (최소~최대)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil", meta = (ClampMin = "0.0"))
+    float MinPitchRecoil = 0.8f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil", meta = (ClampMin = "0.0"))
+    float MaxPitchRecoil = 1.4f;
+
+    // 좌우(Yaw) 반동 각도 범위 (-좌, +우)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil")
+    float MinYawRecoil = -0.3f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil")
+    float MaxYawRecoil = 0.5f;
+
+    // 반동 회복 속도 (초당 복구되는 각도, 0이면 회복 안 함)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Recoil", meta = (ClampMin = "0.0"))
+    float RecoilRecoverySpeed = 10.0f;
+};
+
 // 전방 선언 
 class UCameraComponent;
 class UInputMappingContext;
@@ -31,6 +56,13 @@ class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInter
 
 public:
     ABaruCharacter();
+    
+    // [09.13] 반동 회복 처리를 위한 Tick 오버라이드
+    virtual void Tick(float DeltaSeconds) override;
+
+    // [09.13] 사격 시 화면 반동 트리거 함수
+    UFUNCTION(BlueprintCallable, Category = "BARU|Combat")
+    void ApplyRecoil(const FBaruRecoilData& InRecoilData);
     
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override; // [추가]
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;                             // [추가]
@@ -306,8 +338,6 @@ private:
     UPROPERTY()
     TObjectPtr<AActor> LastKiller; // [추가] 사망처리를 다음 틱으로 넘길때 임시보관
     
-    
-    // 09.11 DBNO 세부 로직 추가
 public:
     // [추가] 다운 상태에서 추가 피격을 받았을 때 호출 (출혈시간 단축)
     void NotifyHitWhileDBNO(float DamageAmount, AActor* Attacker);
@@ -327,5 +357,90 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat")
     float DBNODamageBleedReduction = 15.0f;
     
+    // [09.13] R키 수동 재장전 InputAction 에셋 포인터
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+    TObjectPtr<UInputAction> ReloadAction;
     
+    // [09.13] 수동 재장전 입력 핸들러
+    void Input_Reload();
+    
+    
+    // [09.13] 자연 회복 파이프라인 설정 및 타이머 핸들
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float HealthRegenDelay = 10.0f;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float MaxRegenHealth = 80.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float HealthRegenRatePerSecond = 5.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat|Regen")
+    float HealthRegenTickInterval = 0.5f;
+
+    FTimerHandle HealthRegenDelayTimerHandle;
+    FTimerHandle HealthRegenTickTimerHandle;
+
+    void StartHealthRegenDelay();
+    void OnHealthRegenDelayExpired();
+    void TickHealthRegen();
+    void StopHealthRegen();
+    
+private:
+    // [09.13] Early-Out 반동 복구 상태 변수
+    float RemainingRecoilRecoveryPitch = 0.0f;
+    float CurrentRecoilRecoverySpeed = 0.0f;
+
+    
+public:
+    // [09.13] 조준(ADS) 집중 상태 온/오프 (GAS Ability 및 캐릭터 직접 입력 공용)
+    UFUNCTION(BlueprintCallable, Category = "BARU|Camera")
+    void SetAiming(bool bNewAiming);
+
+    UFUNCTION(BlueprintPure, Category = "BARU|Camera")
+    bool IsAiming() const { return bIsAiming; }
+  
+protected:
+    // =========================================================================
+    // 조준(ADS) & 호러 터널비전 연출 파라미터
+    // =========================================================================
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float DefaultFOV = 90.0f;
+
+    // 왜곡이 생기지 않도록 살짝만 축소 (78~80도 권장)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimFOV = 78.0f;
+
+    // 평상시 외곽 어두움 -> 조준 시 짙은 터널 비전
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float DefaultVignette = 0.35f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimVignette = 0.75f;
+
+    // 조준 시 렌즈 외곽 색수차 왜곡 (공포/어지러움 극대화)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float DefaultFringe = 0.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimFringe = 1.5f;
+
+    // 줌 및 후처리 보간 속도
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera|Aim")
+    float AimInterpSpeed = 12.0f;
+
+    // 우클릭 조준 InputAction 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
+    TObjectPtr<UInputAction> AimAction;
+
+    void Input_AimStart();
+    void Input_AimStop();
+
+private:
+    bool bIsAiming = false;
+    float CurrentTargetFOV = 90.0f;
+    float CurrentTargetVignette = 0.35f;
+    float CurrentTargetFringe = 0.0f;
+
+    void UpdateAimingEffects(float DeltaSeconds);
 };

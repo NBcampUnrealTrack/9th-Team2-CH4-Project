@@ -7,6 +7,8 @@
 
 class UStaticMeshComponent;
 class ABaruCoopDoorActor;
+class USoundBase;
+class USoundAttenuation;
 
 /**
  * 2인 협동 문에 신호를 보내는 스위치 액터
@@ -28,8 +30,7 @@ public:
 	virtual FGameplayTag GetInteractionTag_Implementation() const override;
 	virtual float GetInteractionDuration_Implementation() const override;
 	virtual void ExecuteInteraction_Implementation(APawn* Interactor) override;
-	virtual void EndInteraction_Implementation(APawn* Interactor) override; // [추가]
-
+	virtual void EndInteraction_Implementation(APawn* Interactor) override;
 	void SetButtonActive(bool bActive);
 
 protected:
@@ -56,6 +57,15 @@ protected:
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor")
 	float MaxHoldDistance = 250.0f;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopButton|Audio")
+	TObjectPtr<USoundBase> ButtonPressSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopButton|Audio")
+	TObjectPtr<USoundBase> ButtonReleaseSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopButton|Audio")
+	TObjectPtr<USoundAttenuation> SoundAttenuation;
 	
 private:
 	UPROPERTY(Transient)

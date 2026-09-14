@@ -9,12 +9,17 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Gameplay/Items/DataTypes/BaruItemData.h"   // FInventorySlot, FInventorySlotArray 사용 목적. 실제 경로에 맞게 수정.
+#include "Gameplay/Inventory/DataTypes/BaruInventoryNotification.h"
 #include "BaruInventoryComponent.generated.h"
 
 class UDataTable;
 class UBaruItemInstance;
 
 DECLARE_MULTICAST_DELEGATE(FOnInventoryUpdated); // UI(태현님)와 맞춰서 이름 정할 것.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnBaruInventoryPickupResult,
+	const FBaruInventoryPickupNotification&,
+	Notification);
 
 // 현재 인벤토리로부터 계산한 정산 결과입니다.
 // 계산 결과만 담으며 인벤토리 아이템을 제거하거나 변경하지 않습니다.
@@ -75,6 +80,10 @@ public:
 		// (3) 변경 - 서버전용. UFUNCTION 없음 -> 서버 C++ 코드에서만 호출하는 내부함수.(HasAuthority 체크 필수)
 		// UFUNCTION 등을 붙이면 클라 블프에서도 호출이 가능해지게 되니까 안 붙임.
 	int32 AddItem(FName ItemID, int32 Count);	// 아이템 추가. 
+
+	// [추가] 월드 아이템 습득 전용 진입점입니다.
+	// AddItem과 결과 계산·소유 클라이언트 전달을 InventoryComponent 안에서 끝냅니다.
+	int32 AddPickupItem(FName ItemID, int32 Count);
 	
 	bool MoveItem(UBaruItemInstance* Item, FIntPoint NewTopLeft, bool bNewRotated);
 	bool RemoveItem(UBaruItemInstance* Item, int32 Count);
@@ -109,6 +118,15 @@ public:
 	
 	// 4. UI 갱신 부분.
 	FOnInventoryUpdated OnInventoryUpdated;
+
+	// [추가] 소유 클라이언트에서만 Broadcast되는 획득 결과입니다.
+	UPROPERTY(BlueprintAssignable, Category = "BARU|Inventory|Pickup")
+	FOnBaruInventoryPickupResult OnInventoryPickupResult;
+
+	// 서버가 확정한 결과를 이 InventoryComponent의 소유 클라이언트에 전달합니다.
+	UFUNCTION(Client, Reliable)
+	void Client_ReceiveInventoryPickupResult(
+		const FBaruInventoryPickupNotification& Notification);
 
 		// 복제 콜백에서 호출 — Cells 재구성 : Cell - 슬롯의 각 구역?
 	void RebuildCellCache();
@@ -148,6 +166,10 @@ public:
 		// 정산 대상 여부나 가격과 관계없이 수량만 계산.
 	UFUNCTION(BlueprintPure, Category = "BARU|Inventory")
 	int32 GetTotalItemCount() const;
+	
+	// [09.13] 인벤토리 내 모든 아이템 및 격자 점유 초기화 (사망/세션 리셋용)
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Inventory")
+	void ClearInventory();
 
 private:
 		// [진실원(진짜 부분)] 복제 대상
@@ -164,6 +186,11 @@ private:
 
 	void OccupyCells(UBaruItemInstance* Item, FIntPoint TopLeft); // 아이템 차지 칸을 채움.
 	void ClearCells(UBaruItemInstance* Item, FIntPoint TopLeft); // 아이템 차지 칸을 비움.
+
+	void SendPickupResultToOwner(
+		FName ItemID,
+		int32 RequestedQuantity,
+		int32 RemainingQuantity);
 
 	FInventorySlot* FindSlot(const UBaruItemInstance* Item);
 	const FItemData* FindItemData(FName ItemID) const;

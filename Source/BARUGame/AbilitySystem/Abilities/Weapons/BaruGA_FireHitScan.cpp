@@ -9,6 +9,8 @@
 #include "Engine/World.h"
 #include "BaruLog.h"
 #include "GameplayTags/BaruGameplayTags.h"
+#include "Gameplay/Equipment/BaruEquipmentComponent.h"
+#include "Gameplay/Weapon/BaruWeaponBase.h"
 
 UBaruGA_FireHitscan::UBaruGA_FireHitscan()
 {
@@ -67,12 +69,34 @@ void UBaruGA_FireHitscan::PerformFire()
     {
         return;
     }
+    
+    // 현재 들고 있는 무기 및 잔여 탄약 검사
+    ABaruCharacter* BaruChar = GetBaruCharacterFromActorInfo();
+    UBaruEquipmentComponent* EquipComp = BaruChar ? BaruChar->FindComponentByClass<UBaruEquipmentComponent>() : nullptr;
+    ABaruWeaponBase* ActiveWeapon = EquipComp ? EquipComp->GetActiveWeapon() : nullptr;
+
+    if (!ActiveWeapon || ActiveWeapon->GetCurrentAmmo() <= 0)
+    {
+        // 탄약이 없으면 자동 재장전 트리거 후 사격 중단
+        if (UBaruAbilitySystemComponent* SourceASC = GetBaruAbilitySystemComponentFromActorInfo())
+        {
+            SourceASC->TryActivateAbilityByTag(FBaruGameplayTags::Get().InputTag_Reload);
+        }
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        return;
+    }
 
     // 탄약/쿨다운 재검사
     if (!CommitCheck(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo))
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
         return;
+    }
+    
+    // 서버에서 탄약 1발 소모
+    if (HasAuthority(&CurrentActivationInfo))
+    {
+        ActiveWeapon->ConsumeAmmo(1);
     }
 
     FVector ViewLoc;
@@ -84,14 +108,10 @@ void UBaruGA_FireHitscan::PerformFire()
     const FVector FireDir = FMath::VRandCone(ViewRot.Vector(), SpreadHalfAngleRad);
     const FVector TraceEnd = ViewLoc + (FireDir * MaxRange);
 
-    // 로컬 화면 반동(FBaruRecoilData 만들어지면 주석 해제)
-    // if (ABaruCharacter* BaruChar = GetBaruCharacterFromActorInfo())
-    // {
-    //     if (BaruChar->IsLocallyControlled())
-    //     {
-    //         BaruChar->ApplyRecoil(RecoilData);
-    //     }
-    // }
+    if (BaruChar && BaruChar->IsLocallyControlled())
+    {
+        BaruChar->ApplyRecoil(RecoilData);
+    }
     
     // 라인트레이스 및 충돌 연산
     FCollisionQueryParams Params(TEXT("FireHitscanTrace"), true, AvatarPawn);
@@ -138,6 +158,15 @@ void UBaruGA_FireHitscan::PerformFire()
                     }
                 }
             }
+        }
+    }
+    
+    // 이번 격발로 마지막 발(30번째 또는 6번째)을 소진했을 경우 자동 재장전 트리거
+    if (ActiveWeapon->GetCurrentAmmo() <= 0)
+    {
+        if (SourceASC)
+        {
+            SourceASC->TryActivateAbilityByTag(FBaruGameplayTags::Get().InputTag_Reload);
         }
     }
 }

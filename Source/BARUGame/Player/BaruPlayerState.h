@@ -110,6 +110,9 @@ public:
     UFUNCTION(BlueprintAuthorityOnly, Category = "BARU|PlayerState")
     void AddMonsterKill();
     
+    // [09.13] 완전 사망 또는 리스폰 시 닉네임/아이디를 유지하고 스탯, 장비, 인벤토리를 전량 초기화
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|PlayerState")
+    void ResetPlayerStatusAndInventory();
     
 public:
     // UI 델리게이트

@@ -25,8 +25,12 @@ public:
     ABaruLobbyGameMode();
 
     virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+    virtual void BeginPlay() override;
     virtual void PostLogin(APlayerController* NewPlayer) override;
     virtual void Logout(AController* Exiting) override;
+    
+    virtual void HandleSeamlessTravelPlayer(AController*& C) override;
+    virtual void PostSeamlessTravel() override;
 
     // 플레이어의 레디 상태가 변경되거나 세션 인원이 변동될 때 호출되어 전원 준비 완료 여부를 재계산
     UFUNCTION(BlueprintCallable, Category = "BARU|Lobby")
@@ -47,6 +51,8 @@ public:
 protected:
     UFUNCTION()
     void HandlePlayerReadyStatusChanged(bool bIsReady);
+    
+    void InitializeLobbyPlayerState(APlayerController* PC);
     
 protected:
     UPROPERTY(Transient)

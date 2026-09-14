@@ -9,38 +9,60 @@
 #include "Core/BaruLobbyGameState.h"   
 #include "AbilitySystem/BaruAbilitySystemComponent.h"   
 #include "Subsystems/BaruSaveGameSubsystem.h"
-#include "UI/Subsystem/BaruUIManagerSubsystem.h"   // [추가] 인벤 UI Push/Pop
-#include "UI/BaruUITags.h"                         // [추가] UI_Layer_GameMenu
-#include "CommonActivatableWidget.h"               // [추가]
-#include "Engine/LocalPlayer.h"                    // [추가] GetSubsystem
+#include "UI/Subsystem/BaruUIManagerSubsystem.h"
+#include "UI/BaruUITags.h"
+#include "CommonActivatableWidget.h"
+#include "Engine/LocalPlayer.h"
 #include "BaruLog.h"
-
+#include "UI/ItemUI/BaruItemFocusComponent.h"
+#include "Framework/Application/SlateApplication.h"
 
 ABaruPlayerController::ABaruPlayerController()
 {
     PrimaryActorTick.bCanEverTick = true;
     PlayerCameraManagerClass = APlayerCameraManager::StaticClass();
+    
+    ItemFocusComponent = CreateDefaultSubobject<UBaruItemFocusComponent>(TEXT("ItemFocusComponent"));
+    if (ItemFocusComponent)
+    {
+        ItemFocusComponent->bEnableItemFocusUI = true;
+        ItemFocusComponent->FocusTraceDistance = 300.0f;
+    }
 }
 
 void ABaruPlayerController::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (!IsLocalController())   // ★[수정] 중첩 대신 early return
+    if (!IsLocalController())
     {
         return;
     }
 
     FInputModeGameOnly InputModeData;
-    InputModeData.SetConsumeCaptureMouseDown(true);
+    InputModeData.SetConsumeCaptureMouseDown(false);
     SetInputMode(InputModeData);
     SetShowMouseCursor(false);
     
-    BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
+    // [09.13] 세이브 파일에서 확정된 닉네임을 PlayerState에 전달
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UBaruSaveGameSubsystem* SaveSubsystem = GI->GetSubsystem<UBaruSaveGameSubsystem>())
+        {
+            const FString SavedName = SaveSubsystem->GetActiveProfilePlayerName();
+            if (!SavedName.IsEmpty())
+            {
+                if (ABaruPlayerState* PS = GetPlayerState<ABaruPlayerState>())
+                {
+                    PS->Server_UpdateNickname(SavedName);
+                }
+            }
+        }
+    }
     
+    BARU_LOG(LogBaruUI, Log, TEXT("Local PlayerController Initialized: %s"), *GetName());
 }
 
-//관전 전환 입력 바인딩 사망시 
 void ABaruPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
@@ -59,10 +81,100 @@ void ABaruPlayerController::SetupInputComponent()
         {
             EIC->BindAction(ToggleInventoryAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_ToggleInventory);
         }
+        if (MenuAction)
+        {
+            EIC->BindAction(MenuAction, ETriggerEvent::Started, this, &ABaruPlayerController::Input_ToggleGameMenu);
+        }
     }
 }
 
-// [추가] 입력 핸들러. 클라에서 실행되며 서버에 요청만 보냄
+void ABaruPlayerController::Input_ToggleGameMenu()
+{
+    ToggleGameMenu();
+}
+
+void ABaruPlayerController::ToggleGameMenu()
+{
+    if (!IsLocalController()) return;
+    
+    // [09.14] UI 키 연타 방지하여 안전성 보장
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    if (CurrentTime - LastGameMenuToggleTime < 0.2f) return;
+    LastGameMenuToggleTime = CurrentTime;
+
+    UBaruUIManagerSubsystem* UIManager = ULocalPlayer::GetSubsystem<UBaruUIManagerSubsystem>(GetLocalPlayer());
+    if (!UIManager) return;
+
+    // 1. 이미 메뉴 위젯이 존재하고 활성화되어 있다면 레이어에서 팝(닫기)
+    if (IsValid(ActiveGameMenuWidget))
+    {
+        if (ActiveGameMenuWidget->IsActivated())
+        {
+            UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
+            ActiveGameMenuWidget = nullptr;
+            
+            // [수정 09.14] ESC 메뉴 닫힐 때 FPS 1인칭 게임 입력 복구
+            FInputModeGameOnly InputMode;
+            InputMode.SetConsumeCaptureMouseDown(false);
+            SetInputMode(InputMode);
+            SetShowMouseCursor(false);
+            
+            // [09.14] 닫힐 때 뷰포트로 키보드 포커스 강제 회수
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().SetAllUserFocusToGameViewport();
+            }
+            return;
+        }
+        
+        ActiveGameMenuWidget = nullptr;
+    }
+
+    // 2. 인벤토리가 열려 있는 상태라면 인벤토리만 닫고 즉시 리턴
+    if (IsValid(ActiveInventoryWidget))
+    {
+        ToggleInventory();
+        return;
+    }
+
+    // 3. 게임 메뉴 위젯 클래스 검증
+    if (!GameMenuWidgetClass)
+    {
+        BARU_LOG(LogBaruUI, Warning, TEXT("ToggleGameMenu: BP_BaruPlayerController에 GameMenuWidgetClass가 비어 있습니다."));
+        return;
+    }
+
+    // 4. UI Manager를 통해 GameMenu 레이어에 푸시
+    ActiveGameMenuWidget = UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_GameMenu.GetTag(), GameMenuWidgetClass);
+    
+    if (IsValid(ActiveGameMenuWidget))
+    {
+        // [수정 09.14] 내부 버튼(계속하기 등)으로 닫힐 때도 1인칭 FPS 조작으로 복귀
+        ActiveGameMenuWidget->OnDeactivated().AddWeakLambda(this, [this]()
+        {
+            ActiveGameMenuWidget = nullptr;
+
+            FInputModeGameOnly InputMode;
+            InputMode.SetConsumeCaptureMouseDown(false);
+            SetInputMode(InputMode);
+            SetShowMouseCursor(false);
+
+            // [09.14] 버튼 클릭 후 슬레이트 포커스가 공중에 뜨는 현상 방지
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().SetAllUserFocusToGameViewport();
+            }
+            
+            BARU_LOG(LogBaruUI, Log, TEXT("GameMenu Deactivated -> Restored InputModeGameOnly."));
+        });
+    }
+}
+
+void ABaruPlayerController::HandleGameMenuDeactivated()
+{
+    ActiveGameMenuWidget = nullptr;
+}
+
 void ABaruPlayerController::Input_SpectateNext()
 {
     Server_CycleSpectatorTarget(true);
@@ -86,76 +198,112 @@ void ABaruPlayerController::PostProcessInput(const float DeltaTime, const bool b
     Super::PostProcessInput(DeltaTime, bGamePaused);
 }
 
-// ★[추가 09.10] 인벤토리 토글 입력.
 void ABaruPlayerController::Input_ToggleInventory()
 {
     ToggleInventory();
 }
 
-// ★[추가 09.10] 인벤토리 UI 열기/닫기.
+// [수정 09.14] 인벤토리 UI 열기/닫기 및 1인칭 FPS 포커스 복원 로직
 void ABaruPlayerController::ToggleInventory()
 {
     if (!IsLocalController())
     {
         return;
     }
+    
+    // [09.14] 더블 트리거(0.1초 만에 닫히고 다시 열리는 레이스 컨디션) 방지 쿨타임 (0.25초)
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    if (CurrentTime - LastInventoryToggleTime < 0.25f)
+    {
+        return;
+    }
+    LastInventoryToggleTime = CurrentTime;
 
-    UBaruUIManagerSubsystem* UIManager =
-        ULocalPlayer::GetSubsystem<UBaruUIManagerSubsystem>(GetLocalPlayer());
-
+    UBaruUIManagerSubsystem* UIManager = ULocalPlayer::GetSubsystem<UBaruUIManagerSubsystem>(GetLocalPlayer());
     if (!UIManager)
     {
         BARU_LOG(LogBaruUI, Warning, TEXT("ToggleInventory: UIManagerSubsystem 을 찾지 못했습니다."));
         return;
     }
 
-    // ── 이미 열려 있으면 닫기 ────────────────────────────────
+    // 1. 이미 열려 있으면 닫기 (I 키 토글 닫기)
     if (IsValid(ActiveInventoryWidget))
     {
-        UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
+        if (ActiveInventoryWidget->IsActivated())
+        {
+            UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
+            ActiveInventoryWidget = nullptr;
+
+            // [수정 09.14] 닫히는 즉시 완벽한 1인칭 FPS 조작 모드로 복귀 (마우스 커서 숨김)
+            FInputModeGameOnly InputMode;
+            InputMode.SetConsumeCaptureMouseDown(false);
+            SetInputMode(InputMode);
+            SetShowMouseCursor(false);
+
+            // [09.14] 1인칭 FPS 뷰포트로 키보드 포커스 즉시 강제 회수
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().SetAllUserFocusToGameViewport();
+            }
+            
+            BARU_LOG(LogBaruUI, Log, TEXT("Inventory closed -> Restored FPS InputMode."));
+            return;
+        }
+
         ActiveInventoryWidget = nullptr;
-
-        // 게임 입력으로 복귀
-        FInputModeGameOnly InputMode;
-        InputMode.SetConsumeCaptureMouseDown(true);
-        SetInputMode(InputMode);
-        SetShowMouseCursor(false);
-
-        BARU_LOG(LogBaruUI, Log, TEXT("Inventory closed."));
-        return;
     }
 
-    // ── 닫혀 있으면 열기 ────────────────────────────────────
+    // 2. 닫혀 있으면 열기
     if (!InventoryWidgetClass)
     {
-        BARU_LOG(LogBaruUI, Warning,
-            TEXT("ToggleInventory: BP_BaruPlayerController 에 Inventory Widget Class 가 비어 있습니다."));
+        BARU_LOG(LogBaruUI, Warning, TEXT("ToggleInventory: BP_BaruPlayerController 에 Inventory Widget Class 가 비어 있습니다."));
         return;
     }
 
-    ActiveInventoryWidget =
-        UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_GameMenu.GetTag(), InventoryWidgetClass);
-
+    ActiveInventoryWidget = UIManager->PushWidgetToLayer(BaruUITags::UI_Layer_GameMenu.GetTag(), InventoryWidgetClass);
     if (!ActiveInventoryWidget)
     {
         BARU_LOG(LogBaruUI, Warning, TEXT("ToggleInventory: 위젯 생성에 실패했습니다."));
         return;
     }
 
-    // 마우스로 아이템을 옮겨야 하므로 커서를 켜고 UI 입력을 허용합니다.
+    // [수정 09.14] 위젯 내부(NativeOnKeyDown 등)에서 비활성화될 때도 FPS 조작으로 복귀 보장
+    ActiveInventoryWidget->OnDeactivated().AddWeakLambda(this, [this]()
+    {
+        ActiveInventoryWidget = nullptr;
+
+        FInputModeGameOnly InputMode;
+        InputMode.SetConsumeCaptureMouseDown(false);
+        SetInputMode(InputMode);
+        SetShowMouseCursor(false);
+
+        if (FSlateApplication::IsInitialized())
+        {
+            FSlateApplication::Get().SetAllUserFocusToGameViewport();
+        }
+
+        BARU_LOG(LogBaruUI, Log, TEXT("Inventory Deactivated -> Restored FPS Viewport Focus."));
+    });
+
+    // [수정 09.14] SetWidgetToFocus를 절대 호출하지 않고, 키 입력을 뷰포트에 남겨 'I' 키를 다시 인식하도록 설정
     FInputModeGameAndUI InputMode;
     InputMode.SetWidgetToFocus(ActiveInventoryWidget->TakeWidget());
-    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockOnCapture);
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    InputMode.SetHideCursorDuringCapture(false);
     SetInputMode(InputMode);
     SetShowMouseCursor(true);
 
     BARU_LOG(LogBaruUI, Log, TEXT("Inventory opened."));
 }
 
-// Server RPC
+// =============================================================================
+// Server RPC 구현부
+// [수정 09.14] 헤더의 UFUNCTION(Server, Reliable, WithValidation) 선언과 완벽히 일치하도록 매칭
+// =============================================================================
+
 bool ABaruPlayerController::Server_RequestEquipItem_Validate(int32 SlotIndex)
 {
-    return SlotIndex >= 0 && SlotIndex < MaxInventorySlotIndex;   // ★[수정] 매직넘버 100 제거
+    return SlotIndex >= 0 && SlotIndex < MaxInventorySlotIndex;
 }
 
 void ABaruPlayerController::Server_RequestEquipItem_Implementation(int32 SlotIndex)
@@ -172,7 +320,7 @@ void ABaruPlayerController::Server_RequestEquipItem_Implementation(int32 SlotInd
 
 bool ABaruPlayerController::Server_RequestUseItem_Validate(int32 SlotIndex)
 {
-    return SlotIndex >= 0 && SlotIndex < MaxInventorySlotIndex;   // ★[수정]
+    return SlotIndex >= 0 && SlotIndex < MaxInventorySlotIndex;
 }
 
 void ABaruPlayerController::Server_RequestUseItem_Implementation(int32 SlotIndex)
@@ -189,7 +337,7 @@ void ABaruPlayerController::Server_RequestUseItem_Implementation(int32 SlotIndex
 
 bool ABaruPlayerController::Server_RequestDropItem_Validate(int32 SlotIndex, int32 Count)
 {
-    return SlotIndex >= 0 && SlotIndex < MaxInventorySlotIndex && Count > 0;   // ★[수정]
+    return SlotIndex >= 0 && SlotIndex < MaxInventorySlotIndex && Count > 0;
 }
 
 void ABaruPlayerController::Server_RequestDropItem_Implementation(int32 SlotIndex, int32 Count)
@@ -203,13 +351,11 @@ void ABaruPlayerController::Server_RequestDropItem_Implementation(int32 SlotInde
     BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Server_RequestDropItem Approved for Slot: %d, Count: %d"), SlotIndex, Count);
 }
 
-
 // Client RPC
 void ABaruPlayerController::Client_ShowSettlementUI_Implementation(const FBaruSettlementReport& Report)
 {
     BARU_NET_LOG(this, LogBaruUI, Log, TEXT("Client_ShowSettlementUI Received. (Survived: %d, Currency: %d)"), Report.bSurvived, Report.AcquiredCurrency);
 
-    // 로컬 PC의 .sav 에 기록
     if (UGameInstance* GI = GetGameInstance())
     {
         if (UBaruSaveGameSubsystem* SaveSubsystem = GI->GetSubsystem<UBaruSaveGameSubsystem>())
@@ -230,16 +376,11 @@ void ABaruPlayerController::Client_PlayElevatorCinematic_Implementation()
 
 bool ABaruPlayerController::Server_CycleSpectatorTarget_Validate(bool bNext)
 {
-    // _Validate 에서 false 를 반환하면 해당 클라이언트의 연결이 끊깁니다.
-    // 파라미터가 bool 하나뿐이라 조작 가능한 값이 없으므로 항상 통과시키고,
-    // "관전 자격이 있는가" 같은 게임 규칙은 아래 _Implementation 에서 거릅니다.
     return true;
 }
 
 void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNext)
 {
-    // [1] 자격 검사 — 살아있는 플레이어가 팀원 시점을 훔쳐보는 것을 차단합니다.
-    //     추출 호러에서 벽 너머 몬스터 위치를 아는 건 치명적인 이득이라 반드시 막아야 합니다.
     const ABaruPlayerState* MyPS = GetPlayerState<ABaruPlayerState>();
     if (!MyPS || MyPS->IsAlive())
     {
@@ -247,7 +388,6 @@ void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNex
         return;
     }
 
-    // [2] 관전 가능한 대상 수집
     TArray<APawn*> Candidates;
     GatherSpectatablePawns(Candidates);
 
@@ -257,24 +397,20 @@ void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNex
         return;
     }
 
-    // [3] 현재 대상의 위치를 찾고 다음/이전으로 이동 (순환)
     int32 CurrentIndex = Candidates.IndexOfByKey(CurrentSpectatingPawn.Get());
     if (CurrentIndex == INDEX_NONE)
     {
-        // 보고 있던 대상이 죽었거나 나갔으면 첫 번째부터 시작
         CurrentIndex = 0;
     }
     else
     {
         const int32 Delta = bNext ? 1 : -1;
         CurrentIndex = (CurrentIndex + Delta + Candidates.Num()) % Candidates.Num();
-        //                             Num() 을 더하는 이유: bNext=false 일 때 음수 인덱스 방지
     }
 
     APawn* NewTarget = Candidates[CurrentIndex];
     CurrentSpectatingPawn = NewTarget;
 
-    
     SetViewTargetWithBlend(NewTarget, 0.5f);
 
     if (!IsLocalController())
@@ -285,7 +421,6 @@ void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNex
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Spectating Target Changed to: %s"), *GetNameSafe(NewTarget));
 }
 
-// [추가] 살아있는 팀원의 폰만 모읍니다. 서버에서만 호출됩니다.
 void ABaruPlayerController::GatherSpectatablePawns(TArray<APawn*>& OutPawns) const
 {
     OutPawns.Reset();
@@ -301,12 +436,12 @@ void ABaruPlayerController::GatherSpectatablePawns(TArray<APawn*>& OutPawns) con
         const ABaruPlayerState* BaruPS = Cast<ABaruPlayerState>(PS);
         if (!BaruPS || BaruPS == GetPlayerState<ABaruPlayerState>())
         {
-            continue;   // 자기 자신은 제외
+            continue;
         }
 
         if (!BaruPS->IsAlive())
         {
-            continue;   // 죽은 팀원은 관전 대상이 아님
+            continue;
         }
 
         if (APawn* SpectatablePawn = BaruPS->GetPawn())
@@ -316,10 +451,8 @@ void ABaruPlayerController::GatherSpectatablePawns(TArray<APawn*>& OutPawns) con
     }
 }
 
-// [추가 09.04]
 bool ABaruPlayerController::Server_RequestStartRaid_Validate()
 {
-    
     return true;
 }
 
@@ -337,7 +470,6 @@ void ABaruPlayerController::Server_RequestStartRaid_Implementation()
         return;
     }
 
-    
     ABaruLobbyGameMode* LobbyGM = Cast<ABaruLobbyGameMode>(World->GetAuthGameMode());
     if (!LobbyGM)
     {
@@ -345,7 +477,6 @@ void ABaruPlayerController::Server_RequestStartRaid_Implementation()
         return;
     }
 
-   
     const ABaruLobbyGameState* LobbyGS = World->GetGameState<ABaruLobbyGameState>();
     if (!LobbyGS)
     {
@@ -365,13 +496,10 @@ void ABaruPlayerController::Server_RequestStartRaid_Implementation()
         return;
     }
 
-    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("StartRaid approved. Target: %s"),
-        *LobbyGS->GetSelectedTargetMapURL());
-    
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("StartRaid approved. Target: %s"), *LobbyGS->GetSelectedTargetMapURL());
     LobbyGM->StartGameRaid();
 }
 
-//  탐사 목표 맵 선택
 bool ABaruPlayerController::Server_RequestSetTargetRaidMap_Validate(const FString& TargetMapURL)
 {
     return !TargetMapURL.IsEmpty() && TargetMapURL.Len() <= 260;
@@ -384,14 +512,13 @@ void ABaruPlayerController::Server_RequestSetTargetRaidMap_Implementation(const 
     {
         return;
     }
-    // [1] 방장 확인
+
     if (!IsLocalController())
     {
         BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("SetTargetRaidMap rejected: requester is not the host."));
         return;
     }
 
-    // [2] 지금이 로비인지
     ABaruLobbyGameMode* LobbyGM = Cast<ABaruLobbyGameMode>(World->GetAuthGameMode());
     if (!LobbyGM)
     {
@@ -399,9 +526,6 @@ void ABaruPlayerController::Server_RequestSetTargetRaidMap_Implementation(const 
         return;
     }
 
-    // [3] 허용된 맵인지 검사
-    //   클라이언트가 보낸 문자열을 그대로 믿으면 임의의 레벨로 팀 전체를 끌고 갈 수 있습니다.
-    //   목록이 비어 있으면 아직 설정 전이므로, 조용히 통과시키지 않고 거부합니다.
     if (AllowedRaidMapURLs.Num() == 0)
     {
         BARU_NET_LOG(this, LogBaruSession, Warning,
@@ -416,8 +540,6 @@ void ABaruPlayerController::Server_RequestSetTargetRaidMap_Implementation(const 
         return;
     }
 
-    // [4] 확정. GameState 복제와 UI 갱신은 GameMode 가 처리합니다.
     LobbyGM->SetTargetRaidMap(TargetMapURL);
-
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Target raid map set to: %s"), *TargetMapURL);
 }
