@@ -47,7 +47,8 @@ class UBaruItemInstance;
 class USpotLightComponent;
 class UBaruTensionComponent;
 class UBaruFootstepComponent;
-struct FOnAttributeChangeData;               
+struct FOnAttributeChangeData;
+enum class EBaruInteractionHoldEndReason : uint8;
 
 UCLASS()
 class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface , public IInteractableInterface
@@ -219,9 +220,21 @@ protected:
     TWeakObjectPtr<AActor> PendingInteractTarget;
 
     FTimerHandle InteractionTimerHandle;
+    
+    // [추가] 홀드 도중 거리·대상 상태를 0.1초마다 확인하는 타이머
+    FTimerHandle InteractionHoldCheckTimerHandle;
+
+    // [추가] 지금 진행 중인 게 "홀드"인지 (09.13 에 즉시 실행 대상도 캐싱하게 바뀌어서 구분 필요)
+    bool bInteractionHoldActive = false;
 
     void CompletePendingInteraction();
     void CancelPendingInteraction();
+
+    // [추가 ] 홀드 검사·종료 (서버 전용)
+    void CheckPendingInteractionHold();
+    bool ValidatePendingInteractionHold(EBaruInteractionHoldEndReason& OutFailReason);
+    void EndInteractionHold(EBaruInteractionHoldEndReason Reason);
+
 
 
 protected:
@@ -299,6 +312,9 @@ protected:
     // [추가] 앉기 (Ctrl, Toggle)
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
     TObjectPtr<UInputAction> CrouchAction;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Interaction")
+    float InteractionHoldBreakTolerance = 100.0f;
 
     // 상호작용 트레이스 설정
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Interaction")

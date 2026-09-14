@@ -13,6 +13,10 @@
 #include "Gameplay/Equipment/BaruEquipmentComponent.h"	// [09.03 추가]
 #include "Gameplay/Weapon/Data/BaruWeaponDataAsset.h"	// [09.03 추가]
 #include "BaruLog.h"	// [09.03 추가]
+#include "GameFramework/PlayerController.h"	//사운드 관련.0914.
+#include "GameFramework/PlayerState.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "CollisionQueryParams.h"
 
@@ -301,6 +305,9 @@ bool UBaruInventoryComponent::ReturnEquippedItemToCell(
 	OccupyCells(Item, NewTopLeft);
 
 	SlotList.MarkItemDirty(*InventorySlot);
+	
+	Client_PlayDropSuccessSound();	// 드래그 앤 드랍 사운드.
+	
 	OnInventoryUpdated.Broadcast();
 
 	return true;
@@ -472,6 +479,11 @@ void UBaruInventoryComponent::Client_ReceiveInventoryPickupResult_Implementation
 		Notification.AddedQuantity,
 		Notification.RemainingQuantity,
 		static_cast<int32>(Notification.Result));
+	
+	if (Notification.AddedQuantity > 0)
+	{
+		PlayLocalInventorySound(PickupSound.Get());
+	}	// 인벤 사운드 관련.
 
 	OnInventoryPickupResult.Broadcast(Notification);
 }
@@ -506,6 +518,8 @@ bool UBaruInventoryComponent::MoveItem(UBaruItemInstance* Item, FIntPoint NewTop
 	InventorySlot->TopLeft = NewTopLeft;
 	OccupyCells(Item, NewTopLeft);
 	SlotList.MarkItemDirty(*InventorySlot);
+	
+	if (OldTopLeft != NewTopLeft)	{	Client_PlayDropSuccessSound();	}	// 격자 이동 시 사운드.
 
 	OnInventoryUpdated.Broadcast();
 	return true;
@@ -744,6 +758,9 @@ void UBaruInventoryComponent::UseItem(
 	case EItemType::Weapon:
 			// 무기는 소비하지 않고 장착만.
 		EquipWeaponItem(Item);
+		{
+		Client_PlayDropSuccessSound();	// 그리고 사운드.
+		}
 		return;
 
 	case EItemType::Consumable:
@@ -1295,4 +1312,40 @@ void UBaruInventoryComponent::ClearInventory()
 	SlotList.MarkArrayDirty();
 	OnInventoryUpdated.Broadcast();
 	GetOwner()->ForceNetUpdate();
+}
+
+	//인벤 사운드 관련.
+void UBaruInventoryComponent::PlayLocalInventorySound(
+	USoundBase* Sound)
+{
+	if (!IsValid(Sound))
+	{
+		return;
+	}
+
+	const APlayerState* OwnerPS =
+		Cast<APlayerState>(GetOwner());
+
+	const APlayerController* OwnerPC = IsValid(OwnerPS)
+		? Cast<APlayerController>(OwnerPS->GetOwner())
+		: nullptr;
+
+	// 이 인벤토리를 소유한 로컬 플레이어에게만 재생합니다.
+	if (!IsValid(OwnerPC) || !OwnerPC->IsLocalController())
+	{
+		return;
+	}
+
+	UGameplayStatics::PlaySound2D(this, Sound);
+}
+
+void UBaruInventoryComponent::PlayDragStartSound()
+{
+	PlayLocalInventorySound(DragStartSound.Get());
+}
+
+void UBaruInventoryComponent::
+Client_PlayDropSuccessSound_Implementation()
+{
+	PlayLocalInventorySound(DropSuccessSound.Get());
 }

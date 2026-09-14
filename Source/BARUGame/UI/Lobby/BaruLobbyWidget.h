@@ -23,6 +23,7 @@ class UCanvasPanel;
 class UImage;
 class UListView;
 class UTextBlock;
+class UTexture2D;
 class UWidgetSwitcher;
 class UBaruSessionListItemData;
 class UBaruLobbyPlayerListItemData;
@@ -66,6 +67,9 @@ protected:
     UFUNCTION()
     void HandleConfirmContractClicked();
     
+    // 로비 홈 중앙에 선택된 맵 썸네일을 표시한다.
+    void UpdateSelectedMapPreview(UTexture2D* Thumbnail);
+
     void RebuildContractList();
     
     UFUNCTION()
@@ -166,6 +170,9 @@ protected:
     
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
     TObjectPtr<UImage> Image_ContractDetailThumbnail;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
+    TObjectPtr<UImage> Image_SelectedMapPreview;
     
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Contract")
     TObjectPtr<UTextBlock> Text_ContractDetailMapName;

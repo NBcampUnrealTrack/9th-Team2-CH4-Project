@@ -374,6 +374,20 @@ void ABaruPlayerController::Client_PlayElevatorCinematic_Implementation()
     OnPlayCinematic.Broadcast();
 }
 
+void ABaruPlayerController::Client_InteractionHoldStarted_Implementation(AActor* OtherActor, float Duration, bool bIsHolder)
+{
+    BARU_NET_LOG(this, LogBaruUI, Log, TEXT("Interaction hold started. Other=%s Duration=%.2f Holder=%d"),
+        *GetNameSafe(OtherActor), Duration, bIsHolder);
+    OnInteractionHoldStarted.Broadcast(OtherActor, Duration, bIsHolder);
+}
+
+void ABaruPlayerController::Client_InteractionHoldEnded_Implementation(AActor* OtherActor, EBaruInteractionHoldEndReason Reason, bool bIsHolder)
+{
+    BARU_NET_LOG(this, LogBaruUI, Log, TEXT("Interaction hold ended. Other=%s Reason=%s Holder=%d"),
+        *GetNameSafe(OtherActor), *UEnum::GetValueAsString(Reason), bIsHolder);
+    OnInteractionHoldEnded.Broadcast(OtherActor, Reason, bIsHolder);
+}
+
 bool ABaruPlayerController::Server_CycleSpectatorTarget_Validate(bool bNext)
 {
     return true;
