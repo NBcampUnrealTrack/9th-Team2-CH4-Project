@@ -136,6 +136,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Equipment|Weapon")
 	FName ThirdPersonWeaponAttachPoint = TEXT("hand_r");
 	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Equipment|Weapon")
+	TMap<EBaruEquipmentSlot, FName> HandAttachPointBySlot;
+	
 	// 장비 해제 관련.
 	UFUNCTION(Server, Reliable, WithValidation)
 	void Server_UnequipWeapon(EBaruEquipmentSlot WeaponSlot);
@@ -180,6 +183,8 @@ protected:
 
 		// 서버에서 실제 무기 전환을 처리
 	void SetActiveWeaponSlotOnServer(EBaruEquipmentSlot NewWeaponSlot);
+	
+	FName GetHandAttachPointForSlot(EBaruEquipmentSlot WeaponSlot) const;
 
 		// 활성 무기: 손에 부착
 	void AttachWeaponToHand(ABaruWeaponBase* Weapon);

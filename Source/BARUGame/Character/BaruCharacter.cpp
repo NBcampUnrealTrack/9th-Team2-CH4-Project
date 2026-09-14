@@ -10,6 +10,7 @@
 #include "Net/UnrealNetwork.h"                                    
 #include "TimerManager.h"                                       
 #include "Player/BaruPlayerState.h"
+#include "Player/BaruPlayerController.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayEffectTypes.h"                                  
 #include "AbilitySystem/Attributes/BaruCoreAttributeSet.h"        
@@ -1209,14 +1210,18 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
           TEXT("Interaction target does not implement InteractableInterface: %s"), *ClaimedActor->GetName());
       return;
    }
-
-   // ★[추가 09.10] 대상이 요구하는 홀드 시간을 확인합니다.
-   //   0 이하면 즉시 실행(아이템 줍기 등), 0보다 크면 그 시간만큼 F 를 누르고 있어야 합니다.
+   
+   if (!IInteractableInterface::Execute_CanInteract(ClaimedActor, this))
+   {
+      BARU_NET_LOG(this, LogBaruItem, Log,
+         TEXT("Interaction rejected: target refused (%s)"), *ClaimedActor->GetName());
+      return;
+   }
+   
    const float HoldDuration = IInteractableInterface::Execute_GetInteractionDuration(ClaimedActor);
 
    if (HoldDuration <= 0.0f)
    {
-      // [09.13] F키를 뗄 때 EndInteraction을 호출할 수 있도록 즉시 실행 대상도 타깃으로 캐싱
       CancelPendingInteraction();
       PendingInteractTarget = ClaimedActor;
 
@@ -1224,10 +1229,10 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
       BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *ClaimedActor->GetName());
       return;
    }
-
-   // 홀드 상호작용 시작. 이전에 잡고 있던 게 있으면 먼저 정리합니다.
+   
    CancelPendingInteraction();
    PendingInteractTarget = ClaimedActor;
+   bInteractionHoldActive = true;   
 
    GetWorldTimerManager().SetTimer(
       InteractionTimerHandle,
@@ -1235,6 +1240,25 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
       &ABaruCharacter::CompletePendingInteraction,
       HoldDuration,
       false);
+   
+   GetWorldTimerManager().SetTimer(
+      InteractionHoldCheckTimerHandle,
+      this,
+      &ABaruCharacter::CheckPendingInteractionHold,
+      0.1f,
+      true);
+   
+   if (ABaruPlayerController* MyPC = GetController<ABaruPlayerController>())
+   {
+      MyPC->Client_InteractionHoldStarted(ClaimedActor, HoldDuration, true);
+   }
+   if (const APawn* TargetPawn = Cast<APawn>(ClaimedActor))
+   {
+      if (ABaruPlayerController* TargetPC = TargetPawn->GetController<ABaruPlayerController>())
+      {
+         TargetPC->Client_InteractionHoldStarted(this, HoldDuration, false);
+      }
+   }
 
    BARU_NET_LOG(this, LogBaruItem, Log,
       TEXT("Interaction hold started: %s (%.2fs)"), *ClaimedActor->GetName(), HoldDuration);
@@ -1245,41 +1269,110 @@ void ABaruCharacter::Server_ProcessInteraction_Implementation(const FHitResult& 
 //   누르고 있는 동안 플레이어가 멀어졌거나 문이 잠겼을 수 있기 때문입니다.
 void ABaruCharacter::CompletePendingInteraction()
 {
+   // ★[수정 09.14] 검사를 ValidatePendingInteractionHold 로 모으고, 결과를 종료 이벤트로 알립니다.
+   EBaruInteractionHoldEndReason FailReason = EBaruInteractionHoldEndReason::Failed;
+   if (!ValidatePendingInteractionHold(FailReason))
+   {
+      EndInteractionHold(FailReason);
+      return;
+   }
+
    AActor* Target = PendingInteractTarget.Get();
-   CancelPendingInteraction();   // 타이머·타깃 먼저 정리
-
-   if (bIsDead || !IsValid(Target))
-   {
-      return;
-   }
-
-   const float MaxDist = InteractionTraceDistance + InteractionLagTolerance;
-   if (FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) > FMath::Square(MaxDist))
-   {
-      BARU_NET_LOG(this, LogBaruNet, Warning,
-         TEXT("Interaction hold cancelled: target out of range (%s)"), *Target->GetName());
-      return;
-   }
-
-   if (!IInteractableInterface::Execute_CanInteract(Target, this))
-   {
-      BARU_NET_LOG(this, LogBaruItem, Log,
-         TEXT("Interaction hold refused by target: %s"), *Target->GetName());
-      return;
-   }
+   EndInteractionHold(EBaruInteractionHoldEndReason::Completed);   // 타이머·타깃 먼저 정리 + 완료 이벤트
 
    IInteractableInterface::Execute_ExecuteInteraction(Target, this);
    BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction executed on: %s"), *Target->GetName());
 }
 
-// ★[추가] 진행 중인 홀드를 정리 서버 전용.
+// ★[추가 09.14] 홀드 도중 0.1초마다 호출 — 조건이 깨지면 바로 종료 이벤트를 보냅니다.
+void ABaruCharacter::CheckPendingInteractionHold()
+{
+   EBaruInteractionHoldEndReason FailReason = EBaruInteractionHoldEndReason::Failed;
+   if (!ValidatePendingInteractionHold(FailReason))
+   {
+      EndInteractionHold(FailReason);
+   }
+}
+
+// ★[추가 09.14] 홀드를 계속해도 되는지 검사. 안 되면 이유를 OutFailReason 에 담아 false.
+bool ABaruCharacter::ValidatePendingInteractionHold(EBaruInteractionHoldEndReason& OutFailReason)
+{
+   // 내가 죽었거나 다운됐으면 취소
+   const ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>();
+   if (bIsDead || (BaruPS && BaruPS->IsDBNO()))
+   {
+      OutFailReason = EBaruInteractionHoldEndReason::Cancelled;
+      return false;
+   }
+
+   AActor* Target = PendingInteractTarget.Get();
+   if (!IsValid(Target))
+   {
+      OutFailReason = EBaruInteractionHoldEndReason::Failed;
+      return false;
+   }
+
+   // 거리 이탈 (대상 중심 기준이라 InteractionHoldBreakTolerance 만큼 여유)
+   const float MaxDist = InteractionTraceDistance + InteractionLagTolerance + InteractionHoldBreakTolerance;
+   if (FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) > FMath::Square(MaxDist))
+   {
+      BARU_NET_LOG(this, LogBaruNet, Log, TEXT("Interaction hold: target out of range (%s)"), *Target->GetName());
+      OutFailReason = EBaruInteractionHoldEndReason::OutOfRange;
+      return false;
+   }
+
+   // 대상 상태 변화 — 출혈사, 다른 사람이 먼저 소생, 문이 잠김 등
+   if (!IInteractableInterface::Execute_CanInteract(Target, this))
+   {
+      BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction hold refused by target: %s"), *Target->GetName());
+      OutFailReason = EBaruInteractionHoldEndReason::Failed;
+      return false;
+   }
+
+   return true;
+}
+
+// ★[수정 09.14] 진행 중인 홀드 정리 (서버 전용). 홀드 중이었다면 UI 에 '취소'로 종료를 알립니다.
+//   EnterDBNO·Die·새 상호작용 시작 등 기존 호출부는 그대로 두면 자동으로 Cancelled 가 나갑니다.
 void ABaruCharacter::CancelPendingInteraction()
 {
+   EndInteractionHold(EBaruInteractionHoldEndReason::Cancelled);
+}
+
+// ★[추가 09.14] 타이머·타깃을 정리하고, 홀드 중이었을 때만 양쪽 클라이언트에 종료 이벤트를 보냅니다.
+void ABaruCharacter::EndInteractionHold(EBaruInteractionHoldEndReason Reason)
+{
+   AActor* Target = PendingInteractTarget.Get();
+   const bool bWasHolding = bInteractionHoldActive;
+
    if (UWorld* World = GetWorld())
    {
       World->GetTimerManager().ClearTimer(InteractionTimerHandle);
+      World->GetTimerManager().ClearTimer(InteractionHoldCheckTimerHandle);
    }
    PendingInteractTarget.Reset();
+   bInteractionHoldActive = false;
+
+   // 즉시 실행 대상(아이템·버튼)만 캐싱돼 있던 경우엔 보낼 게 없음
+   if (!bWasHolding)
+   {
+      return;
+   }
+
+   if (ABaruPlayerController* MyPC = GetController<ABaruPlayerController>())
+   {
+      MyPC->Client_InteractionHoldEnded(Target, Reason, true);
+   }
+   if (const APawn* TargetPawn = Cast<APawn>(Target))
+   {
+      if (ABaruPlayerController* TargetPC = TargetPawn->GetController<ABaruPlayerController>())
+      {
+         TargetPC->Client_InteractionHoldEnded(this, Reason, false);
+      }
+   }
+
+   BARU_NET_LOG(this, LogBaruItem, Log, TEXT("Interaction hold ended: %s (%s)"),
+      *GetNameSafe(Target), *UEnum::GetValueAsString(Reason));
 }
 
 // ★[추가] 클라이언트가 F 를 뗐을 때 서버가 홀드를 중단
@@ -1302,7 +1395,7 @@ void ABaruCharacter::Server_StopInteraction_Implementation()
       BARU_NET_LOG(this, LogBaruItem, Log,
           TEXT("Interaction hold cancelled by input release: %s"), *Target->GetName());
    }
-   CancelPendingInteraction();
+   EndInteractionHold(EBaruInteractionHoldEndReason::Released);
 }
 
 UAbilitySystemComponent* ABaruCharacter::GetAbilitySystemComponent() const
