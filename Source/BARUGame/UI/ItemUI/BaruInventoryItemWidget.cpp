@@ -255,6 +255,12 @@ void UBaruInventoryItemWidget::NativeOnDragDetected(
 	}
 
 	OutOperation = DragOperation;
+	
+		//사운드.
+	if (IsValid(InventoryComponent))
+	{
+		InventoryComponent->PlayDragStartSound();
+	}
 }
 
 	// 아이템 툴팁 호버링을 위해.

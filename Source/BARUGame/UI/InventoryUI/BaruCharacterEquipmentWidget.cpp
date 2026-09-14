@@ -455,6 +455,12 @@ void UBaruCharacterEquipmentWidget::NativeOnDragDetected(
     }
 
     OutOperation = DragOperation;
+    
+        //장착 사운드
+    if (IsValid(InventoryComponent))
+    {
+        InventoryComponent->PlayDragStartSound();
+    }
 }
 
 
