@@ -14,7 +14,6 @@ UBaruInventoryScreenWidget::UBaruInventoryScreenWidget(
 	GameMouseCaptureMode = EMouseCaptureMode::NoCapture;
 
 	bSupportsActivationFocus = false;
-	bIsBackHandler = false;
 	
 	// [09.14] ESC 키를 누르면 CommonUI 기본 뒤로가기(닫기)가 동작하도록 활성화
 	bIsBackHandler = true;
@@ -23,7 +22,6 @@ UBaruInventoryScreenWidget::UBaruInventoryScreenWidget(
 // [09.14] 인벤토리 화면 어디를 클릭해서 UI 포커스가 잡혀 있어도 I 키를 누르면 닫힘
 FReply UBaruInventoryScreenWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	// 인벤토리 토글 키인 'I' 키가 눌렸을 때
 	if (InKeyEvent.GetKey() == EKeys::I)
 	{
 		DeactivateWidget();

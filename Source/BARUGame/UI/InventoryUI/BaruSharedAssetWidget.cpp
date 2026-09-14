@@ -18,14 +18,11 @@ void UBaruSharedAssetWidget::NativeDestruct()
 {
 	if (IsValid(BoundGameState))
 	{
-		BoundGameState->OnTeamScrapValueChanged.RemoveDynamic(
-			this,
-			&UBaruSharedAssetWidget::
-				HandleTeamScrapValueChanged);
+		// [09.14] 매크로 파싱 오류 방지를 위해 한 줄로 바인딩 해제
+		BoundGameState->OnTeamScrapValueChanged.RemoveDynamic(this, &UBaruSharedAssetWidget::HandleTeamScrapValueChanged);
 	}
 
 	BoundGameState = nullptr;
-
 	Super::NativeDestruct();
 }
 
@@ -33,15 +30,11 @@ void UBaruSharedAssetWidget::BindGameState()
 {
 	if (IsValid(BoundGameState))
 	{
-		BoundGameState->OnTeamScrapValueChanged.RemoveDynamic(
-			this,
-			&UBaruSharedAssetWidget::
-				HandleTeamScrapValueChanged);
+		// [09.14] 매크로 파싱 오류 방지를 위해 한 줄로 바인딩 해제
+		BoundGameState->OnTeamScrapValueChanged.RemoveDynamic(this, &UBaruSharedAssetWidget::HandleTeamScrapValueChanged);
 	}
 
-	BoundGameState = GetWorld()
-		? GetWorld()->GetGameState<ABaruGameState>()
-		: nullptr;
+	BoundGameState = GetWorld() ? GetWorld()->GetGameState<ABaruGameState>() : nullptr;
 
 	if (!IsValid(BoundGameState))
 	{
@@ -49,14 +42,11 @@ void UBaruSharedAssetWidget::BindGameState()
 		return;
 	}
 
-	BoundGameState->OnTeamScrapValueChanged.AddUniqueDynamic(
-		this,
-		&UBaruSharedAssetWidget::
-			HandleTeamScrapValueChanged);
+	// [09.14] 매크로 내부 공백 생성 방지를 위해 반드시 한 줄로 바인딩
+	BoundGameState->OnTeamScrapValueChanged.AddUniqueDynamic(this, &UBaruSharedAssetWidget::HandleTeamScrapValueChanged);
 
 	// 위젯이 열리기 전에 변경된 값도 즉시 표시
-	HandleTeamScrapValueChanged(
-		BoundGameState->GetTeamScrapValue());
+	HandleTeamScrapValueChanged(BoundGameState->GetTeamScrapValue());
 }
 
 void UBaruSharedAssetWidget::HandleTeamScrapValueChanged(
