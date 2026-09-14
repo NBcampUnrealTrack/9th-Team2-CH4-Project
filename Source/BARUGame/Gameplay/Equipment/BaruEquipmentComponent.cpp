@@ -698,6 +698,20 @@ void UBaruEquipmentComponent::SetActiveWeaponSlotOnServer(
 }
 
     //무기를 손에 붙이기.
+// ★[추가 09.14] 슬롯별 소켓이 지정돼 있으면 그걸, 아니면 기본 소켓(ThirdPersonWeaponAttachPoint)
+FName UBaruEquipmentComponent::GetHandAttachPointForSlot(EBaruEquipmentSlot WeaponSlot) const
+{
+    if (const FName* SlotSocket = HandAttachPointBySlot.Find(WeaponSlot))
+    {
+        if (!SlotSocket->IsNone())
+        {
+            return *SlotSocket;
+        }
+    }
+    return ThirdPersonWeaponAttachPoint;
+}
+
+//무기를 손에 붙이기.
 void UBaruEquipmentComponent::AttachWeaponToHand(
     ABaruWeaponBase* Weapon)
 {
@@ -713,23 +727,36 @@ void UBaruEquipmentComponent::AttachWeaponToHand(
         return;
     }
 
+    // [추가] 이 무기가 어느 슬롯인지 알아내서 슬롯별 손 소켓을 고릅니다.
+    EBaruEquipmentSlot WeaponSlot = ActiveWeaponSlot;
+    if (Weapon == PrimaryWeapon)
+    {
+        WeaponSlot = EBaruEquipmentSlot::PrimaryWeapon;
+    }
+    else if (Weapon == SecondaryWeapon)
+    {
+        WeaponSlot = EBaruEquipmentSlot::SecondaryWeapon;
+    }
+    const FName HandAttachPoint = GetHandAttachPointForSlot(WeaponSlot);
+
+    // [수정] ThirdPersonWeaponAttachPoint → HandAttachPoint (아래 3군데)
     const bool bHasAttachPoint =
-        CharacterMesh->DoesSocketExist(ThirdPersonWeaponAttachPoint)
-        || CharacterMesh->GetBoneIndex(ThirdPersonWeaponAttachPoint) != INDEX_NONE;
+        CharacterMesh->DoesSocketExist(HandAttachPoint)
+        || CharacterMesh->GetBoneIndex(HandAttachPoint) != INDEX_NONE;
 
     if (!bHasAttachPoint)
     {
         BARU_NET_LOG(
             GetOwner(), LogBaruItem, Warning,
             TEXT("손 부착 실패: 전신 메시에서 '%s'를 찾지 못했습니다."),
-            *ThirdPersonWeaponAttachPoint.ToString());
+            *HandAttachPoint.ToString());
         return;
     }
 
     const bool bAttached = Weapon->AttachToComponent(
         CharacterMesh,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-        ThirdPersonWeaponAttachPoint);
+        HandAttachPoint);
 
     if (!bAttached)
     {

@@ -30,10 +30,21 @@ struct FBaruSettlementReport
 	int32 MonsterKillCount = 0;
 };
 
+// [추가] 홀드 상호작용(소생 등) 종료 이유 — UI 가 문구/연출 고를 때 사용
+UENUM(BlueprintType)
+enum class EBaruInteractionHoldEndReason : uint8
+{
+	Completed,	// 끝까지 채움
+	Released,	// F 키를 뗌
+	OutOfRange,	// 거리 이탈
+	Failed,		// 대상 상태가 바뀜 (출혈사, 다른 사람이 먼저 소생 등)
+	Cancelled,	// 내가 다운/사망, 다른 상호작용 시작 등
+};
 // UI Deligate (Client)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSettlementReceived, const FBaruSettlementReport&, Report);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBaruPlayCinematic);
-
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBaruInteractionHoldStarted, AActor*, OtherActor, float, Duration, bool, bIsHolder);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBaruInteractionHoldEnded, AActor*, OtherActor, EBaruInteractionHoldEndReason, Reason, bool, bIsHolder);
 /**
  * 클라이언트 입력, 서버 RPC 라우팅 및 1회성 피드백 담당 처리
  */
@@ -85,6 +96,12 @@ public:
 	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
 	void Client_PlayElevatorCinematic();
 	
+	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
+	void Client_InteractionHoldStarted(AActor* OtherActor, float Duration, bool bIsHolder);
+
+	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
+	void Client_InteractionHoldEnded(AActor* OtherActor, EBaruInteractionHoldEndReason Reason, bool bIsHolder);
+	
 	UFUNCTION(BlueprintPure, Category = "BARU|Components")
 	UBaruItemFocusComponent* GetItemFocusComponent() const { return ItemFocusComponent; }
 
@@ -96,7 +113,12 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "BARU|Events")
 	FOnBaruPlayCinematic OnPlayCinematic;
-
+	
+	UPROPERTY(BlueprintAssignable, Category = "BARU|Events")
+	FOnBaruInteractionHoldStarted OnInteractionHoldStarted;
+	
+	UPROPERTY(BlueprintAssignable, Category = "BARU|Events")
+	FOnBaruInteractionHoldEnded OnInteractionHoldEnded;
 	
 protected:
 	virtual void BeginPlay() override;
