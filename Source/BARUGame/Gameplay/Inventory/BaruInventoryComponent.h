@@ -14,6 +14,7 @@
 
 class UDataTable;
 class UBaruItemInstance;
+class USoundBase;
 
 DECLARE_MULTICAST_DELEGATE(FOnInventoryUpdated); // UI(태현님)와 맞춰서 이름 정할 것.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -204,4 +205,28 @@ private:
 	friend struct FInventorySlotArray; // friend는 friend로 지정된 FInventorySlotArray만 RebuildCellCache 등의 private 함수를 쓸 수 있고, 접근 가능하게. 델타 복제 콜백 시.
 	
 	bool DropEntireItemOnServer(UBaruItemInstance* Item, int32 ExpectedQuantity);
+	
+	
+	// Item 사운드 관련.(09.14)
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "BARU|Inventory|Sound")
+	TObjectPtr<USoundBase> PickupSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "BARU|Inventory|Sound")
+	TObjectPtr<USoundBase> DragStartSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "BARU|Inventory|Sound")
+	TObjectPtr<USoundBase> DropSuccessSound = nullptr;
+
+	// 로컬 UI에서 드래그가 시작될 때 호출합니다.
+	void PlayDragStartSound();
+
+private:
+	void PlayLocalInventorySound(USoundBase* Sound);
+
+	UFUNCTION(Client, Reliable)
+	void Client_PlayDropSuccessSound();
 };
