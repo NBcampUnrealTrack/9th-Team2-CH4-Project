@@ -9,6 +9,7 @@
 
 class ABaruMonsterCharacter;
 class ABaruMonsterAIController;
+class ABaruControlRoomSpawner;
 class APawn;
 
 /**
@@ -100,6 +101,18 @@ public:
 		APawn* PlayerPawn,
 		float ThreatDelta
 	);
+	
+	// 플레이어가 몬스터에게 피해를 줬을 때 호출
+	// 실제 피해량을 디렉터 위협도로 변환하여 누적
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director|Threat"
+	)
+	void ReportPlayerDamageThreat(
+		APawn* PlayerPawn,
+		float DamageAmount
+	);
 
 	// 저장된 위협도를 반환
 	// 기록이 없거나 유효하지 않은 플레이어라면 0 반환
@@ -165,6 +178,21 @@ public:
 		Category = "Monster|Director|Extraction"
 	)
 	void SetExtractionActive(bool bNewExtractionActive);
+	
+	/**
+	* 탈출 저지 웨이브가 향할 플레이어를 설정합니다.
+	*
+	* 엘리베이터 카운트다운 중 외부에 남아 있는
+	* 살아 있는 플레이어가 대상으로 전달됩니다.
+	*
+	 * nullptr를 전달하면 기존 목표를 제거합니다.
+	 */
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director|Extraction"
+	)
+	void SetExtractionTarget(APawn* TargetPlayer);
 
 	// 현재 탈출 저지 상태가 필요한지 반환
 	UFUNCTION(
@@ -195,6 +223,30 @@ protected:
 		meta = (ClampMin = "1.0")
 	)
 	float ThreatPerMonster = 25.0f;
+	
+	// 플레이어가 몬스터에게 준 피해 1당 증가하는 디렉터 위협도
+	//
+	// 기본값 1:
+	// 피해 30을 주면 위협도도 30 증가
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Threat",
+		meta = (ClampMin = "0.0")
+	)
+	float ThreatGainPerDamage = 1.0f;
+
+	// 전투가 끝난 뒤 1초마다 감소하는 플레이어 위협도
+	//
+	// 기본값 2:
+	// 위협도 50이라면 추가 행동이 없을 때 약 25초 후 0이 됨
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Threat",
+		meta = (ClampMin = "0.0")
+	)
+	float PlayerThreatDecayPerSecond = 2.0f;
 
 	// 디렉터가 플레이어 한 명에게 배정할 수 있는 최대 수
 	// 0이면 해당 디렉터의 자동 배정을 하지 않음
@@ -218,6 +270,64 @@ protected:
 		meta = (ClampMin = "0.1")
 	)
 	float AssignmentUpdateInterval = 2.0f;
+	
+	// =========================================================================
+	// 디렉터 웨이브 스폰 설정
+	// =========================================================================
+
+	/**
+	 * 디렉터가 사용할 웨이브 스포너 목록
+	 *
+	 * 레벨에 배치된 MonsterDirector 인스턴스에서
+	 * 사용할 스포너들을 직접 지정합니다.
+	 */
+	UPROPERTY(
+		EditInstanceOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Spawning"
+	)
+	TArray<TObjectPtr<ABaruControlRoomSpawner>> WaveSpawners;
+
+	/**
+	 * 웨이브가 반복 생성되는 것을 막는 전역 쿨타임
+	 *
+	 * 플레이어 위협도가 계속 높더라도
+	 * 이 시간이 지나기 전에는 다음 웨이브를 생성하지 않습니다.
+	 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Spawning",
+		meta = (ClampMin = "1.0")
+	)
+	float WaveSpawnCooldown = 15.0f;
+
+	/** 평상시 한 번에 생성할 몬스터 수 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Spawning",
+		meta = (ClampMin = "1")
+	)
+	int32 NormalWaveSize = 2;
+
+	/** 압박 상태에서 한 번에 생성할 몬스터 수 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Spawning",
+		meta = (ClampMin = "1")
+	)
+	int32 PressureWaveSize = 4;
+
+	/** 탈출 저지 상태에서 한 번에 생성할 몬스터 수 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Spawning",
+		meta = (ClampMin = "1")
+	)
+	int32 ExtractionWaveSize = 5;
 
 private:
 	// 지휘 대상의 수명을 유지하지 않도록 약한 참조로 보관
@@ -247,6 +357,16 @@ private:
 
 	// Actor Tick 대신 일정 간격으로 배정을 확인하는 타이머
 	FTimerHandle MonsterAssignmentUpdateTimerHandle;
+	
+	// 현재 디렉터 상태에 맞는 웨이브 수량 반환
+	int32 GetWaveSizeForCurrentState() const;
+
+	// 사용 가능한 스포너를 찾아 새 웨이브 생성 시도
+	bool TrySpawnDirectorWave(APawn* TargetPlayer);
+
+	// 마지막으로 웨이브 생성에 성공한 서버 시간
+	// -1이면 아직 한 번도 생성하지 않은 상태
+	double LastWaveSpawnTime = -1.0;
 
 	// 파괴되거나 사망한 몬스터를 목록에서 제거
 	void RemoveInvalidMonsters();
@@ -266,6 +386,10 @@ private:
 
 	// 파괴됐거나 조종이 해제된 플레이어의 기록을 제거
 	void RemoveInvalidPlayerThreats();
+	
+	// 경과 시간에 따라 모든 플레이어의 디렉터 위협도 감소
+	// 0까지 감소한 기록은 목록에서 제거
+	void DecayPlayerThreats(float DeltaSeconds);
 	
 	// 플레이어 팀 전체가 현재 얼마나 벅찬지를 나타내는 값
 	// 0에 가까움:
@@ -315,5 +439,14 @@ private:
 
 	// Actor Tick 대신 1초마다 부담도를 계산하기 위한 타이머
 	FTimerHandle TeamBurdenUpdateTimerHandle;
+	
+	/**
+	* 탈출 카운트다운 중 엘리베이터 밖에 남아 있는 플레이어
+	*
+	* 약한 참조이므로 플레이어 Pawn의 제거를 방해하지 않습니다.
+	* 서버의 탈출 저지 웨이브 목표로만 사용합니다.
+	*/
+	UPROPERTY(Transient)
+	TWeakObjectPtr<APawn> ExtractionTargetPlayer;
 	
 };

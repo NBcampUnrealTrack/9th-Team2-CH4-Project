@@ -8,6 +8,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Player/BaruPlayerState.h"
 #include "Character/BaruCharacter.h"
+#include "Monster/AI/BaruMonsterDirector.h"
 #include "Interfaces/CombatInterface.h"
 #include "Core/BaruGameState.h"
 #include "Core/BaruLobbyGameMode.h"
@@ -83,6 +84,118 @@ void ABaruElevatorActor::BeginPlay()
         &ABaruElevatorActor::EnableElevatorActivation,
         ArrivalLockoutDuration,
         false
+    );
+}
+
+void ABaruElevatorActor::EndPlay(
+    const EEndPlayReason::Type EndPlayReason
+)
+{
+    // 엘리베이터가 제거되면 탈출 저지 상태도 종료
+    if (HasAuthority() && IsValid(CachedMonsterDirector))
+    {
+        CachedMonsterDirector->SetExtractionActive(false);
+        CachedMonsterDirector->SetExtractionTarget(nullptr);
+    }
+
+    Super::EndPlay(EndPlayReason);
+}
+
+APawn* ABaruElevatorActor::FindLivingPlayerOutsideElevator() const
+{
+    UWorld* World = GetWorld();
+
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    for (FConstPlayerControllerIterator It =
+             World->GetPlayerControllerIterator();
+         It;
+         ++It)
+    {
+        APlayerController* PlayerController = It->Get();
+
+        if (!IsValid(PlayerController) ||
+            PlayerController->IsPendingKillPending())
+        {
+            continue;
+        }
+
+        APawn* PlayerPawn = PlayerController->GetPawn();
+
+        const ABaruPlayerState* PlayerState =
+            PlayerController->GetPlayerState<ABaruPlayerState>();
+
+        // Pawn이 없거나 사망·DBNO 상태라면 탈출 저지 대상에서 제외
+        if (!IsValid(PlayerPawn) ||
+            !IsValid(PlayerState) ||
+            !PlayerState->IsAlive())
+        {
+            continue;
+        }
+
+        // 살아 있으면서 엘리베이터에 타지 않은 플레이어
+        if (!BoardedPlayers.Contains(PlayerPawn))
+        {
+            return PlayerPawn;
+        }
+    }
+
+    return nullptr;
+}
+
+void ABaruElevatorActor::RefreshDirectorExtractionState()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+
+    if (!World)
+    {
+        return;
+    }
+
+    // 디렉터가 아직 캐시되지 않았다면 월드에서 다시 탐색
+    if (!IsValid(CachedMonsterDirector))
+    {
+        CachedMonsterDirector =
+            Cast<ABaruMonsterDirector>(
+                UGameplayStatics::GetActorOfClass(
+                    World,
+                    ABaruMonsterDirector::StaticClass()
+                )
+            );
+    }
+
+    if (!IsValid(CachedMonsterDirector))
+    {
+        return;
+    }
+
+    // 로비에서는 탈출 저지를 사용하지 않음
+    const bool bIsIngameElevator =
+        Cast<ABaruGameMode>(World->GetAuthGameMode()) != nullptr;
+
+    APawn* OutsidePlayer = nullptr;
+
+    if (bIsIngameElevator &&
+        bIsCountingDown &&
+        !bIsDeparted)
+    {
+        OutsidePlayer = FindLivingPlayerOutsideElevator();
+    }
+
+    const bool bShouldBlockExtraction = IsValid(OutsidePlayer);
+
+    // 목표를 먼저 저장한 후 StateTree 전환 조건을 활성화
+    CachedMonsterDirector->SetExtractionTarget(OutsidePlayer);
+    CachedMonsterDirector->SetExtractionActive(
+        bShouldBlockExtraction
     );
 }
 
@@ -251,6 +364,9 @@ void ABaruElevatorActor::HandleTriggerBeginOverlap(
     BoardedPlayers.Add(PlayerPawn);
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Player Entered Elevator: %s (Count: %d)"), *PlayerPawn->GetName(), BoardedPlayers.Num());
 
+    // 카운트다운 도중 외부 인원이 탑승했을 수 있으므로 다시 확인
+    RefreshDirectorExtractionState();
+    
     if (TriggerType == EBaruElevatorTriggerType::AutoOnAllBoarded && bIsElevatorArmed && !bIsCountingDown)
     {
         if (CheckAllPlayersBoarded())
@@ -295,6 +411,10 @@ void ABaruElevatorActor::HandleTriggerEndOverlap(
             }
         }
     }
+    
+    // 카운트다운 도중 플레이어가 밖으로 나갔을 수 있으므로 다시 확인
+    RefreshDirectorExtractionState();
+    
 }
 
 bool ABaruElevatorActor::CheckAllPlayersBoarded() const
@@ -332,6 +452,8 @@ void ABaruElevatorActor::StartCountdown()
     if (bIsCountingDown || bIsDeparted) return;
 
     bIsCountingDown = true;
+    
+    RefreshDirectorExtractionState();
 
     AGameModeBase* AuthGM = GetWorld()->GetAuthGameMode();
     const bool bIsLobby = (Cast<ABaruLobbyGameMode>(AuthGM) != nullptr);
@@ -369,6 +491,7 @@ void ABaruElevatorActor::CancelCountdown()
     if (!bIsCountingDown || bIsDeparted) return;
 
     bIsCountingDown = false;
+    RefreshDirectorExtractionState();
     RemainingCountdown = 0.0f;
     GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
     OnRep_IsCountingDown();
@@ -412,6 +535,9 @@ void ABaruElevatorActor::OnCountdownCompleted()
 
     bIsCountingDown = false;
     bIsDeparted = true;
+    
+    // 출발이 확정됐으므로 추가 탈출 저지 웨이브 중단
+    RefreshDirectorExtractionState();
 
     // 출발 확정 즉시 모든 트리거/콘솔 충돌을 꺼서 8초 대기 중 추가 상호작용 및 오버랩 원천 차단
     if (BoardingTriggerBox) BoardingTriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
