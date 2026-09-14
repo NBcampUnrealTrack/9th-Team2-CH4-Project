@@ -208,6 +208,12 @@ public:
 		return DirectorCommand;
 	}
 	
+	// 현재 명령의 버전 번호
+	uint32 GetDirectorCommandRevision() const
+	{
+		return DirectorCommandRevision;
+	}
+	
 private:
 	
 	//----------------
@@ -227,5 +233,8 @@ private:
 
 	// 현재 명령을 Behavior Tree의 Blackboard에 반영
 	void UpdateBlackboardFromDirectorState();
+	
+	// 명령이 변경될 때마다 증가
+	uint32 DirectorCommandRevision = 0;
 	
 };

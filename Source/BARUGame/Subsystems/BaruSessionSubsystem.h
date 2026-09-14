@@ -10,7 +10,6 @@
 class UWorld;
 class UNetDriver;
 
-// BARU 게임만 선별하기 위한 식별 키
 namespace BaruMatchmakingConstants
 {
     const FName SETTING_MATCH_KEY = FName(TEXT("BARU_MATCH_KEY"));
@@ -63,23 +62,18 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // 방 만들기 (로비 선진입 상태에서는 맵 재로드 없이 세션만 활성화)
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void CreateSession(int32 NumPublicConnections = 5, bool bIsLANMatch = false, const FString& ServerName = TEXT("BARU Room"), TSoftObjectPtr<UWorld> OverrideLobbyLevel = nullptr);
 
-    // 방 찾기 (Spacewar 중 MATCH_KEY 필터링)
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void FindSessions(int32 MaxSearchResults = 50, bool bIsLANMatch = false);
 
-    // 방 참가
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void JoinSessionByIndex(int32 SessionIndex);
 
-    // 세션 파괴 (bReturnToMainMenu가 false이면 로비에 잔류하여 솔로 플레이 모드 유지)
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void DestroySession(bool bReturnToMainMenu = false);
 
-    // 스팀 오버레이 친구 초대 창 호출
     UFUNCTION(BlueprintCallable, Category = "BARU|Session")
     void OpenFriendInviteUI();
 
@@ -87,7 +81,6 @@ public:
     bool IsSessionActive() const;
 
 public:
-    // UI 델리게이트
     UPROPERTY(BlueprintAssignable, Category = "BARU|Session|Delegates")
     FOnBaruCreateSessionComplete OnCreateSessionCompleteEvent;
 
@@ -101,7 +94,6 @@ public:
     FOnBaruDestroySessionComplete OnDestroySessionCompleteEvent;
     
 protected:
-    /** 기본 트럭 UI 및 방 만들기용 로비 레벨 에셋 레퍼런스 */
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "BARU|Session|Maps")
     TSoftObjectPtr<UWorld> DefaultMainLobbyLevel;
     
@@ -109,16 +101,39 @@ private:
     void OpenLobbyLevelAsListenServer(const TSoftObjectPtr<UWorld>& LevelToOpen);
 
     void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
+    // [수정] CreateSession 이후 세션을 InProgress 상태로 확정 짓기 위한 StartSession 콜백 추가
+    void OnStartSessionComplete(FName SessionName, bool bWasSuccessful);
     void OnFindSessionsComplete(bool bWasSuccessful);
     void OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
     void OnDestroySessionComplete(FName SessionName, bool bWasSuccessful);
 
+    // [수정 - 신규 추가] 스팀 오버레이(Shift+Tab) 초대 수락 콜백 함수
+    void OnSessionUserInviteAccepted(
+        const bool bWasSuccessful,
+        const int32 ControllerId,
+        FUniqueNetIdPtr UserId,
+        const FOnlineSessionSearchResult& InviteResult
+    );
+
+    // [수정 - 신규 추가] 인덱스 기반 참가 및 친구 초대 수락 참가를 일원화하는 공용 참가 헬퍼
+    bool JoinSessionInternal(const FOnlineSessionSearchResult& SearchResult);
+
     IOnlineSessionPtr GetSessionInterface() const;
 
+    void HandleNetworkFailure(
+        UWorld* World, 
+        UNetDriver* NetDriver, 
+        ENetworkFailure::Type FailureType, 
+        const FString& ErrorString
+    );
+
 private:
-    // [Handlers & pointer]
     FOnCreateSessionCompleteDelegate CreateSessionCompleteDelegate;
     FDelegateHandle CreateSessionCompleteDelegateHandle;
+
+    // [수정] StartSession 완료 처리를 위한 델리게이트 및 핸들 추가
+    FOnStartSessionCompleteDelegate StartSessionCompleteDelegate;
+    FDelegateHandle StartSessionCompleteDelegateHandle;
 
     FOnFindSessionsCompleteDelegate FindSessionsCompleteDelegate;
     FDelegateHandle FindSessionsCompleteDelegateHandle;
@@ -128,6 +143,12 @@ private:
 
     FOnDestroySessionCompleteDelegate DestroySessionCompleteDelegate;
     FDelegateHandle DestroySessionCompleteDelegateHandle;
+
+    // [수정 - 신규 추가] 스팀 오버레이 초대 수락 전용 델리게이트 및 안전장치 핸들
+    FOnSessionUserInviteAcceptedDelegate OnSessionUserInviteAcceptedDelegate;
+    FDelegateHandle OnSessionUserInviteAcceptedDelegateHandle;
+
+    FDelegateHandle NetworkFailureDelegateHandle;
 
     TSharedPtr<FOnlineSessionSearch> LastSessionSearch;
     TSharedPtr<FOnlineSessionSettings> LastSessionSettings;
@@ -139,14 +160,4 @@ private:
 
     bool bCreateSessionAfterDestroy = false;
     bool bPendingReturnToMainMenu = false;
-    
-    // 네트워크 끊김 발생 시 호출하는 Handler
-    void HandleNetworkFailure(
-        UWorld* World, 
-        UNetDriver* NetDriver, 
-        ENetworkFailure::Type FailureType, 
-        const FString& ErrorString
-    );
-    
-    FDelegateHandle NetworkFailureDelegateHandle;
 };

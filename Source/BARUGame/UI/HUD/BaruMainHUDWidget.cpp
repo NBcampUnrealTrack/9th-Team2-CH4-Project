@@ -15,6 +15,7 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "GameFramework/PlayerState.h"
+#include "Animation/WidgetAnimation.h"
 
 #include "BaruLog.h"
 
@@ -172,6 +173,11 @@ void UBaruMainHUDWidget::NativeOnActivated()
 	HideGuideMessage();
 	HideWeaponDisplay();
 	
+	if (IsValid(Border_HitScreenEffect))
+	{
+		Border_HitScreenEffect->SetRenderOpacity(0.0f);
+	}
+
 	PlayerStateBindRetryCount = 0;
 	
 	BindToPlayerState();
@@ -190,6 +196,16 @@ void UBaruMainHUDWidget::NativeOnDeactivated()
 	HideGuideMessage();
 	HideWeaponDisplay();
 	
+	if (IsValid(Anim_HitScreenEffect))
+	{
+		StopAnimation(Anim_HitScreenEffect);
+	}
+
+	if (IsValid(Border_HitScreenEffect))
+	{
+		Border_HitScreenEffect->SetRenderOpacity(0.0f);
+	}
+
 	UnbindFromGameState();
 	UnbindFromPlayerState();
 	
@@ -478,6 +494,12 @@ void UBaruMainHUDWidget::HandleHealthChanged(
 	AActor* Instigator)
 {
 	UpdateHealthDisplay();
+
+	// 초기화나 회복이 아니라 실제로 체력이 감소했을 때만 재생한다.
+	if (NewHealth < OldHealth - KINDA_SMALL_NUMBER)
+	{
+		PlayHitScreenEffect();
+	}
 }
 
 void UBaruMainHUDWidget::HandleMaxHealthChanged(
@@ -490,4 +512,23 @@ void UBaruMainHUDWidget::HandleMaxHealthChanged(
 void UBaruMainHUDWidget::HandleSanityChanged(float NewSanity)
 {
 	UpdateSanityDisplay();
+}
+
+void UBaruMainHUDWidget::PlayHitScreenEffect()
+{
+	if (!IsValid(Border_HitScreenEffect) ||
+		!IsValid(Anim_HitScreenEffect))
+	{
+		return;
+	}
+
+	// 연속으로 피격될 경우 이전 재생을 중단하고 처음부터 다시 재생한다.
+	StopAnimation(Anim_HitScreenEffect);
+
+	PlayAnimation(
+		Anim_HitScreenEffect,
+		0.0f,
+		1,
+		EUMGSequencePlayMode::Forward,
+		1.0f);
 }

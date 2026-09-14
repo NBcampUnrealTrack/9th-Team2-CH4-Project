@@ -91,7 +91,9 @@ bool ABaruBaseItem::TryPickup(AActor* Picker)	// Actor : 타입 || Picker : 이�
 	UBaruInventoryComponent* Inv = FindInventoryOf(Picker);	// 헬퍼 결과물의 실제 사용부.
 	if (!Inv) return false;
 
-	const int32 Left = Inv->AddItem(ItemRow.RowName, PickupCount);
+	// 월드 습득 전용 함수가 수납과 UI 결과 판정을 함께 처리합니다.
+	const int32 Left =
+		Inv->AddPickupItem(ItemRow.RowName, PickupCount);
 
 		// 전량 수납 성공 시에만 파괴 (부분 수납이면 남은 만큼 월드에 유지)
 	if (Left == 0)
