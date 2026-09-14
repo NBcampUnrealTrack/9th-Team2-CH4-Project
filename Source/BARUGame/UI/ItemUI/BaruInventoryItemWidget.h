@@ -12,6 +12,7 @@ class UTexture2D;
 class UBaruItemInstance;
 class UButton;
 class UBaruInventoryComponent;
+class UBaruInventoryTooltipWidget;	// 아이템 툴팁
 
 UCLASS(Abstract)
 class BARUGAME_API UBaruInventoryItemWidget
@@ -53,6 +54,11 @@ protected:
 	virtual FReply NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry,const FPointerEvent& InMouseEvent) override;
 
 	virtual FReply NativeOnMouseButtonUp(	const FGeometry& InGeometry,const FPointerEvent& InMouseEvent) override;
+	
+		//아이템 툴팁.
+	virtual void NativeOnMouseEnter(const FGeometry& InGeometry,const FPointerEvent& InMouseEvent) override;
+
+	virtual void NativeOnMouseLeave(	const FPointerEvent& InMouseEvent) override;
 
 private:
 	UPROPERTY()
@@ -65,4 +71,11 @@ private:
 	TObjectPtr<UBaruInventoryComponent> InventoryComponent;
 	
 	bool bPendingItemClick = false;
+	
+		//아이템 툴팁
+	void ShowItemTooltip();
+	void HideItemTooltip();
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBaruInventoryTooltipWidget> ItemTooltip;
 };

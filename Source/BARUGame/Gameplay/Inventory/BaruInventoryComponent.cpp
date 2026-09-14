@@ -390,6 +390,92 @@ int32 UBaruInventoryComponent::AddItem(FName ItemID, int32 Count)
 	return Remaining;
 }
 
+int32 UBaruInventoryComponent::AddPickupItem(
+	FName ItemID,
+	int32 Count)
+{
+	// 월드 아이템 습득은 반드시 서버에서 확정합니다.
+	if (!IsValid(GetOwner())
+		|| !GetOwner()->HasAuthority()
+		|| Count <= 0)
+	{
+		return Count;
+	}
+
+	const int32 RemainingQuantity = AddItem(ItemID, Count);
+	SendPickupResultToOwner(ItemID, Count, RemainingQuantity);
+
+	return RemainingQuantity;
+}
+
+void UBaruInventoryComponent::SendPickupResultToOwner(
+	FName ItemID,
+	int32 RequestedQuantity,
+	int32 RemainingQuantity)
+{
+	const FItemData* Data = FindItemData(ItemID);
+	if (!Data || RequestedQuantity <= 0)
+	{
+		return;
+	}
+
+	const int32 SafeRemaining = FMath::Clamp(
+		RemainingQuantity,
+		0,
+		RequestedQuantity);
+
+	FBaruInventoryPickupNotification Notification;
+	Notification.ItemID = ItemID;
+	Notification.ItemName = Data->ItemName.IsEmpty()
+		? FText::FromName(ItemID)
+		: Data->ItemName;
+	Notification.RequestedQuantity = RequestedQuantity;
+	Notification.AddedQuantity = RequestedQuantity - SafeRemaining;
+	Notification.RemainingQuantity = SafeRemaining;
+
+	if (Notification.AddedQuantity <= 0)
+	{
+		Notification.Result = EBaruInventoryPickupResult::Full;
+	}
+	else if (SafeRemaining > 0)
+	{
+		Notification.Result = EBaruInventoryPickupResult::Partial;
+	}
+	else
+	{
+		Notification.Result = EBaruInventoryPickupResult::Succeeded;
+	}
+
+	BARU_NET_LOG(
+		this,
+		LogBaruItem,
+		Log,
+		TEXT("Pickup result: Item=%s Requested=%d Added=%d Remaining=%d Result=%d"),
+		*ItemID.ToString(),
+		Notification.RequestedQuantity,
+		Notification.AddedQuantity,
+		Notification.RemainingQuantity,
+		static_cast<int32>(Notification.Result));
+
+	Client_ReceiveInventoryPickupResult(Notification);
+}
+
+void UBaruInventoryComponent::Client_ReceiveInventoryPickupResult_Implementation(
+	const FBaruInventoryPickupNotification& Notification)
+{
+	BARU_NET_LOG(
+		this,
+		LogBaruUI,
+		Log,
+		TEXT("Pickup UI event: Item=%s Added=%d Remaining=%d Result=%d"),
+		*Notification.ItemID.ToString(),
+		Notification.AddedQuantity,
+		Notification.RemainingQuantity,
+		static_cast<int32>(Notification.Result));
+
+	OnInventoryPickupResult.Broadcast(Notification);
+}
+
 	// 아이템 이동. 실패 시 원위치로 롤백.
 bool UBaruInventoryComponent::MoveItem(UBaruItemInstance* Item, FIntPoint NewTopLeft, bool bNewRotated)
 {
