@@ -194,7 +194,7 @@ void ABaruPlayerController::Input_ToggleInventory()
     ToggleInventory();
 }
 
-// ★[추가 09.10] 인벤토리 UI 열기/닫기.
+// [수정 09.14] 인벤토리 UI 열기/닫기.
 void ABaruPlayerController::ToggleInventory()
 {
     if (!IsLocalController())
@@ -211,23 +211,28 @@ void ABaruPlayerController::ToggleInventory()
         return;
     }
 
-    // ── 이미 열려 있으면 닫기 ────────────────────────────────
+    // 이미 열려 있으면 닫기
     if (IsValid(ActiveInventoryWidget))
     {
-        UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
+        if (ActiveInventoryWidget->IsActivated())
+        {
+            UIManager->PopWidgetFromLayer(BaruUITags::UI_Layer_GameMenu.GetTag());
+            ActiveInventoryWidget = nullptr;
+
+            // 게임 입력으로 복귀
+            FInputModeGameOnly InputMode;
+            InputMode.SetConsumeCaptureMouseDown(true);
+            SetInputMode(InputMode);
+            SetShowMouseCursor(false);
+
+            BARU_LOG(LogBaruUI, Log, TEXT("Inventory closed."));
+            return;
+        }
+
         ActiveInventoryWidget = nullptr;
-
-        // 게임 입력으로 복귀
-        FInputModeGameOnly InputMode;
-        InputMode.SetConsumeCaptureMouseDown(true);
-        SetInputMode(InputMode);
-        SetShowMouseCursor(false);
-
-        BARU_LOG(LogBaruUI, Log, TEXT("Inventory closed."));
-        return;
     }
 
-    // ── 닫혀 있으면 열기 ────────────────────────────────────
+    // 닫혀 있으면 열기
     if (!InventoryWidgetClass)
     {
         BARU_LOG(LogBaruUI, Warning,
@@ -244,10 +249,23 @@ void ABaruPlayerController::ToggleInventory()
         return;
     }
 
-    // 마우스로 아이템을 옮겨야 하므로 커서를 켜고 UI 입력을 허용합니다.
+    // [09.14] 위젯 내부(NativeOnKeyDown, ESC 등)에서 닫힐 때도 1인칭 게임 모드로 복귀
+    ActiveInventoryWidget->OnDeactivated().AddWeakLambda(this, [this]()
+    {
+        ActiveInventoryWidget = nullptr;
+
+        FInputModeGameOnly InputMode;
+        InputMode.SetConsumeCaptureMouseDown(true);
+        SetInputMode(InputMode);
+        SetShowMouseCursor(false);
+
+        BARU_LOG(LogBaruUI, Log, TEXT("Inventory Deactivated -> Restored InputModeGameOnly."));
+    });
+
+    // [09.14] 뷰포트 키 입력을 유지하여 'I' 키 인식 가능
     FInputModeGameAndUI InputMode;
-    InputMode.SetWidgetToFocus(ActiveInventoryWidget->TakeWidget());
-    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockOnCapture);
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    InputMode.SetHideCursorDuringCapture(false);
     SetInputMode(InputMode);
     SetShowMouseCursor(true);
 

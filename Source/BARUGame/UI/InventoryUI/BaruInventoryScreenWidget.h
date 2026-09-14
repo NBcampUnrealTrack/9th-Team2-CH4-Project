@@ -25,4 +25,8 @@ public:
 		const FGeometry& InGeometry,
 		const FDragDropEvent& InDragDropEvent,
 		UDragDropOperation* InOperation) override;
+	
+protected:
+	// [09.14] UI에 포커스가 잡혀있어도 I 키나 ESC 키를 눌렀을 때 닫히도록 처리
+	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 };
