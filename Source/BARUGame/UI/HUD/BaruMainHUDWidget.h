@@ -17,6 +17,7 @@ class UBorder;
 class UListView;
 class UProgressBar;
 class UTextBlock;
+class UWidgetAnimation;
 
 /**
  * 플레이 중 항상 표시되는 Main HUD의 C++ 기반 클래스,
@@ -127,7 +128,10 @@ protected:
 	
 	// PlayerArray를 읽어 아군 목록을 다시 만든다.
 	void RebuildAllyStatusList();
-	
+
+	// 로컬 플레이어가 피해를 받았을 때 피격 화면 효과를 재생한다.
+	void PlayHitScreenEffect();
+
 	// 현재 체력이 변경됐을 때 호출된다.
 	UFUNCTION()
 	void HandleHealthChanged(
@@ -202,7 +206,15 @@ protected:
 	// 본인을 제외한 아군 상태 목록
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UListView> ListView_AllyStatus;
-	
+
+	// 피격 시 화면 가장자리에 표시되는 효과
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UBorder> Border_HitScreenEffect;
+
+	// 피격 화면 효과 애니메이션
+	UPROPERTY(Transient, meta = (BindWidgetAnim))
+	TObjectPtr<UWidgetAnimation> Anim_HitScreenEffect;
+
 private:
 	// 현재 HUD가 관찰하고있는 로컬 PlayerState
 	UPROPERTY(Transient)
