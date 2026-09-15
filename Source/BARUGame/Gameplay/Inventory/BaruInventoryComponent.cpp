@@ -19,6 +19,11 @@
 #include "Sound/SoundBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "CollisionQueryParams.h"
+/* [주석해제]
+#include "Player/BaruPlayerState.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
+**/
 
 UBaruInventoryComponent::UBaruInventoryComponent()
 {
@@ -35,6 +40,10 @@ void UBaruInventoryComponent::InitializeComponent()
 
 	SlotList.OwnerComponent = this;
 	Cells.SetNum(GridWidth * GridHeight);   // 전부 nullptr
+	
+	/* [주석해제]
+	OnInventoryUpdated.AddUObject(this, &UBaruInventoryComponent::RefreshCarryWeight);
+	**/
 }
 
 void UBaruInventoryComponent::ReadyForReplication()
@@ -1403,3 +1412,24 @@ void UBaruInventoryComponent::RemoveSettledItems()
 
 	BARU_NET_LOG(GetOwner(), LogBaruItem, Log, TEXT("[LobbyItems] RemoveSettledItems: %d개 정산 대상 아이템 소각 완료"), RemovedCount);
 }
+
+/** [주석해제]
+void UBaruInventoryComponent::RefreshCarryWeight()
+{
+	ABaruPlayerState* PS = Cast<ABaruPlayerState>(GetOwner());
+	if (!IsValid(PS) || !PS->HasAuthority())
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = PS->GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	ASC->SetNumericAttributeBase(
+		UBaruPlayerAttributeSet::GetCarryWeightAttribute(),
+		GetTotalCarriedWeightKg());
+}
+*/

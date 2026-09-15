@@ -175,7 +175,12 @@ public:
 	// 정산 완료된 아이템(bCanBeSettled == true)만 인벤토리에서 일괄 제거
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Inventory")
 	void RemoveSettledItems();
-
+	
+	/* [주석해제]
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Inventory|Weight")
+	void RefreshCarryWeight();
+	**/
+	
 private:
 		// [진실원(진짜 부분)] 복제 대상
 	UPROPERTY(Replicated)
