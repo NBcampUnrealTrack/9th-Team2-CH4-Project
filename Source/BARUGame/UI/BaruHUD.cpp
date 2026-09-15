@@ -237,10 +237,9 @@ void ABaruHUD::HandleSettlementReceived(
 		return;
 	}
 	
-	// MonsterKillCount는 아직 결과 구조체에 없으므로 임시로 0을 전달한다.
 	ResultWidget->SetResultData(
 		Report.bSurvived,
-		0,
+		Report.MonsterKillCount,
 		Report.ExtractedItemCount,
 		Report.AcquiredCurrency);
 	
@@ -248,5 +247,8 @@ void ABaruHUD::HandleSettlementReceived(
 		this,
 		LogBaruUI,
 		Log,
-		TEXT("정산 결과 Widget을 Modal Layer에 표시했습니다."));
+		TEXT("정산 결과 Widget을 Modal Layer에 표시했습니다. (Kills: %d, Items: %d, Currency: %d)"),
+		Report.MonsterKillCount,
+		Report.ExtractedItemCount,
+		Report.AcquiredCurrency);
 }
