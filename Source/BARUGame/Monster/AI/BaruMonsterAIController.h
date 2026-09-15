@@ -13,6 +13,7 @@ class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 class UBaruMonsterDataAsset;
 class UBaruMonsterNavigationComponent;
+class ABaruMonsterTacticalRoute;
 
 // 디렉터가 몬스터에게 내릴 수 있는 기본 명령
 UENUM(BlueprintType)
@@ -28,7 +29,11 @@ enum class EBaruMonsterDirectorCommand : uint8
 	Ambush UMETA(DisplayName = "매복"),
 
 	// 현재 자리에서 대기
-	Hold UMETA(DisplayName = "현재 위치 대기")
+	Hold UMETA(DisplayName = "현재 위치 대기"),
+
+	// 다른 통로를 경유하여 목표의 퇴로를 차단
+	Encircle UMETA(DisplayName = "우회 및 차단")
+	
 };
 
 UCLASS()
@@ -248,6 +253,37 @@ public:
 		Category = "Monster|AI|Director"
 	)
 	bool ReceiveDirectorAmbushCommand(APawn* TargetPlayer);
+	
+	// 지정된 전술 경로를 이용해 다른 통로로 우회한 뒤
+	// 목표 플레이어의 예상 퇴로를 차단
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|AI|Director"
+	)
+	bool ReceiveDirectorEncirclementCommand(
+		APawn* TargetPlayer,
+		ABaruMonsterTacticalRoute* TacticalRoute
+	);
+	
+	/**
+	* 맵에 배치된 TacticalRoute 없이
+	* Director가 계산한 우회·차단 좌표를 직접 전달받습니다.
+	*/
+	bool ReceiveDirectorDynamicEncirclementCommand(
+		APawn* TargetPlayer,
+		const FVector& RouteLocation,
+		const FVector& BlockLocation
+	);
+
+	// Behavior Tree가 최종 차단 위치에 도착했을 때 호출
+	// 포위 명령을 종료하고 해당 위치 대기 상태로 전환
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|AI|Director"
+	)
+	void CompleteDirectorEncirclementCommand();
 
 	// 지정 위치로 이동·조사하도록 명령
 	// 서버에서 명령을 접수하면 true 반환
@@ -302,6 +338,26 @@ private:
 	// 매복 목표는 벽 뒤로 이동한 뒤에도 유지되어야 함
 	UPROPERTY(Transient)
 	TWeakObjectPtr<APawn> AmbushTarget;
+	
+	// 포위·차단 명령의 대상 플레이어
+	UPROPERTY(Transient)
+	TWeakObjectPtr<APawn> EncirclementTarget;
+
+	// 현재 사용 중인 전술 우회 경로
+	// 명령 종료 시 이 경로의 예약을 해제
+	UPROPERTY(Transient)
+	TWeakObjectPtr<ABaruMonsterTacticalRoute> ActiveTacticalRoute;
+
+	// 먼저 이동할 측면 통로 경유지
+	UPROPERTY(Transient)
+	FVector EncirclementRouteLocation = FVector::ZeroVector;
+
+	// 최종적으로 퇴로를 막고 대기할 위치
+	UPROPERTY(Transient)
+	FVector EncirclementBlockLocation = FVector::ZeroVector;
+
+	// 현재 전술 경로의 몬스터 예약을 안전하게 해제
+	void ReleaseActiveTacticalRoute();
 
 	// 현재 명령을 Behavior Tree의 Blackboard에 반영
 	void UpdateBlackboardFromDirectorState();

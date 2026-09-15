@@ -9,6 +9,7 @@
 
 class ABaruMonsterCharacter;
 class ABaruMonsterAIController;
+class ABaruMonsterTacticalRoute;
 class ABaruControlRoomSpawner;
 class APawn;
 
@@ -84,6 +85,19 @@ public:
 	bool RequestAmbush(
 		ABaruMonsterCharacter* Monster,
 		APawn* TargetPlayer
+	);
+	
+	// 지정한 몬스터에게 전술 경로를 이용한
+	// 측면 우회 및 퇴로 차단 명령 전달
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director"
+	)
+	bool RequestEncirclement(
+		ABaruMonsterCharacter* Monster,
+		APawn* TargetPlayer,
+		ABaruMonsterTacticalRoute* TacticalRoute
 	);
 
 	// 등록된 몬스터 한 마리에게 대기 명령 전달
@@ -408,6 +422,58 @@ protected:
 		meta = (ClampMin = "0.0", Units = "cm")
 	)
 	float MinimumAmbushDistance = 800.0f;
+	
+	// =========================================================================
+	// 전술 우회·차단 설정
+	// =========================================================================
+
+	// 레벨에 배치된 전술 경로 목록
+	// 첫 스플라인 점은 우회 경유지,
+	// 마지막 점은 최종 차단 위치
+	UPROPERTY(
+		EditInstanceOnly,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Encirclement"
+	)
+	TArray<TObjectPtr<ABaruMonsterTacticalRoute>> TacticalRoutes;
+
+	// 포위 행동을 시작하기 위해 필요한 최소 생존 몬스터 수
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Encirclement",
+		meta = (ClampMin = "2")
+	)
+	int32 MinimumEncirclementParticipants = 2;
+
+	// 플레이어가 차단 지점의 이 거리 안에 있을 때만
+	// 해당 전술 경로를 사용
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Encirclement",
+		meta = (ClampMin = "100.0", Units = "cm")
+	)
+	float EncirclementRouteActivationRadius = 1800.0f;
+
+	// 너무 멀리 있는 몬스터가 포위 명령을 받아
+	// 맵 전체를 횡단하지 않도록 제한
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Encirclement",
+		meta = (ClampMin = "100.0", Units = "cm")
+	)
+	float MaximumEncirclementCandidateDistance = 3000.0f;
+
+	// 실패한 경로 탐색을 매 배정 타이머마다 반복하지 않도록 제한
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Encirclement",
+		meta = (ClampMin = "1.0", Units = "s")
+	)
+	float EncirclementDecisionCooldown = 5.0f;
 
 private:
 	// 지휘 대상의 수명을 유지하지 않도록 약한 참조로 보관
@@ -440,6 +506,13 @@ private:
 	
 	// 현재 디렉터 상태에 맞는 웨이브 수량 반환
 	int32 GetWaveSizeForCurrentState() const;
+	
+	/**
+	* 현재 접속 중이며 살아 있는 실제 플레이어 수 반환
+	*
+	* AI 동료나 관전자는 스폰 배수에 포함하지 않는다.
+	*/
+	int32 GetAlivePlayerCount() const;
 
 	// 사용 가능한 스포너를 찾아 새 웨이브 생성 시도
 	bool TrySpawnDirectorWave(APawn* TargetPlayer);
@@ -536,5 +609,32 @@ private:
 	// 마지막으로 매복 배정을 판단한 서버 시간
 	// -1이면 아직 한 번도 판단하지 않은 상태
 	double LastAmbushDecisionTime = -1.0;
+	
+	// 현재 상황에서 측면 우회·차단 담당 몬스터를 선정
+	bool TryAssignEncirclement(APawn* TargetPlayer);
+
+	// 사망, 목표 이탈, 경로 이탈 등으로 끝난 포위 배정 정리
+	void RefreshEncirclementAssignment();
+
+	// 현재 퇴로 차단 담당 몬스터
+	UPROPERTY(Transient)
+	TWeakObjectPtr<ABaruMonsterCharacter>
+		CurrentEncirclementBlocker;
+
+	// 현재 차단 대상 플레이어
+	UPROPERTY(Transient)
+	TWeakObjectPtr<APawn>
+		CurrentEncirclementTarget;
+
+	// 현재 사용 중인 전술 경로
+	UPROPERTY(Transient)
+	TWeakObjectPtr<ABaruMonsterTacticalRoute>
+		CurrentEncirclementRoute;
+
+	// 마지막 포위 배정 판단 시간
+	double LastEncirclementDecisionTime = -1.0;
+	
+	// 압박·탈출 저지 상태에서만 포위를 허용
+	bool IsEncirclementAllowed() const;
 	
 };

@@ -7,6 +7,7 @@
 #include "Perception/AISenseConfig_Sight.h"
 
 #include "Monster/Characters/BaruMonsterCharacter.h"
+#include "Monster/AI/BaruMonsterTacticalRoute.h"
 #include "Monster/Data/BaruMonsterDataAsset.h"
 #include "Monster/Components/BaruMonsterNavigationComponent.h"
 
@@ -215,14 +216,31 @@ void ABaruMonsterAIController::InitializeFromControlledMonster()
 	
 	// DataAsset에서 적용된 이동 도착 허용 반경을
 	// Behavior Tree가 사용할 블랙보드에 저장
-	if (UBlackboardComponent* BlackboardComponent =
-	GetBlackboardComponent())
+	UBlackboardComponent* BlackboardComponent =
+	GetBlackboardComponent();
+
+	// BT 실행 요청 후에도 Blackboard가 없다면 실제 초기화 문제
+	if (!IsValid(BlackboardComponent))
 	{
-		BlackboardComponent->SetValueAsFloat(
-			BaruMonsterBlackboardKeys::MoveAcceptanceRadius,
-			MonsterNavigationComponent->GetMoveAcceptanceRadius()
+		BARU_NET_LOG(
+			this,
+			LogBaruAI,
+			Error,
+			TEXT(
+				"Monster Blackboard is missing after "
+				"RunBehaviorTree. Check the BehaviorTree "
+				"and Blackboard assets."
+			)
 		);
+
+		return;
 	}
+
+	// Blackboard가 준비된 뒤 이동 도착 허용 반경 저장
+	BlackboardComponent->SetValueAsFloat(
+		BaruMonsterBlackboardKeys::MoveAcceptanceRadius,
+		MonsterNavigationComponent->GetMoveAcceptanceRadius()
+	);
 	
 	// BT 실행에 성공한 뒤 초기 감지 상태를 반영
 	UpdateBlackboardFromPerceptionState();
@@ -990,13 +1008,11 @@ void ABaruMonsterAIController::UpdateBlackboardFromPerceptionState()
 
 	if (!IsValid(BlackboardComponent))
 	{
-		BARU_NET_LOG(
-			this,
-			LogBaruAI,
-			Error,
-			TEXT("Monster Blackboard Component is invalid.")
-		);
-
+		/*
+		 * 스폰 직후에는 감지 이벤트가 BT 초기화보다 먼저 올 수 있음.
+		 * 감지 정보는 멤버 변수에 유지하고 Blackboard 반영만 보류한다.
+		 * 초기화가 끝나면 이 함수를 다시 호출해 반영한다.
+		 */
 		return;
 	}
 
@@ -1378,6 +1394,8 @@ void ABaruMonsterAIController::OnUnPossess()
 	{
 		UpdateBlackboardFromPerceptionState();
 	}
+	
+	ReleaseActiveTacticalRoute();
 
 	Super::OnUnPossess();
 
@@ -1392,6 +1410,8 @@ void ABaruMonsterAIController::EndPlay(
 	const EEndPlayReason::Type EndPlayReason
 )
 {
+	ReleaseActiveTacticalRoute();
+	
 	GetWorldTimerManager().ClearTimer(ThreatUpdateTimerHandle);
 	GetWorldTimerManager().ClearTimer(SightMemoryTimerHandle);
 
@@ -1455,6 +1475,9 @@ bool ABaruMonsterAIController::ReceiveDirectorAmbushCommand(
 	{
 		return false;
 	}
+	
+	// 기존 포위 경로의 예약과 관련 상태 정리
+	ReleaseActiveTacticalRoute();
 
 	// 이전 명령과 새로운 매복 명령을 구분
 	++DirectorCommandRevision;
@@ -1500,6 +1523,9 @@ bool ABaruMonsterAIController::ReceiveDirectorInvestigateCommand(
         return false;
     }
 	
+	// 기존 포위 경로의 예약과 관련 상태 정리
+	ReleaseActiveTacticalRoute();
+	
 	// 이전 명령의 완료와 새 명령을 구분
 	++DirectorCommandRevision;
 
@@ -1542,6 +1568,9 @@ void ABaruMonsterAIController::ReceiveDirectorHoldCommand()
         return;
     }
 	
+	// 기존 포위 경로의 예약과 관련 상태 정리
+	ReleaseActiveTacticalRoute();
+	
 	// 이전 명령의 완료와 새 명령을 구분
 	++DirectorCommandRevision;
 
@@ -1578,6 +1607,9 @@ void ABaruMonsterAIController::ClearDirectorCommand()
     // 해제 전 조사 명령이 있었는지 기억
     const bool bWasInvestigating =
         DirectorCommand == EBaruMonsterDirectorCommand::Investigate;
+	
+	// 기존 포위 경로의 예약과 관련 상태 정리
+	ReleaseActiveTacticalRoute();
 	
 	// 이전 명령의 완료와 새 명령을 구분
 	++DirectorCommandRevision;
@@ -1721,5 +1753,166 @@ void ABaruMonsterAIController::UpdateBlackboardFromDirectorState()
             false
         );
     }
+	
+	{
+    	UBlackboardComponent* EncirclementBlackboard =
+			GetBlackboardComponent();
+
+    	if (IsValid(EncirclementBlackboard))
+    	{
+    		const bool bHasEncirclementOrder =
+				DirectorCommand ==
+					EBaruMonsterDirectorCommand::Encircle &&
+				EncirclementTarget.IsValid() &&
+				ActiveTacticalRoute.IsValid();
+
+    		if (bHasEncirclementOrder)
+    		{
+    			// 목적지들을 먼저 기록한 뒤 Bool을 켜야
+    			// Behavior Tree가 빈 위치로 먼저 실행되지 않음
+    			EncirclementBlackboard->SetValueAsVector(
+					TEXT("EncirclementRouteLocation"),
+					EncirclementRouteLocation
+				);
+
+    			EncirclementBlackboard->SetValueAsVector(
+					TEXT("EncirclementBlockLocation"),
+					EncirclementBlockLocation
+				);
+
+    			EncirclementBlackboard->SetValueAsBool(
+					TEXT("HasEncirclementOrder"),
+					true
+				);
+    		}
+    		else
+    		{
+    			EncirclementBlackboard->SetValueAsBool(
+					TEXT("HasEncirclementOrder"),
+					false
+				);
+
+    			EncirclementBlackboard->ClearValue(
+					TEXT("EncirclementRouteLocation")
+				);
+
+    			EncirclementBlackboard->ClearValue(
+					TEXT("EncirclementBlockLocation")
+				);
+    		}
+    	}
+	}
+	
+}
+
+bool ABaruMonsterAIController::ReceiveDirectorEncirclementCommand(
+    APawn* TargetPlayer,
+    ABaruMonsterTacticalRoute* TacticalRoute
+)
+{
+    if (!HasAuthority() ||
+        !IsValid(TargetPlayer) ||
+        !IsValid(TacticalRoute))
+    {
+        return false;
+    }
+
+    ABaruMonsterCharacter* ControlledMonster =
+        Cast<ABaruMonsterCharacter>(GetPawn());
+
+    if (!IsValid(ControlledMonster))
+    {
+        return false;
+    }
+
+    // 같은 명령이 반복 전달되면 이동을 처음부터 다시 시작하지 않음
+    if (DirectorCommand ==
+            EBaruMonsterDirectorCommand::Encircle &&
+        EncirclementTarget.Get() == TargetPlayer &&
+        ActiveTacticalRoute.Get() == TacticalRoute)
+    {
+        return true;
+    }
+
+    // 다른 몬스터가 사용 중이거나 잘못 배치된 경로면 거절
+    if (!TacticalRoute->TryReserve(ControlledMonster))
+    {
+        return false;
+    }
+
+    // 이전에 다른 전술 경로를 사용 중이었다면 예약 해제
+    if (ABaruMonsterTacticalRoute* PreviousRoute =
+            ActiveTacticalRoute.Get())
+    {
+        if (PreviousRoute != TacticalRoute)
+        {
+            PreviousRoute->ReleaseReservation(
+                ControlledMonster
+            );
+        }
+    }
+
+    DirectorCommand =
+        EBaruMonsterDirectorCommand::Encircle;
+
+    // 다른 종류의 디렉터 명령 데이터 정리
+    DirectorTargetLocation = FVector::ZeroVector;
+    AmbushTarget.Reset();
+
+    EncirclementTarget = TargetPlayer;
+    ActiveTacticalRoute = TacticalRoute;
+
+    EncirclementRouteLocation =
+        TacticalRoute->GetRouteEntryLocation();
+
+    EncirclementBlockLocation =
+        TacticalRoute->GetBlockLocation();
+
+    ++DirectorCommandRevision;
+
+    // 진행 중이던 직접 추적을 중단하고
+    // 블랙보드의 포위 분기로 즉시 전환
+    StopMovement();
+    UpdateBlackboardFromDirectorState();
+
+    return true;
+}
+
+void ABaruMonsterAIController::
+    CompleteDirectorEncirclementCommand()
+{
+    if (!HasAuthority() ||
+        DirectorCommand !=
+            EBaruMonsterDirectorCommand::Encircle)
+    {
+        return;
+    }
+
+    // 차단 위치에 도착한 뒤에는 그 자리에서 대기
+    DirectorCommand =
+        EBaruMonsterDirectorCommand::Hold;
+
+    ++DirectorCommandRevision;
+
+    StopMovement();
+    UpdateBlackboardFromDirectorState();
+}
+
+void ABaruMonsterAIController::
+    ReleaseActiveTacticalRoute()
+{
+    if (ABaruMonsterTacticalRoute* TacticalRoute =
+            ActiveTacticalRoute.Get())
+    {
+        TacticalRoute->ReleaseReservation(
+            Cast<ABaruMonsterCharacter>(GetPawn())
+        );
+    }
+
+    ActiveTacticalRoute.Reset();
+    EncirclementTarget.Reset();
+
+    EncirclementRouteLocation = FVector::ZeroVector;
+    EncirclementBlockLocation = FVector::ZeroVector;
 }
 
