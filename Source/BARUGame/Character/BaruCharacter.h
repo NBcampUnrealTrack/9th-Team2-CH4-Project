@@ -49,6 +49,10 @@ class USpotLightComponent;
 class UBaruTensionComponent;
 class UBaruFootstepComponent;
 class UAnimMontage;
+class UNiagaraSystem;      
+class USoundBase;         
+class USoundAttenuation;   
+class UAudioComponent;     
 struct FOnAttributeChangeData;
 enum class EBaruInteractionHoldEndReason : uint8;
 
@@ -64,6 +68,10 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
     virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+    virtual void OnJumped_Implementation() override;
+    virtual void Landed(const FHitResult& Hit) override;
+    virtual void BecomeViewTarget(APlayerController* PC) override;
+    virtual void EndViewTarget(APlayerController* PC) override;
 
     // [09.13] 사격 시 화면 반동 트리거 함수
     UFUNCTION(BlueprintCallable, Category = "BARU|Combat")
@@ -233,6 +241,30 @@ protected:
     UPROPERTY(Transient)
     TObjectPtr<UAnimMontage> CurrentReloadMontage;
     
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Effects")
+    TMap<FGameplayTag, TObjectPtr<UNiagaraSystem>> MuzzleFlashByCue;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Effects")
+    FVector MuzzleFlashScale = FVector(1.0f);
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Effects")
+    float MuzzleFlashLifetime = 0.15f;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Effects")
+    FRotator MuzzleFlashRotationOffset = FRotator::ZeroRotator;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Effects")
+    TMap<EBaruEquipmentSlot, TObjectPtr<USoundBase>> ReloadSoundBySlot;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Effects")
+    TObjectPtr<USoundAttenuation> WeaponSoundAttenuation;
+    
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> CurrentReloadAudio;
+    
+    void PlayMuzzleFlash(const FGameplayTag& FireCueTag);
+    void PlayReloadSound(EBaruEquipmentSlot WeaponSlot);
+    
     // [추가] 다운 중에도 사망 연출과 구분되도록 BP 훅을 열어둡니다.
     UFUNCTION(BlueprintImplementableEvent, Category = "BARU|Combat")
     void OnDBNOCosmetic(bool bNewDBNO);
@@ -311,6 +343,12 @@ protected:
 
     // ★[추가 09.15] 앉기·다운 시 카메라 위치 갱신 (로컬 전용, Tick 에서 호출)
     void UpdateCameraFollow(float DeltaSeconds);
+    
+    // ★[추가 09.16] 내 화면이 이 (남의) 캐릭터를 관전 중인지
+    bool bIsViewedBySpectator = false;
+
+    // ★[추가 09.16] 이 캐릭터 머리를 내 화면에서만 숨기기/보이기
+    void SetHeadHiddenForLocalView(bool bHide);
     
     FTimerHandle WeaponShadowTimerHandle;
     void HideLocalWeaponShadows();
