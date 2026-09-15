@@ -397,6 +397,10 @@ private:
     // [추가] MoveSpeed 어트리뷰트가 준 기본 속도. 스프린트 배율의 기준값
     float BaseWalkSpeed = 450.0f;
     FDelegateHandle MoveSpeedChangedHandle;
+    
+    FDelegateHandle CarryWeightChangedHandle;
+    FDelegateHandle MaxCarryWeightChangedHandle;
+    void HandleCarryWeightChanged(const FOnAttributeChangeData& ChangeData);
 
     UPROPERTY()
     TObjectPtr<AActor> LastKiller; // [추가] 사망처리를 다음 틱으로 넘길때 임시보관

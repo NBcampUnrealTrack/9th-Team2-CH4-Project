@@ -116,6 +116,20 @@ void ABaruCharacter::PossessedBy(AController* NewController)
       if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
       {
          BaruPS->SetDeadState(false);
+         
+         if (UBaruInventoryComponent* Inven = BaruPS->GetInventoryComponent())
+         {
+            if (UBaruEquipmentComponent* EquipComp = FindComponentByClass<UBaruEquipmentComponent>())
+            {
+               for (const FInventorySlot& Slot : Inven->GetSlots())
+               {
+                  if (Slot.bEquipped && IsValid(Slot.Item))
+                  {
+                     EquipComp->RestoreEquippedWeapon(Slot.Item);
+                  }
+               }
+            }
+         }
       }
    }
 }
@@ -143,6 +157,14 @@ void ABaruCharacter::InitAbilityActorInfo()
    }
    
    ASC->InitAbilityActorInfo(BaruPS, this);
+   
+   if (HasAuthority())
+   {
+      if (UBaruInventoryComponent* Inventory = BaruPS->GetInventoryComponent())
+      {
+         Inventory->RefreshCarryWeight();
+      }
+   }
 
    if (UBaruHealthComponent* PSHealthComp = BaruPS->GetHealthComponent())
    {
@@ -165,20 +187,20 @@ void ABaruCharacter::InitAbilityActorInfo()
    MoveSpeedChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
       UBaruCoreAttributeSet::GetMoveSpeedAttribute()).AddUObject(this, &ABaruCharacter::HandleMoveSpeedChanged);
    
+   CarryWeightChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
+      UBaruPlayerAttributeSet::GetCarryWeightAttribute()).AddUObject(this, &ABaruCharacter::HandleCarryWeightChanged);
+
+   MaxCarryWeightChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
+      UBaruPlayerAttributeSet::GetMaxCarryWeightAttribute()).AddUObject(this, &ABaruCharacter::HandleCarryWeightChanged);
+   
    ReloadingTagChangedHandle = ASC->RegisterGameplayTagEvent(
      FBaruGameplayTags::Get().State_Combat_Reloading, EGameplayTagEventType::NewOrRemoved)
      .AddUObject(this, &ABaruCharacter::HandleReloadingTagChanged);
 
   
    const float InitialMoveSpeed = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
-   if (InitialMoveSpeed > 0.0f)
-   {
-      GetCharacterMovement()->MaxWalkSpeed = InitialMoveSpeed;
-   }
-   else
-   {
-      GetCharacterMovement()->MaxWalkSpeed = 450.0f;
-   } 
+   BaseWalkSpeed = (InitialMoveSpeed > 0.0f) ? InitialMoveSpeed : 450.0f;
+   UpdateMaxWalkSpeed();
 }
 
 void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& ChangeData)
@@ -187,6 +209,10 @@ void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& Change
    UpdateMaxWalkSpeed();
 }
 
+void ABaruCharacter::HandleCarryWeightChanged(const FOnAttributeChangeData& ChangeData)
+{
+   UpdateMaxWalkSpeed();
+}
 
 void ABaruCharacter::HandleReloadingTagChanged(const FGameplayTag Tag, int32 NewCount)
 {
@@ -245,6 +271,12 @@ void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
    {
       ASC->GetGameplayAttributeValueChangeDelegate(
           UBaruCoreAttributeSet::GetMoveSpeedAttribute()).Remove(MoveSpeedChangedHandle);
+      
+      ASC->GetGameplayAttributeValueChangeDelegate(
+          UBaruPlayerAttributeSet::GetCarryWeightAttribute()).Remove(CarryWeightChangedHandle);
+      ASC->GetGameplayAttributeValueChangeDelegate(
+          UBaruPlayerAttributeSet::GetMaxCarryWeightAttribute()).Remove(MaxCarryWeightChangedHandle);
+      
       ASC->RegisterGameplayTagEvent(
           FBaruGameplayTags::Get().State_Combat_Reloading, EGameplayTagEventType::NewOrRemoved)
           .Remove(ReloadingTagChangedHandle);
@@ -767,8 +799,25 @@ void ABaruCharacter::UpdateMaxWalkSpeed()
       return;
    }
 
-   MoveComp->MaxWalkSpeedCrouched = CrouchedWalkSpeed;
-   MoveComp->MaxWalkSpeed = bIsSprinting ? (BaseWalkSpeed * SprintSpeedMultiplier) : BaseWalkSpeed;
+   float WeightMultiplier = 1.0f;
+
+   if (UAbilitySystemComponent* ASC = CachedASC.Get())
+   {
+      const float Weight = ASC->GetNumericAttribute(UBaruPlayerAttributeSet::GetCarryWeightAttribute());
+      const float MaxWeight = ASC->GetNumericAttribute(UBaruPlayerAttributeSet::GetMaxCarryWeightAttribute());
+
+      if (MaxWeight > KINDA_SMALL_NUMBER)
+      {
+         // 80%에서 감속 시작, 100%에서 최대 감속 (50% 속도)
+         const float Alpha = FMath::Clamp((Weight / MaxWeight - 0.8f) / 0.2f, 0.0f, 1.0f);
+         WeightMultiplier = FMath::Lerp(1.0f, 0.5f, Alpha);
+      }
+   }
+
+   const float SprintMultiplier = bIsSprinting ? SprintSpeedMultiplier : 1.0f;
+
+   MoveComp->MaxWalkSpeed = BaseWalkSpeed * SprintMultiplier * WeightMultiplier;
+   MoveComp->MaxWalkSpeedCrouched = CrouchedWalkSpeed * WeightMultiplier;
 }
 
 void ABaruCharacter::OnRep_Controller()
@@ -989,6 +1038,11 @@ void ABaruCharacter::HandleDBNOStatusChanged(bool bNewDBNO)
       {
          MoveComp->SetMovementMode(MOVE_Walking);
          UpdateMaxWalkSpeed();
+         
+         if (APlayerController* PC = Cast<APlayerController>(GetController()))
+         {
+            PC->SetViewTarget(this);
+         }
       }
    }
    // [추가] 다운 중에만 상호작용 트레이스에 걸리게 합니다.
