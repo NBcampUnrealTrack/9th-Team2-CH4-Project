@@ -177,11 +177,21 @@ void ABaruPlayerController::HandleGameMenuDeactivated()
 
 void ABaruPlayerController::Input_SpectateNext()
 {
+    const ABaruPlayerState* MyPS = GetPlayerState<ABaruPlayerState>();
+    if (!MyPS || !MyPS->IsDead())
+    {
+        return;
+    }
     Server_CycleSpectatorTarget(true);
 }
 
 void ABaruPlayerController::Input_SpectatePrev()
 {
+    const ABaruPlayerState* MyPS = GetPlayerState<ABaruPlayerState>();
+    if (!MyPS || !MyPS->IsDead())
+    {
+        return;
+    }
     Server_CycleSpectatorTarget(false);
 }
 
@@ -396,9 +406,9 @@ bool ABaruPlayerController::Server_CycleSpectatorTarget_Validate(bool bNext)
 void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNext)
 {
     const ABaruPlayerState* MyPS = GetPlayerState<ABaruPlayerState>();
-    if (!MyPS || MyPS->IsAlive())
+    if (!MyPS || !MyPS->IsDead())
     {
-        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("CycleSpectatorTarget rejected: requester is still alive."));
+        BARU_NET_LOG(this, LogBaruSession, Warning, TEXT("CycleSpectatorTarget rejected: requester is not dead."));
         return;
     }
 

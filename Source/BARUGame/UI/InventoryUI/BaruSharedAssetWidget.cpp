@@ -2,10 +2,11 @@
 
 
 #include "UI/InventoryUI/BaruSharedAssetWidget.h"
-
 #include "Components/TextBlock.h"
 #include "Core/BaruGameState.h"
 #include "Engine/World.h"
+#include "Subsystems/BaruSaveGameSubsystem.h"
+#include "Engine/GameInstance.h"
 
 void UBaruSharedAssetWidget::NativeConstruct()
 {
@@ -30,11 +31,26 @@ void UBaruSharedAssetWidget::BindGameState()
 {
 	if (IsValid(BoundGameState))
 	{
-		// [09.14] 매크로 파싱 오류 방지를 위해 한 줄로 바인딩 해제
 		BoundGameState->OnTeamScrapValueChanged.RemoveDynamic(this, &UBaruSharedAssetWidget::HandleTeamScrapValueChanged);
 	}
 
 	BoundGameState = GetWorld() ? GetWorld()->GetGameState<ABaruGameState>() : nullptr;
+
+	// [핵심 수정] 로비 레벨일 때는 세이브 서브시스템에 기록된 누적 골드를 표시
+	if (GetWorld() && GetWorld()->GetMapName().Contains(TEXT("Lobby")))
+	{
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBaruSaveGameSubsystem* SaveSubsystem = GI->GetSubsystem<UBaruSaveGameSubsystem>())
+			{
+				if (UBaruSaveGame* SaveData = SaveSubsystem->GetCachedSaveGame())
+				{
+					HandleTeamScrapValueChanged(SaveData->TotalGold);
+					return;
+				}
+			}
+		}
+	}
 
 	if (!IsValid(BoundGameState))
 	{
@@ -42,10 +58,7 @@ void UBaruSharedAssetWidget::BindGameState()
 		return;
 	}
 
-	// [09.14] 매크로 내부 공백 생성 방지를 위해 반드시 한 줄로 바인딩
 	BoundGameState->OnTeamScrapValueChanged.AddUniqueDynamic(this, &UBaruSharedAssetWidget::HandleTeamScrapValueChanged);
-
-	// 위젯이 열리기 전에 변경된 값도 즉시 표시
 	HandleTeamScrapValueChanged(BoundGameState->GetTeamScrapValue());
 }
 

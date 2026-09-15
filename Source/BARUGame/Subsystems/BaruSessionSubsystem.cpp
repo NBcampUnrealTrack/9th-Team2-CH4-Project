@@ -156,13 +156,11 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
     
     const FString MapAssetPath = StoredLobbyLevel.GetAssetName();
 
-    // 메타데이터 설정 (MATCH_KEY는 완전히 제거)
+    // 메타데이터 설정 (언리얼 OSS가 스팀 백엔드에 _s를 자동으로 붙여서 전송함)
     LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_SERVER_NAME, ServerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
     LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_MAP_NAME, MapAssetPath, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
     LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_HOST_NAME, HostPlayerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	
-	// [추가] 방 생성 시 우리 프로젝트 고유 태그를 스팀 로비에 각인
-	LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_PROJECT_ID, FString(UTF8_TO_TCHAR(BaruMatchmakingConstants::RAW_PROJECT_VALUE)), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_PROJECT_ID, FString(UTF8_TO_TCHAR(BaruMatchmakingConstants::RAW_PROJECT_VALUE)), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
     FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
@@ -233,78 +231,33 @@ void UBaruSessionSubsystem::OnStartSessionComplete(FName SessionName, bool bWasS
 
 void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatch)
 {
-	if (!SteamMatchmaking())
-	{
-		BARU_LOG(LogBaruSession, Error, TEXT("FindSessions: SteamMatchmaking is null!"));
-		OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
-		return;
-	}
+    if (!SteamMatchmaking())
+    {
+       BARU_LOG(LogBaruSession, Error, TEXT("FindSessions: SteamMatchmaking is null!"));
+       OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
+       return;
+    }
 
-	FoundSteamLobbyIDs.Empty();
-	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Requesting Filtered Steam Lobby List..."));
+    FoundSteamLobbyIDs.Empty();
+    BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Requesting Filtered Steam Lobby List..."));
 
-	// 전 세계 로비 검색 허용
-	SteamMatchmaking()->AddRequestLobbyListDistanceFilter(k_ELobbyDistanceFilterWorldwide);
-	SteamMatchmaking()->AddRequestLobbyListResultCountFilter(FMath::Clamp(MaxSearchResults, 20, 100));
+    SteamMatchmaking()->AddRequestLobbyListDistanceFilter(k_ELobbyDistanceFilterWorldwide);
+    SteamMatchmaking()->AddRequestLobbyListResultCountFilter(FMath::Clamp(MaxSearchResults, 20, 100));
 
-	// [핵심] 스팀 서버에 필터 전송 (BARU_PROJECT_ID == BARU_PROJECT_2026_V1 인 방만 반환)
-	SteamMatchmaking()->AddRequestLobbyListStringFilter(
-		BaruMatchmakingConstants::RAW_PROJECT_KEY, 
-		BaruMatchmakingConstants::RAW_PROJECT_VALUE, 
-		k_ELobbyComparisonEqual
-	);
+    // [핵심] 스팀 서버에 실제 저장된 "BARU_PROJECT_ID_s" 키로 필터링
+    SteamMatchmaking()->AddRequestLobbyListStringFilter(
+        BaruMatchmakingConstants::RAW_PROJECT_KEY, 
+        BaruMatchmakingConstants::RAW_PROJECT_VALUE, 
+        k_ELobbyComparisonEqual
+    );
 
-	SteamAPICall_t hSteamAPICall = SteamMatchmaking()->RequestLobbyList();
-	SteamLobbyMatchListCallResult.Set(hSteamAPICall, this, &UBaruSessionSubsystem::OnSteamLobbyMatchList);
+    SteamAPICall_t hSteamAPICall = SteamMatchmaking()->RequestLobbyList();
+    SteamLobbyMatchListCallResult.Set(hSteamAPICall, this, &UBaruSessionSubsystem::OnSteamLobbyMatchList);
 }
 
 void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
 {
-    if (IOnlineSessionPtr SessionInterface = GetSessionInterface())
-    {
-       SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegateHandle);
-    }
-
-    TArray<FBaruSessionSearchResultInfo> FilteredResults;
-    const int32 RawResultCount = LastSessionSearch.IsValid() ? LastSessionSearch->SearchResults.Num() : 0;
-
-    if (bWasSuccessful && LastSessionSearch.IsValid())
-    {
-       for (int32 i = 0; i < LastSessionSearch->SearchResults.Num(); ++i)
-       {
-          const FOnlineSessionSearchResult& SearchResult = LastSessionSearch->SearchResults[i];
-
-          // 방이 유효하고 빈 슬롯이 있으면 무조건 등록 (Key 필터링 완전히 배제)
-          if (!SearchResult.IsValid() || SearchResult.Session.NumOpenPublicConnections <= 0)
-          {
-             continue;
-          }
-
-          FBaruSessionSearchResultInfo Info;
-          Info.SessionIndex = i;
-          Info.CurrentPlayers = SearchResult.Session.SessionSettings.NumPublicConnections - SearchResult.Session.NumOpenPublicConnections;
-          Info.MaxPlayers = SearchResult.Session.SessionSettings.NumPublicConnections;
-          Info.PingInMs = SearchResult.PingInMs;
-
-          FString FoundServerName;
-          if (SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_SERVER_NAME, FoundServerName) && !FoundServerName.IsEmpty())
-          {
-              Info.ServerName = FoundServerName;
-          }
-          else
-          {
-              Info.ServerName = TEXT("Steam Lobby");
-          }
-
-          SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_MAP_NAME, Info.SelectedMapName);
-          SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_HOST_NAME, Info.HostPlayerName);
-
-          FilteredResults.Add(Info);
-       }
-    }
-
-    BARU_LOG(LogBaruSession, Log, TEXT("FindSessions Finished. Rooms Found: %d / %d"), FilteredResults.Num(), RawResultCount);
-    OnFindSessionsCompleteEvent.Broadcast(FilteredResults, bWasSuccessful);
+    // 네이티브 콜백인 OnSteamLobbyMatchList를 사용하므로 호환성용 빈 델리게이트로 유지
 }
 
 bool UBaruSessionSubsystem::JoinSessionInternal(const FOnlineSessionSearchResult& SearchResult)
@@ -339,36 +292,36 @@ bool UBaruSessionSubsystem::JoinSessionInternal(const FOnlineSessionSearchResult
 
 void UBaruSessionSubsystem::JoinSessionByIndex(int32 SessionIndex)
 {
-	if (!FoundSteamLobbyIDs.IsValidIndex(SessionIndex))
-	{
-		BARU_LOG(LogBaruSession, Warning, TEXT("JoinSessionByIndex: Invalid Session Index: %d"), SessionIndex);
-		OnJoinSessionCompleteEvent.Broadcast(false);
-		return;
-	}
+    if (!FoundSteamLobbyIDs.IsValidIndex(SessionIndex))
+    {
+       BARU_LOG(LogBaruSession, Warning, TEXT("JoinSessionByIndex: Invalid Session Index: %d"), SessionIndex);
+       OnJoinSessionCompleteEvent.Broadcast(false);
+       return;
+    }
 
-	CSteamID TargetLobbyID = FoundSteamLobbyIDs[SessionIndex];
-	CSteamID HostSteamID = SteamMatchmaking()->GetLobbyOwner(TargetLobbyID);
+    CSteamID TargetLobbyID = FoundSteamLobbyIDs[SessionIndex];
+    CSteamID HostSteamID = SteamMatchmaking()->GetLobbyOwner(TargetLobbyID);
 
-	if (!HostSteamID.IsValid())
-	{
-		BARU_LOG(LogBaruSession, Error, TEXT("JoinSessionByIndex: Failed to get Lobby Owner SteamID."));
-		OnJoinSessionCompleteEvent.Broadcast(false);
-		return;
-	}
+    if (!HostSteamID.IsValid())
+    {
+       BARU_LOG(LogBaruSession, Error, TEXT("JoinSessionByIndex: Failed to get Lobby Owner SteamID."));
+       OnJoinSessionCompleteEvent.Broadcast(false);
+       return;
+    }
 
-	// SteamSockets P2P 접속 주소: steam.<HostSteam64ID>:7777
-	FString ConnectString = FString::Printf(TEXT("steam.%llu:7777"), HostSteamID.ConvertToUint64());
-	BARU_LOG(LogBaruSession, Log, TEXT("Joining Steam Lobby: ConnectString=%s"), *ConnectString);
+    // SteamSockets P2P 접속 주소: steam.<HostSteam64ID>:7777
+    FString ConnectString = FString::Printf(TEXT("steam.%llu:7777"), HostSteamID.ConvertToUint64());
+    BARU_LOG(LogBaruSession, Log, TEXT("Joining Steam Lobby: ConnectString=%s"), *ConnectString);
 
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
-	{
-		PC->ClientTravel(ConnectString, ETravelType::TRAVEL_Absolute);
-		OnJoinSessionCompleteEvent.Broadcast(true);
-	}
-	else
-	{
-		OnJoinSessionCompleteEvent.Broadcast(false);
-	}
+    if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+    {
+       PC->ClientTravel(ConnectString, ETravelType::TRAVEL_Absolute);
+       OnJoinSessionCompleteEvent.Broadcast(true);
+    }
+    else
+    {
+       OnJoinSessionCompleteEvent.Broadcast(false);
+    }
 }
 
 void UBaruSessionSubsystem::OnSessionUserInviteAccepted(
@@ -476,60 +429,60 @@ void UBaruSessionSubsystem::OpenFriendInviteUI()
 
 void UBaruSessionSubsystem::OnSteamLobbyMatchList(LobbyMatchList_t* pLobbyMatchList, bool bIOFailure)
 {
-	if (bIOFailure || !pLobbyMatchList)
+    if (bIOFailure || !pLobbyMatchList)
+    {
+        BARU_LOG(LogBaruSession, Error, TEXT("OnSteamLobbyMatchList: IO Failure or null response."));
+        AsyncTask(ENamedThreads::GameThread, [this]()
         {
-            BARU_LOG(LogBaruSession, Error, TEXT("OnSteamLobbyMatchList: IO Failure or null response."));
-            AsyncTask(ENamedThreads::GameThread, [this]()
-            {
-                OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
-            });
-            return;
-        }
-    
-        const uint32 LobbyCount = pLobbyMatchList->m_nLobbiesMatching;
-        BARU_LOG(LogBaruSession, Log, TEXT("OnSteamLobbyMatchList: Found %d Steam Lobbies."), LobbyCount);
-    
-        TArray<FBaruSessionSearchResultInfo> ResultList;
-        TArray<CSteamID> NewLobbyIDs;
-    
-	for (uint32 i = 0; i < LobbyCount; ++i)
-	{
-		CSteamID LobbyID = SteamMatchmaking()->GetLobbyByIndex(i);
-		if (!LobbyID.IsValid())
-		{
-			continue;
-		}
-
-		// [추가] 혹시 모를 타 프로젝트 로비 2차 방어
-		const char* ProjectId = SteamMatchmaking()->GetLobbyData(LobbyID, BaruMatchmakingConstants::RAW_PROJECT_KEY);
-		if (!ProjectId || FCStringAnsi::Strcmp(ProjectId, BaruMatchmakingConstants::RAW_PROJECT_VALUE) != 0)
-		{
-			continue;
-		}
-    
-            NewLobbyIDs.Add(LobbyID);
-    
-            FBaruSessionSearchResultInfo Info;
-            Info.SessionIndex = NewLobbyIDs.Num() - 1;
-            Info.CurrentPlayers = SteamMatchmaking()->GetNumLobbyMembers(LobbyID);
-            Info.MaxPlayers = SteamMatchmaking()->GetLobbyMemberLimit(LobbyID);
-            Info.PingInMs = 0;
-    
-            const char* ServerName = SteamMatchmaking()->GetLobbyData(LobbyID, "SERVER_NAME");
-            const char* MapName = SteamMatchmaking()->GetLobbyData(LobbyID, "MAP_NAME");
-            const char* HostName = SteamMatchmaking()->GetLobbyData(LobbyID, "HOST_NAME");
-    
-            Info.ServerName = (ServerName && FCStringAnsi::Strlen(ServerName) > 0) ? UTF8_TO_TCHAR(ServerName) : TEXT("Steam Lobby");
-            Info.SelectedMapName = (MapName && FCStringAnsi::Strlen(MapName) > 0) ? UTF8_TO_TCHAR(MapName) : TEXT("MainLobbyLevel");
-            Info.HostPlayerName = (HostName && FCStringAnsi::Strlen(HostName) > 0) ? UTF8_TO_TCHAR(HostName) : TEXT("Host");
-    
-            ResultList.Add(Info);
-        }
-    
-        // [핵심] UMG 및 타이머 조작을 위해 반드시 메인 게임 스레드로 전환하여 브로드캐스트
-        AsyncTask(ENamedThreads::GameThread, [this, ResultList = MoveTemp(ResultList), NewLobbyIDs = MoveTemp(NewLobbyIDs)]() mutable
-        {
-            FoundSteamLobbyIDs = MoveTemp(NewLobbyIDs);
-            OnFindSessionsCompleteEvent.Broadcast(ResultList, true);
+            OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
         });
+        return;
+    }
+
+    const uint32 LobbyCount = pLobbyMatchList->m_nLobbiesMatching;
+    BARU_LOG(LogBaruSession, Log, TEXT("OnSteamLobbyMatchList: Found %d Steam Lobbies."), LobbyCount);
+
+    TArray<FBaruSessionSearchResultInfo> ResultList;
+    TArray<CSteamID> NewLobbyIDs;
+
+    for (uint32 i = 0; i < LobbyCount; ++i)
+    {
+        CSteamID LobbyID = SteamMatchmaking()->GetLobbyByIndex(i);
+        if (!LobbyID.IsValid())
+        {
+            continue;
+        }
+
+        // [2차 방어] 실제 저장된 "BARU_PROJECT_ID_s" 키 검증
+        const char* ProjectId = SteamMatchmaking()->GetLobbyData(LobbyID, BaruMatchmakingConstants::RAW_PROJECT_KEY);
+        if (!ProjectId || FCStringAnsi::Strcmp(ProjectId, BaruMatchmakingConstants::RAW_PROJECT_VALUE) != 0)
+        {
+            continue;
+        }
+
+        NewLobbyIDs.Add(LobbyID);
+
+        FBaruSessionSearchResultInfo Info;
+        Info.SessionIndex = NewLobbyIDs.Num() - 1;
+        Info.CurrentPlayers = SteamMatchmaking()->GetNumLobbyMembers(LobbyID);
+        Info.MaxPlayers = SteamMatchmaking()->GetLobbyMemberLimit(LobbyID);
+        Info.PingInMs = 0;
+
+        // [실제 저장된 키 반영] SERVER_NAME_s, MAP_NAME_s, HOST_NAME_s
+        const char* ServerName = SteamMatchmaking()->GetLobbyData(LobbyID, BaruMatchmakingConstants::RAW_SERVER_NAME_KEY);
+        const char* MapName = SteamMatchmaking()->GetLobbyData(LobbyID, BaruMatchmakingConstants::RAW_MAP_NAME_KEY);
+        const char* HostName = SteamMatchmaking()->GetLobbyData(LobbyID, BaruMatchmakingConstants::RAW_HOST_NAME_KEY);
+
+        Info.ServerName = (ServerName && FCStringAnsi::Strlen(ServerName) > 0) ? UTF8_TO_TCHAR(ServerName) : TEXT("Steam Lobby");
+        Info.SelectedMapName = (MapName && FCStringAnsi::Strlen(MapName) > 0) ? UTF8_TO_TCHAR(MapName) : TEXT("MainLobbyLevel");
+        Info.HostPlayerName = (HostName && FCStringAnsi::Strlen(HostName) > 0) ? UTF8_TO_TCHAR(HostName) : TEXT("Host");
+
+        ResultList.Add(Info);
+    }
+
+    AsyncTask(ENamedThreads::GameThread, [this, ResultList = MoveTemp(ResultList), NewLobbyIDs = MoveTemp(NewLobbyIDs)]() mutable
+    {
+        FoundSteamLobbyIDs = MoveTemp(NewLobbyIDs);
+        OnFindSessionsCompleteEvent.Broadcast(ResultList, true);
+    });
 }

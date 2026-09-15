@@ -7,6 +7,7 @@
 #include "Engine/EngineTypes.h"     
 #include "Interfaces/CombatInterface.h" 
 #include "Interfaces/InteractableInterface.h"
+#include "GameplayCueInterface.h"
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "BaruCharacter.generated.h"     
 
@@ -47,11 +48,12 @@ class UBaruItemInstance;
 class USpotLightComponent;
 class UBaruTensionComponent;
 class UBaruFootstepComponent;
+class UAnimMontage;
 struct FOnAttributeChangeData;
 enum class EBaruInteractionHoldEndReason : uint8;
 
 UCLASS()
-class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface , public IInteractableInterface
+class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface , public IInteractableInterface,public IGameplayCueInterface
 {
     GENERATED_BODY()
 
@@ -60,13 +62,16 @@ public:
     
     // [09.13] 반동 회복 처리를 위한 Tick 오버라이드
     virtual void Tick(float DeltaSeconds) override;
+    virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+    virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 
     // [09.13] 사격 시 화면 반동 트리거 함수
     UFUNCTION(BlueprintCallable, Category = "BARU|Combat")
     void ApplyRecoil(const FBaruRecoilData& InRecoilData);
     
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override; // [추가]
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;                             // [추가]
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;         
+    virtual void HandleGameplayCue(UObject* Self, FGameplayTag GameplayCueTag, EGameplayCueEvent::Type EventType, const FGameplayCueParameters& Parameters) override;
     
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
     
@@ -133,6 +138,13 @@ public:
     
 protected:
     virtual void BeginPlay() override;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat|Death")
+    float DeathRagdollStartRatio = 0.7f;
+
+    FTimerHandle DeathRagdollTimerHandle;
+
+    // ★[추가 09.15] 사망 시 몸을 물리(래그돌)로 전환 — 시체가 널브러지게 (각 PC 에서 연출 전용)
+    void StartDeathRagdoll();
     void InitAbilityActorInfo();
 
     // 이동 및 시점 회전 처리 함수
@@ -183,6 +195,7 @@ protected:
     void UpdateMaxWalkSpeed();
     
     void HandleMoveSpeedChanged(const FOnAttributeChangeData& ChangeData);  // [추가]
+    void HandleReloadingTagChanged(const FGameplayTag Tag, int32 NewCount);
 
     UFUNCTION()
     void OnRep_IsDead();      
@@ -210,6 +223,15 @@ protected:
     // [추가] 소생 시 회복 비율
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Combat")
     float ReviveHealthRatio = 0.3f;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Anim")
+    TMap<FGameplayTag, TObjectPtr<UAnimMontage>> FireMontageByCue;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Anim")
+    TMap<EBaruEquipmentSlot, TObjectPtr<UAnimMontage>> ReloadMontageBySlot;
+    
+    UPROPERTY(Transient)
+    TObjectPtr<UAnimMontage> CurrentReloadMontage;
     
     // [추가] 다운 중에도 사망 연출과 구분되도록 BP 훅을 열어둡니다.
     UFUNCTION(BlueprintImplementableEvent, Category = "BARU|Combat")
@@ -268,6 +290,30 @@ protected:
     // 크라우치를 넣을 때 반드시 다시 손대게 됩니다
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
     float CameraEyeHeight = 60.0f;
+    
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
+    FName CameraFollowSocketName = TEXT("head");
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
+    FVector CameraFollowOffset = FVector(10.0f, 0.0f, 5.0f);
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
+    float CameraFollowInterpSpeed = 12.0f;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
+    bool bCameraAlwaysFollowHead = true;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Camera")
+    float CameraLookDownForwardPush = 20.0f;
+    
+    FVector DefaultCameraRelativeLocation = FVector::ZeroVector;
+
+    // ★[추가 09.15] 앉기·다운 시 카메라 위치 갱신 (로컬 전용, Tick 에서 호출)
+    void UpdateCameraFollow(float DeltaSeconds);
+    
+    FTimerHandle WeaponShadowTimerHandle;
+    void HideLocalWeaponShadows();
     
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Animation")
     TObjectPtr<UBaruCharacterAnimSet> AnimSet;  //이 캐릭터가 사용하는 몽타주 모음
@@ -337,7 +383,8 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Movement")
     float CrouchedWalkSpeed = 200.0f;
 
-    // [추가] 달리는 중인지. 복제되어야 다른 사람 화면에서도 속도가 맞음
+    FDelegateHandle ReloadingTagChangedHandle;
+    
     UPROPERTY(ReplicatedUsing = OnRep_IsSprinting, VisibleInstanceOnly, BlueprintReadOnly, Category = "BARU|Movement")
     bool bIsSprinting = false;
     
@@ -350,6 +397,10 @@ private:
     // [추가] MoveSpeed 어트리뷰트가 준 기본 속도. 스프린트 배율의 기준값
     float BaseWalkSpeed = 450.0f;
     FDelegateHandle MoveSpeedChangedHandle;
+    
+    FDelegateHandle CarryWeightChangedHandle;
+    FDelegateHandle MaxCarryWeightChangedHandle;
+    void HandleCarryWeightChanged(const FOnAttributeChangeData& ChangeData);
 
     UPROPERTY()
     TObjectPtr<AActor> LastKiller; // [추가] 사망처리를 다음 틱으로 넘길때 임시보관

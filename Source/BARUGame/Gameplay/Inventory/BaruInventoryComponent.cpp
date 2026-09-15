@@ -19,6 +19,9 @@
 #include "Sound/SoundBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "CollisionQueryParams.h"
+#include "Player/BaruPlayerState.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 
 UBaruInventoryComponent::UBaruInventoryComponent()
 {
@@ -35,6 +38,9 @@ void UBaruInventoryComponent::InitializeComponent()
 
 	SlotList.OwnerComponent = this;
 	Cells.SetNum(GridWidth * GridHeight);   // 전부 nullptr
+	
+	OnInventoryUpdated.AddUObject(this, &UBaruInventoryComponent::RefreshCarryWeight);
+
 }
 
 void UBaruInventoryComponent::ReadyForReplication()
@@ -950,18 +956,19 @@ void UBaruInventoryComponent::CopyInventoryFrom(
 	{
 		return;
 	}
+	
+	// [필수 추가] 데이터 테이블 및 그리드 설정값 복사
+	ItemDataTable = SourceInventory->ItemDataTable;
+	GridWidth = SourceInventory->GridWidth;
+	GridHeight = SourceInventory->GridHeight;
 
-	// 혹시 목적지 Inventory에 기존 SubObject가 있다면 먼저 해제합니다.
-	if (IsUsingRegisteredSubObjectList()
-		&& IsReadyForReplication())
+	if (IsUsingRegisteredSubObjectList() && IsReadyForReplication())
 	{
-		for (const FInventorySlot& ExistingSlot
-			: SlotList.Slots)
+		for (const FInventorySlot& ExistingSlot : SlotList.Slots)
 		{
 			if (IsValid(ExistingSlot.Item))
 			{
-				RemoveReplicatedSubObject(
-					ExistingSlot.Item);
+				RemoveReplicatedSubObject(ExistingSlot.Item);
 			}
 		}
 	}
@@ -1348,4 +1355,76 @@ void UBaruInventoryComponent::
 Client_PlayDropSuccessSound_Implementation()
 {
 	PlayLocalInventorySound(DropSuccessSound.Get());
+}
+
+void UBaruInventoryComponent::RemoveSettledItems()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority()) return;
+
+	int32 RemovedCount = 0;
+	for (int32 i = SlotList.Slots.Num() - 1; i >= 0; --i)
+	{
+		const FInventorySlot& Slot = SlotList.Slots[i];
+		if (!IsValid(Slot.Item)) continue;
+
+		const FItemData* Data = FindItemData(Slot.Item->ItemID);
+		// bCanBeSettled == true면 가격이 0이어도 정산품으로 취급하여 소각
+		if (Data && Data->bCanBeSettled)
+		{
+			// 장착 중인 아이템이 아니라면 그리드 점유 해제
+			if (!Slot.bEquipped)
+			{
+				ClearCells(Slot.Item, Slot.TopLeft);
+			}
+			else
+			{
+				// 장착된 상태라면 EquipmentComponent의 참조 및 액터 해제
+				if (APlayerState* PS = Cast<APlayerState>(GetOwner()))
+				{
+					if (APawn* Pawn = PS->GetPawn())
+					{
+						if (UBaruEquipmentComponent* Equip = Pawn->FindComponentByClass<UBaruEquipmentComponent>())
+						{
+							Equip->ReleaseWeaponForWorldDropOnServer(Slot.Item);
+						}
+					}
+				}
+			}
+
+			if (IsUsingRegisteredSubObjectList() && IsReadyForReplication())
+			{
+				RemoveReplicatedSubObject(Slot.Item);
+			}
+			SlotList.Slots.RemoveAt(i);
+			RemovedCount++;
+		}
+	}
+
+	if (RemovedCount > 0)
+	{
+		SlotList.MarkArrayDirty();
+		OnInventoryUpdated.Broadcast();
+		GetOwner()->ForceNetUpdate();
+	}
+
+	BARU_NET_LOG(GetOwner(), LogBaruItem, Log, TEXT("[LobbyItems] RemoveSettledItems: %d개 정산 대상 아이템 소각 완료"), RemovedCount);
+}
+
+void UBaruInventoryComponent::RefreshCarryWeight()
+{
+	ABaruPlayerState* PS = Cast<ABaruPlayerState>(GetOwner());
+	if (!IsValid(PS) || !PS->HasAuthority())
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = PS->GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	ASC->SetNumericAttributeBase(
+		UBaruPlayerAttributeSet::GetCarryWeightAttribute(),
+		GetTotalCarriedWeightKg());
 }

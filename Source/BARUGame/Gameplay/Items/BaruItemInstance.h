@@ -37,5 +37,8 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
 	int32 Quantity = 1;
 	
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item|Weapon")
+	int32 LoadedAmmo = -1;
+	
 	// 아이템 회전 기능 넣을 시, 이곳에 Rotation 관련 내용들 넣을 것.
 };
