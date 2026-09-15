@@ -11,6 +11,8 @@
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "BaruCharacter.generated.h"     
 
+class UMaterialInterface;
+
 // [09.13] 총기 반동 데이터 구조체
 USTRUCT(BlueprintType)
 struct FBaruRecoilData
@@ -510,4 +512,20 @@ private:
     float CurrentTargetFringe = 0.0f;
 
     void UpdateAimingEffects(float DeltaSeconds);
+
+protected:
+    // [추가] 다운 상태 외곽선/글로우 연출 설정
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Visual|DBNO")
+    bool bEnableDBNOOutline = true;
+
+    // 포스트 프로세스 스텐실 마스크 값 (기본 250)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Visual|DBNO")
+    int32 DBNOCustomDepthStencilValue = 250;
+
+    // UE5 오버레이 머티리얼 (선택 사항: 프레넬/림라이트 발광 머티리얼 할당 시 캐릭터 외곽 발광)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Visual|DBNO")
+    TObjectPtr<UMaterialInterface> DBNOOverlayMaterial;
+
+    // DBNO 외곽선 및 비주얼 On/Off 갱신 함수
+    void UpdateDBNOVisuals(bool bIsDowned);
 };

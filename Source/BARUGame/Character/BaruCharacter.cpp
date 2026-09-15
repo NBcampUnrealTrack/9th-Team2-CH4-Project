@@ -1066,6 +1066,8 @@ void ABaruCharacter::HandleDBNOStatusChanged(bool bNewDBNO)
          InteractionTraceChannel,
          bNewDBNO ? ECR_Block : ECR_Overlap);
    }
+   // [추가] 다운 진입 시 켜고, 소생 시 끔
+   UpdateDBNOVisuals(bNewDBNO);
    
    OnDBNOCosmetic(bNewDBNO);   // 몽타주·포스트프로세스는 BP 에서
 
@@ -1170,6 +1172,9 @@ void ABaruCharacter::OnRep_IsDead()
    {
       return;   // 리스폰으로 false 가 복제된 경우
    }
+   
+   // [추가] 완전 사망 시 DBNO 외곽선 끄기
+   UpdateDBNOVisuals(false);
 
    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
    {
@@ -1850,5 +1855,50 @@ void ABaruCharacter::UpdateAimingEffects(float DeltaSeconds)
    else if (CurrentFringe != CurrentTargetFringe)
    {
       CurrentFringe = CurrentTargetFringe;
+   }
+}
+
+// [추가] 외곽선 및 발광 연출 적용/해제 구현부
+void ABaruCharacter::UpdateDBNOVisuals(bool bIsDowned)
+{
+   if (!bEnableDBNOOutline)
+   {
+      return;
+   }
+
+   USkeletalMeshComponent* BodyMesh = GetMesh();
+   if (!IsValid(BodyMesh))
+   {
+      return;
+   }
+
+   // 메시에 Custom Depth와 Overlay Material을 적용하는 람다
+   auto ApplyVisualToMesh = [this, bIsDowned](USkeletalMeshComponent* TargetMesh)
+   {
+      if (!IsValid(TargetMesh)) return;
+
+      // 1. Custom Depth & Stencil 설정 (포스트 프로세스 아웃라인용)
+      TargetMesh->SetRenderCustomDepth(bIsDowned);
+      TargetMesh->SetCustomDepthStencilValue(bIsDowned ? DBNOCustomDepthStencilValue : 0);
+
+      // 2. UE5 Overlay Material 설정 (표면 프레넬 글로우용)
+      if (DBNOOverlayMaterial)
+      {
+         TargetMesh->SetOverlayMaterial(bIsDowned ? DBNOOverlayMaterial.Get() : nullptr);
+      }
+   };
+
+   // 3인칭 기본 몸체 메시에 적용
+   ApplyVisualToMesh(BodyMesh);
+
+   // [수정] AActor::Children 과의 이름 충돌 방지를 위해 ChildComponents 로 변경
+   TArray<USceneComponent*> ChildComponents;
+   BodyMesh->GetChildrenComponents(false, ChildComponents);
+   for (USceneComponent* Child : ChildComponents)
+   {
+      if (USkeletalMeshComponent* PartMesh = Cast<USkeletalMeshComponent>(Child))
+      {
+         ApplyVisualToMesh(PartMesh);
+      }
    }
 }
