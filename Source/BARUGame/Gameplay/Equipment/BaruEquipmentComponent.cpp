@@ -56,6 +56,13 @@ UBaruEquipmentComponent::GetOwnerInventoryComponent() const
 void UBaruEquipmentComponent::EndPlay(
     const EEndPlayReason::Type EndPlayReason)
 {
+    // [추가] PIE 정지 또는 게임 종료 시에는 월드가 통째로 정리되므로 즉시 반환
+    if (EndPlayReason == EEndPlayReason::EndPlayInEditor || EndPlayReason == EEndPlayReason::Quit)
+    {
+        Super::EndPlay(EndPlayReason);
+        return;
+    }
+    
     AActor* OwnerActor = GetOwner();
 
     if (OwnerActor && OwnerActor->HasAuthority())
@@ -469,11 +476,15 @@ bool UBaruEquipmentComponent::UnequipWeaponInternal( EBaruEquipmentSlot WeaponSl
     else
     {
         // [추가] 파괴 전 잔여 탄약 백업
-        if (IsValid(SecondaryWeaponItem))
+        if (IsValid(SecondaryWeaponItem) && IsValid(SecondaryWeapon))
         {
             SecondaryWeaponItem->LoadedAmmo = SecondaryWeapon->GetCurrentAmmo();
         }
-        SecondaryWeapon->Destroy();
+
+        if (IsValid(SecondaryWeapon))
+        {
+            SecondaryWeapon->Destroy();
+        }
 
         SecondaryWeapon = nullptr;
         SecondaryWeaponItem = nullptr;
