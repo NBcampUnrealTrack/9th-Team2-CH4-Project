@@ -540,7 +540,7 @@ void ABaruCharacter::Input_ToggleHeadlight()
 
 void ABaruCharacter::Input_Reload()
 {
-   // ★[수정 09.15] 앉아 있으면 재장전 무시
+   // 앉아 있으면 재장전 무시
    if (bIsDead || Execute_IsDBNO(this) || bIsCrouched)
    {
       return;
