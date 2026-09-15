@@ -54,6 +54,10 @@ class UAnimMontage;
 struct FOnAttributeChangeData;
 enum class EBaruInteractionHoldEndReason : uint8;
 
+// [추가] VOIP 3D 음성 컴포넌트 및 사운드 감쇠 에셋 전방 선언
+class UVOIPTalker;
+class USoundAttenuation;
+
 UCLASS()
 class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface , public IInteractableInterface,public IGameplayCueInterface
 {
@@ -528,4 +532,23 @@ protected:
 
     // DBNO 외곽선 및 비주얼 On/Off 갱신 함수
     void UpdateDBNOVisuals(bool bIsDowned);
+    
+    // [추가] 근접 3D 음성 통신 컴포넌트
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Voice")
+    TObjectPtr<UVOIPTalker> VOIPTalker;
+
+    // [추가] 3D 음성 거리 감쇠 에셋 (에디터 디폴트 할당용)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Voice")
+    TObjectPtr<USoundAttenuation> VoiceAttenuation;
+    
+    // [추가] PlayerState 동기화 시 보이스 스트림 연결 헬퍼
+    void SetupVoiceChat();
+
+    // [추가] 로컬 마이크 송출 시작 및 중단 제어 헬퍼 (엔진 VoiceInterface 호출용)
+    void StartVoiceChat();
+    void StopVoiceChat();
+    
+private:
+    // [추가] PlayerState의 Steam UniqueNetId 복제 대기용 타이머 핸들
+    FTimerHandle VoiceSetupRetryTimerHandle;
 };

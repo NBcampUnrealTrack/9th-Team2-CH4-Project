@@ -39,7 +39,8 @@ public class BARUGame : ModuleRules
 			"AIModule",
 			"Niagara",
 			"NavigationSystem",
-			"AnimGraphRuntime"
+			"AnimGraphRuntime",
+			"Voice"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {

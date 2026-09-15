@@ -36,6 +36,8 @@
 #include "Animation/Character/BaruCharacterAnimSet.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Gameplay/Weapon/BaruWeaponBase.h"
+#include "Net/VoiceConfig.h"
+#include "Sound/SoundAttenuation.h"
 
 ABaruCharacter::ABaruCharacter()
 {
@@ -77,6 +79,9 @@ ABaruCharacter::ABaruCharacter()
    // 긴장도 컴포넌트 부착
    TensionComponent = CreateDefaultSubobject<UBaruTensionComponent>(TEXT("TensionComponent"));
    
+   // [추가] 3D VOIP 토커 컴포넌트 생성 (ActorComponent이므로 SetupAttachment 호출 금지)
+   VOIPTalker = CreateDefaultSubobject<UVOIPTalker>(TEXT("VOIPTalker"));
+   
    // [추가] 헤드라이트.
    //   카메라에 붙이면 시선 방향과 정확히 일치하고,
    //   다른 클라에서도 RemoteViewPitch 로 위아래 각도가 대략 맞습니다.
@@ -112,6 +117,8 @@ void ABaruCharacter::PossessedBy(AController* NewController)
 
    InitAbilityActorInfo();
    
+   SetupVoiceChat();
+   
    if (HasAuthority())
    {
       if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
@@ -140,6 +147,9 @@ void ABaruCharacter::OnRep_PlayerState()
 {
     Super::OnRep_PlayerState();
     InitAbilityActorInfo();
+   
+   // [추가] 클라이언트에서 PlayerState가 복제되었을 때 보이스 스트림 연결
+   SetupVoiceChat();
 }
 
 
@@ -362,6 +372,12 @@ void ABaruCharacter::PawnClientRestart()
       if (FSlateApplication::IsInitialized())
       {
          FSlateApplication::Get().SetAllUserFocusToGameViewport();
+      }
+      
+      // [추가] 로컬 플레이어일 경우 마이크 입력 상시 송출 시작
+      if (IsLocallyControlled())
+      {
+         StartVoiceChat();
       }
    }
 }
@@ -1014,6 +1030,12 @@ void ABaruCharacter::ReviveFromDBNO(float HealthRatio)
 
    LastKiller = nullptr;
    BaruPS->SetDBNOState(false);
+   
+   // [추가] 소생 시 로컬 플레이어 마이크 송출 재개
+   if (IsLocallyControlled())
+   {
+      StartVoiceChat();
+   }
 
    BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s revived."), *GetName());
 }
@@ -1171,6 +1193,12 @@ void ABaruCharacter::OnRep_IsDead()
    if (!bIsDead)
    {
       return;   // 리스폰으로 false 가 복제된 경우
+   }
+   
+   // [추가] 사망 시 마이크 송출 즉시 중단 (중복 조건문 제거)
+   if (IsLocallyControlled())
+   {
+      StopVoiceChat();
    }
    
    // [추가] 완전 사망 시 DBNO 외곽선 끄기
@@ -1900,5 +1928,66 @@ void ABaruCharacter::UpdateDBNOVisuals(bool bIsDowned)
       {
          ApplyVisualToMesh(PartMesh);
       }
+   }
+}
+
+// [추가] VOIP 감쇠 설정 주입 및 PlayerState 등록 함수
+void ABaruCharacter::SetupVoiceChat()
+{
+   if (!VOIPTalker)
+   {
+      return;
+   }
+
+   // 1. 3D 거리 감쇠 에셋 연결
+   if (VoiceAttenuation)
+   {
+      VOIPTalker->Settings.AttenuationSettings = VoiceAttenuation;
+   }
+
+   // 2. 음성 수신 스트림 바인딩
+   if (APlayerState* PS = GetPlayerState())
+   {
+      // '다른 사람 캐릭터(!IsLocallyControlled())'일 때만 수신 스피커로 등록
+      if (!IsLocallyControlled())
+      {
+         VOIPTalker->RegisterWithPlayerState(PS);
+      }
+   }
+
+   // 3. 내 캐릭터인 경우에만 마이크 캡처(송출) 가동
+   if (IsLocallyControlled())
+   {
+      StartVoiceChat();
+   }
+}
+
+// [추가] APlayerController 내장 표준 함수를 통한 마이크 송출 시작
+void ABaruCharacter::StartVoiceChat()
+{
+   if (!IsLocallyControlled())
+   {
+      return;
+   }
+
+   if (APlayerController* PC = Cast<APlayerController>(GetController()))
+   {
+      PC->ToggleSpeaking(true);
+      BARU_NET_LOG(this, LogBaru, Verbose, TEXT("Voice Chat Transmission Started"));
+   }
+}
+
+// [추가] APlayerController 내장 표준 함수를 통한 마이크 송출 차단
+void ABaruCharacter::StopVoiceChat()
+{
+   if (!IsLocallyControlled())
+   {
+      return;
+   }
+
+   if (APlayerController* PC = Cast<APlayerController>(GetController()))
+   {
+      PC->ToggleSpeaking(false);
+      BARU_NET_LOG(this, LogBaru, Verbose, TEXT("Voice Chat Transmission Stopped"));
    }
 }
