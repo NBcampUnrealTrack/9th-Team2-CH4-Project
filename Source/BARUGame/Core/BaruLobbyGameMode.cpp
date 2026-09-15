@@ -69,10 +69,20 @@ void ABaruLobbyGameMode::InitializeLobbyPlayerState(APlayerController* PC, bool 
 
     BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("[LobbyItems] Lobby Player Initialized: %s (Seamless: %d)"), *PC->GetName(), bFromSeamlessTravel);
 
-    if (PC->IsInState(NAME_Spectating) || (PC->PlayerState && PC->PlayerState->IsOnlyASpectator()))
+    PC->bPlayerIsWaiting = false;
+    if (PC->PlayerState)
     {
         PC->PlayerState->SetIsOnlyASpectator(false);
-        PC->ChangeState(NAME_Playing);
+    }
+    PC->ChangeState(NAME_Playing);
+    PC->ClientGotoState(NAME_Playing);
+    PC->ResetIgnoreMoveInput();
+    PC->ResetIgnoreLookInput();
+
+    // 클라이언트 머신에 상태 초기화 패킷 전달
+    if (ABaruPlayerController* BaruPC = Cast<ABaruPlayerController>(PC))
+    {
+        BaruPC->Client_ResetLobbyInputAndState();
     }
 
     if (ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())

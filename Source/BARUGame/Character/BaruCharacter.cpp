@@ -34,6 +34,7 @@
 #include "Components/BaruTensionComponent.h"
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "Animation/Character/BaruCharacterAnimSet.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Gameplay/Weapon/BaruWeaponBase.h"
 
 ABaruCharacter::ABaruCharacter()
@@ -333,6 +334,11 @@ void ABaruCharacter::PawnClientRestart()
 
    if (PC && PC->IsLocalController())
    {
+      // [추가] 로컬 컨트롤러 입력 대기 플래그 완전 초기화
+      PC->bPlayerIsWaiting = false;
+      PC->ResetIgnoreMoveInput();
+      PC->ResetIgnoreLookInput();
+      
       // 1. 카메라 시점을 내 캐릭터로 확실하게 전환
       PC->SetViewTarget(this);
 
@@ -351,6 +357,11 @@ void ABaruCharacter::PawnClientRestart()
             Subsystem->AddMappingContext(DefaultMappingContext, 0);
             BARU_LOG(LogBaru, Log, TEXT("PawnClientRestart: [SUCCESS] ViewTarget & IMC applied for %s"), *GetName());
          }
+      }
+      
+      if (FSlateApplication::IsInitialized())
+      {
+         FSlateApplication::Get().SetAllUserFocusToGameViewport();
       }
    }
 }

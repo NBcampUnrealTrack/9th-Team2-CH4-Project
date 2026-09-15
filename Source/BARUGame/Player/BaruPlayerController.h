@@ -56,7 +56,9 @@ class BARUGAME_API ABaruPlayerController : public APlayerController
 	
 public:
 	ABaruPlayerController();
-
+	
+	// [추가] 심리스 트래블 완료 시 로컬 상태 초기화
+	virtual void PostSeamlessTravel() override;
 	
 	virtual void PostProcessInput(const float DeltaTime, const bool bGamePaused) override;
 	
@@ -104,6 +106,10 @@ public:
 	
 	UFUNCTION(BlueprintPure, Category = "BARU|Components")
 	UBaruItemFocusComponent* GetItemFocusComponent() const { return ItemFocusComponent; }
+	
+	// [추가] 로비 복귀 시 클라이언트의 관전/대기 상태를 완전 해제하고 1인칭 조작/포커스를 복원하는 Client RPC
+	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
+	void Client_ResetLobbyInputAndState();
 
 	
 public:
