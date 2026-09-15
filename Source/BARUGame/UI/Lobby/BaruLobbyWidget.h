@@ -144,6 +144,13 @@ protected:
     void RebuildSessionResultList(
        bool bWasSuccessful
        );
+   
+   // 현재 Steam 세션과 네트워크 상태를 UI에 표시한다.
+   void RefreshSessionStatus();
+   
+   void SetSessionStatus(
+      const FText& StatusText,
+      const FLinearColor& StatusColor);
     
     // 화면 패널
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
@@ -200,6 +207,9 @@ protected:
     
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby")
     TObjectPtr<UTextBlock> Text_LobbyAction;
+   
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget), Category = "BARU|UI|Lobby|Session")
+    TObjectPtr<UTextBlock> Text_SessionStatus;
 
     /** 기존 WBP_Lobby와의 호환을 위해 블루프린트 배치 전까지 선택 바인딩으로 둔다. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "BARU|UI|Lobby|Player")

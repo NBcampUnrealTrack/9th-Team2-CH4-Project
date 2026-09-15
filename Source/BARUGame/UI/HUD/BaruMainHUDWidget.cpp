@@ -16,6 +16,7 @@
 #include "TimerManager.h"
 #include "GameFramework/PlayerState.h"
 #include "Animation/WidgetAnimation.h"
+#include "Gameplay/Inventory/BaruInventoryComponent.h"
 
 #include "BaruLog.h"
 
@@ -169,20 +170,36 @@ void UBaruMainHUDWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 	
+	// 기존 HUD 초기화
 	HideInteractionPrompt();
 	HideGuideMessage();
 	HideWeaponDisplay();
 	
+	// 아이템 획득 알림을 처음에는 숨긴다.
+	HidePickupNotification();
+	
+	// 부활 진행 UI를 처음에는 숨긴다.
+	HideReviveProgress();
+	
+	// 기존 피격 효과 초기화
 	if (IsValid(Border_HitScreenEffect))
 	{
 		Border_HitScreenEffect->SetRenderOpacity(0.0f);
 	}
-
+	
 	PlayerStateBindRetryCount = 0;
 	
+	// 기존 PlayerState 연결
+	// 내부에서 InventoryComponent도 연결할 예정
 	BindToPlayerState();
+	
+	// 기존 GameState 연결
 	BindToGameState();
-
+	
+	// 부활 시작/종료 이벤트를 받기 위해
+	// PlayerController와 연결한다.
+	BindToPlayerController();
+	
 	BARU_LOG(
 		LogBaruUI,
 		Log,
@@ -192,20 +209,35 @@ void UBaruMainHUDWidget::NativeOnActivated()
 
 void UBaruMainHUDWidget::NativeOnDeactivated()
 {
+	// 기존 HUD 정리
 	HideInteractionPrompt();
 	HideGuideMessage();
 	HideWeaponDisplay();
 	
+	// 아이템 알림 애니메이션 및 UI 정리
+	HidePickupNotification();
+	
+	// 부활 진행 애니메이션 및 UI 정리
+	HideReviveProgress();
+	
+	// 기존 피격 애니메이션 정리
 	if (IsValid(Anim_HitScreenEffect))
 	{
 		StopAnimation(Anim_HitScreenEffect);
 	}
-
+	
 	if (IsValid(Border_HitScreenEffect))
 	{
 		Border_HitScreenEffect->SetRenderOpacity(0.0f);
 	}
-
+	
+	// PlayerController 부활 이벤트 해제
+	UnbindFromPlayerController();
+	
+	// InventoryComponent 획득 이벤트 해제
+	UnbindFromInventoryComponent();
+	
+	// 기존 연결 해제
 	UnbindFromGameState();
 	UnbindFromPlayerState();
 	
@@ -214,7 +246,7 @@ void UBaruMainHUDWidget::NativeOnDeactivated()
 		Log,
 		TEXT("Main HUD가 비활성화되었습니다. Widget=%s"),
 		*GetName());
-
+	
 	Super::NativeOnDeactivated();
 }
 
@@ -285,6 +317,8 @@ void UBaruMainHUDWidget::BindToPlayerState()
 	
 	// 클라이언트 PlayerState가 준비된 후 아군 목록도 다시 갱신
 	RebuildAllyStatusList();
+	
+	BindToInventoryComponent();
 }
 
 void UBaruMainHUDWidget::UnbindFromPlayerState()
@@ -531,4 +565,232 @@ void UBaruMainHUDWidget::PlayHitScreenEffect()
 		1,
 		EUMGSequencePlayMode::Forward,
 		1.0f);
+}
+
+void UBaruMainHUDWidget::BindToInventoryComponent()
+{
+	UnbindFromInventoryComponent();
+	
+	if (!IsValid(BoundPlayerState))
+	{
+		return;
+	}
+	
+	BoundInventoryComponent =
+		BoundPlayerState->GetInventoryComponent();
+	
+	if (IsValid(BoundInventoryComponent))
+	{
+		BoundInventoryComponent->OnInventoryPickupResult.AddUniqueDynamic(
+			this,
+			&ThisClass::HandleInventoryPickupResult);
+	}
+}
+
+void UBaruMainHUDWidget::UnbindFromInventoryComponent()
+{
+	if (IsValid(BoundInventoryComponent))
+	{
+		BoundInventoryComponent->OnInventoryPickupResult.RemoveDynamic(
+			this,
+			&ThisClass::HandleInventoryPickupResult);
+	}
+	
+	BoundInventoryComponent = nullptr;
+}
+
+void UBaruMainHUDWidget::HandleInventoryPickupResult(
+	const FBaruInventoryPickupNotification& Notification)
+{
+	if (!IsValid(Border_PickupNotification) ||
+		!IsValid(Text_PickupTitle) ||
+		!IsValid(Text_PickupDetail))
+	{
+		return;
+	}
+	
+	switch (Notification.Result)
+	{
+	case EBaruInventoryPickupResult::Succeeded:
+		Text_PickupTitle->SetText(
+			FText::FromString(TEXT("아이템 획득")));
+		
+		Text_PickupDetail->SetText(
+			FText::Format(
+				NSLOCTEXT(
+					"BaruHUD",
+					"PickupSucceeded",
+					"{0} × {1}"),
+				Notification.ItemName,
+				FText::AsNumber(Notification.AddedQuantity)));
+		break;
+		
+	case EBaruInventoryPickupResult::Partial:
+		Text_PickupTitle->SetText(
+			FText::FromString(TEXT("일부만 획득")));
+
+		Text_PickupDetail->SetText(
+			FText::Format(
+				NSLOCTEXT(
+					"BaruHUD",
+					"PickupPartial",
+					"{0} × {1} 획득 · {2}개 남음"),
+				Notification.ItemName,
+				FText::AsNumber(Notification.AddedQuantity),
+				FText::AsNumber(Notification.RemainingQuantity)));
+		break;
+
+	case EBaruInventoryPickupResult::Full:
+		Text_PickupTitle->SetText(
+			FText::FromString(TEXT("인벤토리 공간 부족")));
+
+		Text_PickupDetail->SetText(Notification.ItemName);
+		break;
+	}
+	
+	Border_PickupNotification->SetVisibility(
+		ESlateVisibility::HitTestInvisible);
+	
+	if (IsValid(Anim_PickupNotification))
+	{
+		StopAnimation(Anim_PickupNotification);
+		PlayAnimation(Anim_PickupNotification);
+	}
+	
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			PickupNotificationTimerHandle);
+		
+		World->GetTimerManager().SetTimer(
+			PickupNotificationTimerHandle,
+			this,
+			&ThisClass::HidePickupNotification,
+			4.05f,
+			false);
+	}
+}
+
+void UBaruMainHUDWidget::HidePickupNotification()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			PickupNotificationTimerHandle);
+	}
+	
+	if (IsValid(Border_PickupNotification))
+	{
+		Border_PickupNotification->SetVisibility(
+			ESlateVisibility::Collapsed);
+		
+		Border_PickupNotification->SetRenderOpacity(0.0f);
+	}
+}
+
+void UBaruMainHUDWidget::BindToPlayerController()
+{
+	UnbindFromPlayerController();
+	
+	BoundPlayerController =
+		Cast<ABaruPlayerController>(GetOwningPlayer());
+	
+	if (!IsValid(BoundPlayerController))
+	{
+		return;
+	}
+	
+	BoundPlayerController->OnInteractionHoldStarted.AddUniqueDynamic(
+		this,
+		&ThisClass::HandleInteractionHoldStarted);
+	
+	BoundPlayerController->OnInteractionHoldEnded.AddUniqueDynamic(
+		this,
+		&ThisClass::HandleInteractionHoldEnded);
+}
+
+void UBaruMainHUDWidget::UnbindFromPlayerController()
+{
+	if (IsValid(BoundPlayerController))
+	{
+		BoundPlayerController->OnInteractionHoldStarted.RemoveDynamic(
+			this,
+			&ThisClass::HandleInteractionHoldStarted);
+		
+		BoundPlayerController->OnInteractionHoldEnded.RemoveDynamic(
+			this,
+			&ThisClass::HandleInteractionHoldEnded);
+	}
+	
+	BoundPlayerController = nullptr;
+}
+
+void UBaruMainHUDWidget::HandleInteractionHoldStarted(
+	AActor* OtherActor,
+	float Duration,
+	bool bIsHolder)
+{
+	if (!IsValid(Border_ReviveProgress) ||
+		!IsValid(ProgressBar_ReviveProgressBar))
+	{
+		return;
+	}
+	
+	Border_ReviveProgress->SetVisibility(
+		ESlateVisibility::HitTestInvisible);
+	
+	ProgressBar_ReviveProgressBar->SetPercent(0.0f);
+	
+	if (IsValid(Text_ReviveProgress))
+	{
+		Text_ReviveProgress->SetText(
+			FText::FromString(
+				bIsHolder
+				? TEXT("팀원 치료 중...")
+				: TEXT("치료 받는 중...")));
+	}
+	
+	if (IsValid(Anim_ReviveProgress))
+	{
+		StopAnimation(Anim_ReviveProgress);
+		
+		// Anim_ReviveProgress가 1초이므로
+		// 실제 Duration초에 맞춰 재생 속도를 조절한다.
+		const float PlaybackSpeed =
+			1.0f / FMath::Max(Duration, 0.01f);
+		
+		PlayAnimation(
+			Anim_ReviveProgress,
+			0.0f,
+			1,
+			EUMGSequencePlayMode::Forward,
+			PlaybackSpeed);
+	}
+}
+
+void UBaruMainHUDWidget::HandleInteractionHoldEnded(
+	AActor* OtherActor,
+	EBaruInteractionHoldEndReason Reason,
+	bool bIsHolder)
+{
+	HideReviveProgress();
+}
+
+void UBaruMainHUDWidget::HideReviveProgress()
+{
+	if (IsValid(Anim_ReviveProgress))
+	{
+		StopAnimation(Anim_ReviveProgress);
+	}
+	
+	if (IsValid(ProgressBar_ReviveProgressBar))
+	{
+		ProgressBar_ReviveProgressBar->SetPercent(0.0f);
+	}
+	
+	if (IsValid(Border_ReviveProgress))
+	{
+		Border_ReviveProgress->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
 }
