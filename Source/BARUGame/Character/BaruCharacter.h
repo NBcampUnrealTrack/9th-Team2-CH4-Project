@@ -422,7 +422,7 @@ protected:
 
     // 다운 중 1회 피격 시 차감될 출혈 시간 (초 단위, 기본 15초)
     UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat")
-    float DBNODamageBleedReduction = 15.0f;
+    float DBNODamageBleedReduction = 2.0f;
     
     // [09.13] R키 수동 재장전 InputAction 에셋 포인터
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
