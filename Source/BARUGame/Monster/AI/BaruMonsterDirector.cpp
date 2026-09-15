@@ -1,6 +1,3 @@
-﻿
-
-
 #include "Monster/AI/BaruMonsterDirector.h"
 
 #include "Monster/Characters/BaruMonsterCharacter.h"
@@ -15,6 +12,7 @@
 #include "GameFramework/PlayerState.h"
 #include "Gimmicks/BaruControlRoomSpawner.h"
 #include "Player/BaruPlayerState.h"
+#include "Templates/UnrealTemplate.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "BaruLog.h"
@@ -23,11 +21,11 @@
 
 ABaruMonsterDirector::ABaruMonsterDirector()
 {
-	PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = false;
 
-	// 지휘 판단과 목록은 서버에서만 관리
-	// 실제 몬스터의 이동·전투 결과는 몬스터 쪽에서 동기화
-	bReplicates = false;
+    // 지휘 판단과 목록은 서버에서만 관리
+    // 실제 몬스터의 이동·전투 결과는 몬스터 쪽에서 동기화
+    bReplicates = false;
 }
 
 void ABaruMonsterDirector::BeginPlay()
@@ -65,49 +63,44 @@ void ABaruMonsterDirector::BeginPlay()
         true,
         SafeAssignmentUpdateInterval
     );
+
+    // 이동 중 목표 변경과 카운트다운 종료를 빠르게 반영
+    GetWorldTimerManager().SetTimer(
+        TacticalStateTimerHandle,
+        this,
+        &ABaruMonsterDirector::RefreshTacticalState,
+        0.5f,
+        true
+    );
     
 }
 
-bool ABaruMonsterDirector::RegisterMonster(
-    ABaruMonsterCharacter* Monster
-)
+bool ABaruMonsterDirector::RegisterMonster(ABaruMonsterCharacter* Monster)
 {
-    // 클라이언트에서는 지휘 목록을 변경하지 않음
-    // 존재하지 않거나 이미 사망한 몬스터도 등록하지 않음
-    // ||는 앞 조건이 true면 뒤 조건을 검사하지 않으므로
-    // 무효한 Monster에 사망 인터페이스를 호출하지 않음
-    if (GetNetMode() == NM_Client ||
-        !IsValid(Monster) ||
+    if (GetNetMode() == NM_Client || !IsValid(Monster) ||
         ICombatInterface::Execute_IsDead(Monster))
     {
         return false;
     }
 
-    // 새 몬스터를 넣기 전에 기존 목록의 사망·파괴된 개체 정리
     RemoveInvalidMonsters();
-
-    // 배열에서 사용하는 약한 참조 타입으로 변환
     const TWeakObjectPtr<ABaruMonsterCharacter> MonsterRef(Monster);
-
-    // 같은 몬스터가 여러 번 등록 요청을 보내도 한 번만 보관
-    // 이미 등록된 상태이므로 성공으로 처리
     if (RegisteredMonsters.Contains(MonsterRef))
     {
         return true;
     }
 
     RegisteredMonsters.Add(MonsterRef);
+    if (bRegisteringWaveSpawn)
+    {
+        // 생성 출처와 이번 웨이브 목록을 각각 기록
+        WaveSpawnedMonsters.Add(MonsterRef);
+        NewWaveSpawnedMonsters.AddUnique(MonsterRef);
+    }
 
-    // 지휘 목록에 실제로 새 항목이 추가됐을 때만 로그 출력
-    BARU_NET_LOG(
-        this,
-        LogBaruAI,
-        Log,
+    BARU_NET_LOG(this, LogBaruAI, Log,
         TEXT("Director registered monster: %s / Count=%d"),
-        *GetNameSafe(Monster),
-        RegisteredMonsters.Num()
-    );
-
+        *GetNameSafe(Monster), RegisteredMonsters.Num());
     return true;
 }
 
@@ -163,6 +156,16 @@ void ABaruMonsterDirector::RemoveInvalidMonsters()
                 ICombatInterface::Execute_IsDead(Monster);
         }
     );
+    
+    // 등록 목록에서 사라진 개체의 웨이브 기록도 정리
+    for (auto It = WaveSpawnedMonsters.CreateIterator(); It; ++It)
+    {
+        if (!It->IsValid() || !RegisteredMonsters.Contains(*It))
+        {
+            It.RemoveCurrent();
+        }
+    }
+    
 }
 
 ABaruMonsterAIController* ABaruMonsterDirector::FindCommandController(
@@ -294,6 +297,14 @@ bool ABaruMonsterDirector::RequestEncirclement(
     {
         return false;
     }
+    
+    // 직접 요청에서도 웨이브 개체만 포위를 허용
+    if (!IsValid(Monster) ||
+        !WaveSpawnedMonsters.Contains(
+            TWeakObjectPtr<ABaruMonsterCharacter>(Monster)))
+    {
+        return false;
+    }
 
     const ABaruPlayerState* TargetPlayerState =
         TargetPlayer->GetPlayerState<ABaruPlayerState>();
@@ -387,6 +398,7 @@ void ABaruMonsterDirector::EndPlay(
     {
         // Director 종료 후 부담도 계산이 다시 호출되지 않도록 정리
         GetWorldTimerManager().ClearTimer(TeamBurdenUpdateTimerHandle);
+        GetWorldTimerManager().ClearTimer(TacticalStateTimerHandle);
         
         // Director 종료 후 자동 몬스터 배정이 다시 실행되지 않도록 정리
         GetWorldTimerManager().ClearTimer(
@@ -768,7 +780,7 @@ void ABaruMonsterDirector::RecalculateTeamBurden()
     {
         return;
     }
-
+    
     UWorld* World = GetWorld();
 
     if (!IsValid(World))
@@ -1031,6 +1043,12 @@ void ABaruMonsterDirector::SetDirectorState(
     
     // 상태가 바뀌면 기존 포위를 계속 유지할 수 있는지 즉시 검사
     RefreshEncirclementAssignment();
+
+    // 짧은 탈출 카운트다운에 이전 압박 판단 쿨다운을 이어 붙이지 않음
+    if (NewState == EBaruDirectorState::Extraction)
+    {
+        LastEncirclementDecisionTime = -1.0;
+    }
     
 }
 
@@ -1207,108 +1225,105 @@ GetWaveSizeForCurrentState() const
     return AlivePlayerCount * MonstersPerPlayer;
 }
 
-bool ABaruMonsterDirector::TrySpawnDirectorWave(
-    APawn* TargetPlayer
-)
+bool ABaruMonsterDirector::TrySpawnDirectorWave(APawn* TargetPlayer)
 {
-    if (GetNetMode() == NM_Client ||
-        !IsValid(TargetPlayer))
-    {
-        return false;
-    }
-
-    // 완화 상태에서는 플레이어가 회복할 수 있도록
-    // 새로운 웨이브 생성을 완전히 차단
-    if (CurrentDirectorState == EBaruDirectorState::Relief)
+    if (GetNetMode() == NM_Client || !IsValid(TargetPlayer) ||
+        bRegisteringWaveSpawn || CurrentDirectorState == EBaruDirectorState::Relief)
     {
         return false;
     }
 
     UWorld* World = GetWorld();
-
     if (!IsValid(World))
     {
         return false;
     }
 
-    const double CurrentTime = World->GetTimeSeconds();
-    const double SafeCooldown =
-        FMath::Max(1.0f, WaveSpawnCooldown);
-
-    // 직전 웨이브 이후 쿨타임이 지나지 않았다면 생성하지 않음
+    const double Now = World->GetTimeSeconds();
     if (LastWaveSpawnTime >= 0.0 &&
-        CurrentTime - LastWaveSpawnTime < SafeCooldown)
+        Now - LastWaveSpawnTime < FMath::Max(1.0f, WaveSpawnCooldown))
     {
         return false;
     }
 
-    const int32 WaveSize =
-        GetWaveSizeForCurrentState();
-
+    const int32 WaveSize = GetWaveSizeForCurrentState();
     if (WaveSize <= 0 || WaveSpawners.IsEmpty())
     {
         return false;
     }
 
-    /*
-     * 항상 첫 번째 스포너만 사용하지 않도록
-     * 무작위 위치부터 순서대로 검사합니다.
-     *
-     * 선택된 스포너가 최대 생존 수에 도달했다면
-     * 다음 스포너에서 생성을 시도합니다.
-     */
-    const int32 FirstSpawnerIndex =
-        FMath::RandRange(0, WaveSpawners.Num() - 1);
-
-    for (int32 Attempt = 0;
-         Attempt < WaveSpawners.Num();
-         ++Attempt)
+    const int32 FirstSpawnerIndex = FMath::RandRange(0, WaveSpawners.Num() - 1);
+    for (int32 Attempt = 0; Attempt < WaveSpawners.Num(); ++Attempt)
     {
-        const int32 SpawnerIndex =
-            (FirstSpawnerIndex + Attempt) %
-            WaveSpawners.Num();
-
         ABaruControlRoomSpawner* Spawner =
-            WaveSpawners[SpawnerIndex];
-
-        if (!IsValid(Spawner) ||
-            !Spawner->IsSpawningEnabled())
+            WaveSpawners[(FirstSpawnerIndex + Attempt) % WaveSpawners.Num()];
+        if (!IsValid(Spawner) || !Spawner->IsSpawningEnabled())
         {
             continue;
         }
 
-        const int32 SpawnedCount =
-            Spawner->SpawnWave(
-                WaveSize,
-                TargetPlayer
-            );
+        int32 SpawnedCount = 0;
+        TArray<TWeakObjectPtr<ABaruMonsterCharacter>> NewWaveMonsters;
+        {
+            // 이 SpawnWave 호출 안에서 등록된 몬스터만 수집
+            NewWaveSpawnedMonsters.Reset();
+            TGuardValue<bool> SpawnGuard(bRegisteringWaveSpawn, true);
+            SpawnedCount = Spawner->SpawnWave(WaveSize, TargetPlayer);
+            NewWaveMonsters = MoveTemp(NewWaveSpawnedMonsters);
+        }
 
         if (SpawnedCount <= 0)
         {
             continue;
         }
 
-        // 한 마리 이상 실제로 생성된 경우에만
-        // 다음 웨이브를 막는 쿨타임 시작
-        LastWaveSpawnTime = CurrentTime;
+        LastWaveSpawnTime = Now;
+        const int32 RequestedBlockers = SpawnedCount / 2;
+        BARU_NET_LOG(this, LogBaruAI, Log,
+            TEXT("Director wave spawned: Target=%s, State=%d, Requested=%d, Spawned=%d, Captured=%d"),
+            *GetNameSafe(TargetPlayer), static_cast<int32>(CurrentDirectorState),
+            WaveSize, SpawnedCount, NewWaveMonsters.Num());
 
-        BARU_NET_LOG(
-            this,
-            LogBaruAI,
-            Log,
-            TEXT(
-                "Director wave spawned: "
-                "Target=%s, State=%d, Requested=%d, Spawned=%d"
-            ),
-            *GetNameSafe(TargetPlayer),
-            static_cast<int32>(CurrentDirectorState),
-            WaveSize,
-            SpawnedCount
-        );
+        if (NewWaveMonsters.Num() != SpawnedCount)
+        {
+            BARU_NET_LOG(this, LogBaruAI, Warning,
+                TEXT("New wave capture mismatch: Spawned=%d, Captured=%d"),
+                SpawnedCount, NewWaveMonsters.Num());
+        }
 
+        if (bUseDynamicEncirclement && IsEncirclementAllowed() && RequestedBlockers > 0)
+        {
+            const TWeakObjectPtr<APawn> TargetRef(TargetPlayer);
+            const EBaruDirectorState SpawnState = CurrentDirectorState;
+
+            // 생성 함수가 끝난 뒤 다음 틱에 한 번만 배정
+            GetWorldTimerManager().SetTimerForNextTick(
+                FTimerDelegate::CreateWeakLambda(this,
+                    [this, TargetRef, SpawnState, SpawnedCount, RequestedBlockers,
+                     NewWaveMonsters = MoveTemp(NewWaveMonsters)]()
+                    {
+                        if (!HasActorBegunPlay() || CurrentDirectorState != SpawnState ||
+                            !IsEncirclementAllowed() || !TargetRef.IsValid())
+                        {
+                            BARU_NET_LOG(this, LogBaruAI, Log,
+                                TEXT("New wave encirclement skipped: state or target changed"));
+                            return;
+                        }
+
+                        RefreshEncirclementAssignment();
+                        const int32 Before = DynamicAssignments.Num();
+                        TryAssignDynamicEncirclement(
+                            TargetRef.Get(), NewWaveMonsters, RequestedBlockers);
+
+                        BARU_NET_LOG(this, LogBaruAI, Log,
+                            TEXT("New wave encirclement: Spawned=%d, Captured=%d, Requested=%d, Assigned=%d"),
+                            SpawnedCount, NewWaveMonsters.Num(), RequestedBlockers,
+                            DynamicAssignments.Num() - Before);
+                    })
+            );
+        }
         return true;
     }
-
     return false;
 }
 
@@ -1336,6 +1351,18 @@ void ABaruMonsterDirector::UpdateMonsterAssignments()
     // 완화 상태에서는 기존 위협도 감소만 처리하고
     // 새로운 웨이브는 만들지 않음
     if (CurrentDirectorState == EBaruDirectorState::Relief)
+    {
+        return;
+    }
+
+    // StateTree가 전환되기 전이라도 취소된 탈출 저지는 즉시 중단
+    if (CurrentDirectorState == EBaruDirectorState::Extraction && !bExtractionActive)
+    {
+        return;
+    }
+
+    // 진행 중인 포위가 끝날 때까지 기존 웨이브 대기 규칙 유지
+    if (bUseDynamicEncirclement && bHasDynamicEncirclement)
     {
         return;
     }
@@ -1424,7 +1451,7 @@ void ABaruMonsterDirector::UpdateMonsterAssignments()
     
     // 직접 추적 몬스터는 유지하고
     // 다른 한 마리에게 우회·차단 명령 시도
-    if (TryAssignEncirclement(HighestThreatPlayer))
+    if (!bUseDynamicEncirclement && TryAssignEncirclement(HighestThreatPlayer))
     {
         // 포위와 웨이브가 동시에 시작되지 않도록
         // 이번 전술 배정을 공격 이벤트로 취급
@@ -1677,6 +1704,17 @@ bool ABaruMonsterDirector::TryAssignAmbush(
 void ABaruMonsterDirector::
     RefreshEncirclementAssignment()
 {
+    if (GetNetMode() == NM_Client)
+    {
+        return;
+    }
+
+    if (bHasDynamicEncirclement)
+    {
+        RefreshDynamicEncirclementAssignment();
+        return;
+    }
+
     ABaruMonsterCharacter* Blocker =
         CurrentEncirclementBlocker.Get();
 
@@ -1762,8 +1800,7 @@ void ABaruMonsterDirector::
     const bool bMatchesExtractionTarget =
         CurrentDirectorState !=
             EBaruDirectorState::Extraction ||
-        !ExtractionTargetPlayer.IsValid() ||
-        ExtractionTargetPlayer.Get() == TargetPlayer;
+        (bExtractionActive && ExtractionTargetPlayer.Get() == TargetPlayer);
 
     // 압박·탈출 저지 상태이며 나머지 조건도 유효해야 포위 유지
     const bool bCanContinue =
@@ -1798,6 +1835,12 @@ bool ABaruMonsterDirector::TryAssignEncirclement(
     APawn* TargetPlayer
 )
 {
+    if (bUseDynamicEncirclement)
+    {
+        // 동적 포위는 새 웨이브 생성 직후에만 배정
+        return false;
+    }
+
     // Pressure와 Extraction에서만 자동 포위 배정을 시도
     if (!IsEncirclementAllowed() ||
         GetNetMode() == NM_Client ||
@@ -2000,8 +2043,9 @@ bool ABaruMonsterDirector::TryAssignEncirclement(
         ABaruMonsterCharacter* Monster = Entry.Get();
 
         if (!IsValid(Monster) ||
-            Monster == PressureMonster ||
-            ICombatInterface::Execute_IsDead(Monster))
+        !WaveSpawnedMonsters.Contains(Entry) ||
+        Monster == PressureMonster ||
+        ICombatInterface::Execute_IsDead(Monster))
         {
             continue;
         }

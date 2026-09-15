@@ -91,11 +91,13 @@ void ABaruElevatorActor::EndPlay(
     const EEndPlayReason::Type EndPlayReason
 )
 {
-    // 엘리베이터가 제거되면 탈출 저지 상태도 종료
+    GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+    GetWorldTimerManager().ClearTimer(LockoutTimerHandle);
+
+    // 다른 엘리베이터가 보낸 요청은 해제하지 않음
     if (HasAuthority() && IsValid(CachedMonsterDirector))
     {
-        CachedMonsterDirector->SetExtractionActive(false);
-        CachedMonsterDirector->SetExtractionTarget(nullptr);
+        CachedMonsterDirector->ClearExtractionContext(this);
     }
 
     Super::EndPlay(EndPlayReason);
@@ -190,12 +192,25 @@ void ABaruElevatorActor::RefreshDirectorExtractionState()
         OutsidePlayer = FindLivingPlayerOutsideElevator();
     }
 
-    const bool bShouldBlockExtraction = IsValid(OutsidePlayer);
+    if (!IsValid(OutsidePlayer) ||
+        !IsValid(BoardingTriggerBox) ||
+        RemainingCountdown <= 0.0f)
+    {
+        CachedMonsterDirector->ClearExtractionContext(this);
+        return;
+    }
 
-    // 목표를 먼저 저장한 후 StateTree 전환 조건을 활성화
-    CachedMonsterDirector->SetExtractionTarget(OutsidePlayer);
-    CachedMonsterDirector->SetExtractionActive(
-        bShouldBlockExtraction
+    // 기존 탑승 박스의 바닥 중앙을 탈출 경로의 목적지로 사용
+    const FVector BoardingLocation =
+        BoardingTriggerBox->GetComponentTransform().TransformPosition(
+            FVector(0.0f, 0.0f, -BoardingTriggerBox->GetUnscaledBoxExtent().Z)
+        );
+
+    CachedMonsterDirector->UpdateExtractionContext(
+        this,
+        OutsidePlayer,
+        BoardingLocation,
+        RemainingCountdown
     );
 }
 
@@ -452,13 +467,14 @@ void ABaruElevatorActor::StartCountdown()
     if (bIsCountingDown || bIsDeparted) return;
 
     bIsCountingDown = true;
-    
-    RefreshDirectorExtractionState();
 
     AGameModeBase* AuthGM = GetWorld()->GetAuthGameMode();
     const bool bIsLobby = (Cast<ABaruLobbyGameMode>(AuthGM) != nullptr);
 
     RemainingCountdown = bIsLobby ? CountdownDuration : IngameCountdownDuration;
+
+    // 남은 시간을 초기화한 뒤 디렉터에 전달
+    RefreshDirectorExtractionState();
     OnRep_IsCountingDown();
 
     if (!CachedGameState)
@@ -509,6 +525,9 @@ void ABaruElevatorActor::CancelCountdown()
 void ABaruElevatorActor::UpdateCountdownTick()
 {
     RemainingCountdown -= 1.0f;
+
+    // 외부 플레이어 사망·접속 종료와 남은 시간을 매초 반영
+    RefreshDirectorExtractionState();
 
     if (RemainingCountdown > 0.0f)
     {
