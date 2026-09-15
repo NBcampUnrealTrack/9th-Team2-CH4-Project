@@ -50,6 +50,26 @@ public:
     )
     bool bCanAmbush = false;
     
+    // 매복 위치에서 기다리다가 목표가 이 거리 안으로 들어오면 기습 시작
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Ambush",
+        meta = (ClampMin = "0.0", Units = "cm")
+    )
+    float AmbushTriggerDistance = 400.0f;
+
+    // 목표가 접근하지 않을 때 매복을 유지할 최대 시간
+    //
+    // 시간이 지나면 매복을 취소하고 기존 AI 판단으로 복귀
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Ambush",
+        meta = (ClampMin = "0.1", Units = "s")
+    )
+    float AmbushMaximumWaitDuration = 15.0f;
+    
     // =========================================================================
     // Perception
     // =========================================================================
@@ -297,6 +317,28 @@ public:
         meta = (ClampMin = "0.0")
     )
     float CurrentTargetThreatBonus = 15.0f;
+    
+    // 전투 중 시야 판정이 잠깐 끊겨도
+    // 벽으로 가려지지 않았다면 현재 대상을 계속 추적할 거리
+    //
+    // 이 거리 밖으로 벗어나면 일반적인 마지막 목격 위치 수색으로 전환
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Combat Target Retention",
+        meta = (ClampMin = "0.0", Units = "cm")
+    )
+    float CombatTargetRetentionDistance = 800.0f;
+
+    // 전투 대상과 몬스터 사이에 실제 벽이 생겼는지
+    // 다시 확인하는 시간 간격
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Monster|AI|Combat Target Retention",
+        meta = (ClampMin = "0.05", Units = "s")
+    )
+    float CombatTargetRetentionCheckInterval = 0.25f;
 	
 };
 

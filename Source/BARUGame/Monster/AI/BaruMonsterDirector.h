@@ -71,6 +71,20 @@ public:
 		ABaruMonsterCharacter* Monster,
 		const FVector& TargetLocation
 	);
+	
+	// 등록된 몬스터 한 마리에게 특정 플레이어 매복 명령 전달
+	//
+	// 디렉터는 매복 대상만 지정하고,
+	// 실제 은폐 위치 탐색과 이동은 개별 AI가 처리
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|Director"
+	)
+	bool RequestAmbush(
+		ABaruMonsterCharacter* Monster,
+		APawn* TargetPlayer
+	);
 
 	// 등록된 몬스터 한 마리에게 대기 명령 전달
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Monster|Director")
@@ -328,6 +342,72 @@ protected:
 		meta = (ClampMin = "1")
 	)
 	int32 ExtractionWaveSize = 5;
+	
+	// =========================================================================
+	// 디렉터 매복 설정
+	// =========================================================================
+
+	/**
+	 * 평상시 매복 명령을 시도할 확률
+	 *
+	 * 0.15는 15%, 1.0은 100%를 의미합니다.
+	 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Ambush",
+		meta = (ClampMin = "0.0", ClampMax = "1.0")
+	)
+	float NormalAmbushChance = 0.15f;
+
+	/**
+	 * 압박 상태에서 매복 명령을 시도할 확률
+	 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Ambush",
+		meta = (ClampMin = "0.0", ClampMax = "1.0")
+	)
+	float PressureAmbushChance = 0.35f;
+
+	/**
+	 * 매복 판단을 다시 시도하기까지 기다리는 시간
+	 *
+	 * 배정 성공 여부와 관계없이 적용하여
+	 * 매복 가능한 몬스터가 없을 때도 매 프레임 검사하지 않습니다.
+	 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Ambush",
+		meta = (ClampMin = "1.0", Units = "s")
+	)
+	float AmbushDecisionCooldown = 20.0f;
+
+	/**
+	 * 하나의 디렉터가 동시에 운용할 최대 매복 몬스터 수
+	 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Ambush",
+		meta = (ClampMin = "0")
+	)
+	int32 MaxConcurrentAmbushers = 1;
+
+	/**
+	 * 몬스터와 목표 플레이어 사이의 최소 매복 시작 거리
+	 *
+	 * 너무 가까운 몬스터는 숨으러 가지 않고 기존 전투를 유지합니다.
+	 */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category = "Monster|Director|Ambush",
+		meta = (ClampMin = "0.0", Units = "cm")
+	)
+	float MinimumAmbushDistance = 800.0f;
 
 private:
 	// 지휘 대상의 수명을 유지하지 않도록 약한 참조로 보관
@@ -448,5 +528,13 @@ private:
 	*/
 	UPROPERTY(Transient)
 	TWeakObjectPtr<APawn> ExtractionTargetPlayer;
+	
+	// 목표 플레이어를 매복할 수 있는 몬스터를 찾아 명령 전달
+	// 현재는 자동 갱신에 연결하지 않고 준비만 함
+	bool TryAssignAmbush(APawn* TargetPlayer);
+
+	// 마지막으로 매복 배정을 판단한 서버 시간
+	// -1이면 아직 한 번도 판단하지 않은 상태
+	double LastAmbushDecisionTime = -1.0;
 	
 };

@@ -23,6 +23,9 @@ enum class EBaruMonsterDirectorCommand : uint8
 
 	// 지정 위치로 이동해서 조사
 	Investigate UMETA(DisplayName = "이동 및 조사"),
+	
+	// 지정 플레이어를 대상으로 은폐 위치를 찾아 매복
+	Ambush UMETA(DisplayName = "매복"),
 
 	// 현재 자리에서 대기
 	Hold UMETA(DisplayName = "현재 위치 대기")
@@ -48,6 +51,15 @@ public:
 	// 마지막으로 목격한 플레이어의 위치를 반환
 	UFUNCTION(BlueprintPure, Category = "Monster|AI")
 	FVector GetLastKnownTargetLocation() const;
+	
+	// 마지막 목격 위치 주변 수색이 끝났을 때 호출
+	// 저장된 위치와 관련 타이머 및 Blackboard 값을 정리
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|AI|Perception"
+	)
+	void CompleteLastKnownTargetSearch();
 
 protected:
 	
@@ -130,11 +142,55 @@ private:
 	// 기억시간이 끝났을 때 마지막 목격 정보를 제거할 타이머
 	FTimerHandle SightMemoryTimerHandle;
 	
-	//=============
-	//이동관련
-	//=============
-		
-	
+	// =========================================================================
+	// 근접 전투 대상 유지
+	// =========================================================================
+
+	// DataAsset에서 읽은 전투 대상 유지 거리
+	// 이 거리 안이고 건물 벽이 없다면 시야가 잠시 끊겨도 추적 유지
+	float CombatTargetRetentionDistance = 0.0f;
+
+	// 전투 대상과의 거리 및 벽을 다시 확인하는 간격
+	float CombatTargetRetentionCheckInterval = 0.25f;
+
+	// 시야 손실 판정을 보류하고 있는 플레이어
+	UPROPERTY(Transient)
+	TWeakObjectPtr<APawn> PendingLostCombatTarget;
+
+	// 실제로 마지막까지 확인할 수 있었던 플레이어 위치
+	UPROPERTY(Transient)
+	FVector PendingLostCombatTargetLocation =
+		FVector::ZeroVector;
+
+	// 보류 중인 전투 대상 상태를 다시 검사하는 타이머
+	FTimerHandle CombatTargetRetentionTimerHandle;
+
+	// 가까운 전투 대상을 계속 유지할 수 있는지 검사
+	// 거리 안에 있고 WorldStatic 벽이 없을 때 true
+	bool CanRetainCombatTarget(
+		APawn* TargetPawn
+	) const;
+
+	// 시야 손실을 바로 확정하지 않고 전투 대상 유지 검사 시작
+	void BeginCombatTargetRetention(
+		APawn* TargetPawn,
+		const FVector& LastVisibleLocation
+	);
+
+	// 일정 간격마다 거리와 벽 상태를 다시 검사
+	void ReevaluateCombatTargetRetention();
+
+	// 시야 손실을 최종 확정하고 마지막 위치 수색으로 전환
+	void ConfirmPlayerLost(
+		APawn* LostPlayer,
+		const FVector& LastVisibleLocation
+	);
+
+	// 플레이어를 다시 발견하거나 AI가 종료될 때
+	// 전투 대상 유지 검사와 임시 정보를 정리
+	void CancelCombatTargetRetention(
+		APawn* TargetPawn = nullptr
+	);
 	
 	//=============
 	//BT관련
@@ -183,6 +239,15 @@ public:
 	//----------------
 	// 디렉터 명령
 	//----------------
+	
+	// 지정 플레이어를 대상으로 매복 준비 명령을 받음
+	// 실제 은폐 위치 탐색과 이동은 이후 Behavior Tree에서 처리
+	UFUNCTION(
+		BlueprintCallable,
+		BlueprintAuthorityOnly,
+		Category = "Monster|AI|Director"
+	)
+	bool ReceiveDirectorAmbushCommand(APawn* TargetPlayer);
 
 	// 지정 위치로 이동·조사하도록 명령
 	// 서버에서 명령을 접수하면 true 반환
@@ -230,6 +295,13 @@ private:
 	// 명령 종류로 유효 여부를 구분하므로 원점도 목적지로 사용 가능
 	UPROPERTY(Transient)
 	FVector DirectorTargetLocation = FVector::ZeroVector;
+	
+	// 매복이 끝날 때까지 기억할 목표 플레이어
+	//
+	// CurrentTarget은 시야가 끊기면 제거되지만,
+	// 매복 목표는 벽 뒤로 이동한 뒤에도 유지되어야 함
+	UPROPERTY(Transient)
+	TWeakObjectPtr<APawn> AmbushTarget;
 
 	// 현재 명령을 Behavior Tree의 Blackboard에 반영
 	void UpdateBlackboardFromDirectorState();

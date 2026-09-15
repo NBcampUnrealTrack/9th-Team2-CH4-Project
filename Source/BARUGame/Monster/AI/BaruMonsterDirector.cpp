@@ -4,6 +4,7 @@
 #include "Monster/AI/BaruMonsterDirector.h"
 
 #include "Monster/Characters/BaruMonsterCharacter.h"
+#include "Monster/Data/BaruMonsterDataAsset.h"
 #include "Monster/AI/BaruMonsterAIController.h"
 #include "Interfaces/CombatInterface.h"
 #include "GameFramework/Pawn.h"
@@ -224,6 +225,53 @@ bool ABaruMonsterDirector::RequestInvestigation(
     return MonsterController->ReceiveDirectorInvestigateCommand(
         TargetLocation
     );
+}
+
+bool ABaruMonsterDirector::RequestAmbush(
+    ABaruMonsterCharacter* Monster,
+    APawn* TargetPlayer
+)
+{
+    // 서버에서만 명령하며 유효한 플레이어만 대상으로 사용
+    if (GetNetMode() == NM_Client ||
+        !IsValid(TargetPlayer) ||
+        !TargetPlayer->IsPlayerControlled())
+    {
+        return false;
+    }
+
+    // 등록 여부, 몬스터 생존 상태와 Controller를 공통 검사
+    ABaruMonsterAIController* MonsterController =
+        FindCommandController(Monster);
+
+    if (!MonsterController)
+    {
+        return false;
+    }
+
+    // 개별 AI가 자신의 DataAsset에서 매복 가능 여부를
+    // 다시 확인한 뒤 명령 접수 성공 여부를 반환
+    const bool bAccepted =
+        MonsterController->ReceiveDirectorAmbushCommand(
+            TargetPlayer
+        );
+
+    if (bAccepted)
+    {
+        BARU_NET_LOG(
+            this,
+            LogBaruAI,
+            Log,
+            TEXT(
+                "Director assigned ambush: "
+                "Monster=%s, Target=%s"
+            ),
+            *GetNameSafe(Monster),
+            *GetNameSafe(TargetPlayer)
+        );
+    }
+
+    return bAccepted;
 }
 
 bool ABaruMonsterDirector::RequestHold(
@@ -1230,8 +1278,224 @@ void ABaruMonsterDirector::UpdateMonsterAssignments()
         return;
     }
 
-    // 기존 배치 몬스터를 불러오지 않고
-    // 지정된 스포너에서 새로운 웨이브를 생성
+    /*
+  * 평상시 또는 압박 상태에서는 웨이브를 생성하기 전에
+  * 기존 등록 몬스터 중 매복 가능한 개체가 있는지 확인
+  *
+  * 완화 상태는 위에서 이미 반환되고,
+  * 탈출 저지 상태에서는 TryAssignAmbush가 false를 반환하므로
+  * 기존 탈출 웨이브가 그대로 실행됨
+  */
+    if (TryAssignAmbush(HighestThreatPlayer))
+    {
+        /*
+         * 매복과 새로운 웨이브가 짧은 간격으로 연속 발생하면
+         * 플레이어가 한꺼번에 과도한 압박을 받을 수 있음
+         *
+         * 성공한 매복을 이번 디렉터의 공격 이벤트로 간주하여
+         * 기존 웨이브 쿨타임도 함께 시작
+         */
+        if (UWorld* World = GetWorld())
+        {
+            LastWaveSpawnTime = World->GetTimeSeconds();
+        }
+
+        BARU_NET_LOG(
+            this,
+            LogBaruAI,
+            Log,
+            TEXT(
+                "Director selected ambush instead of wave: "
+                "Target=%s"
+            ),
+            *GetNameSafe(HighestThreatPlayer)
+        );
+
+        return;
+    }
+
+    // 매복을 선택하지 않았거나 적합한 몬스터가 없다면
+    // 지정된 스포너에서 기존 방식대로 새로운 웨이브 생성
     TrySpawnDirectorWave(HighestThreatPlayer);
+}
+
+bool ABaruMonsterDirector::TryAssignAmbush(
+    APawn* TargetPlayer
+)
+{
+    // 매복 판단은 서버에서만 수행
+    if (GetNetMode() == NM_Client ||
+        !IsValid(TargetPlayer) ||
+        !TargetPlayer->IsPlayerControlled())
+    {
+        return false;
+    }
+
+    // 완화 상태에서는 팀이 회복할 시간을 주고,
+    // 탈출 저지 상태에서는 숨지 않고 직접 돌진
+    if (CurrentDirectorState == EBaruDirectorState::Relief ||
+        CurrentDirectorState == EBaruDirectorState::Extraction)
+    {
+        return false;
+    }
+
+    if (MaxConcurrentAmbushers <= 0)
+    {
+        return false;
+    }
+
+    UWorld* World = GetWorld();
+
+    if (!World)
+    {
+        return false;
+    }
+
+    const double CurrentTime = World->GetTimeSeconds();
+
+    // 이전 판단 이후 쿨타임이 지나지 않았다면 재시도하지 않음
+    if (LastAmbushDecisionTime >= 0.0 &&
+        CurrentTime - LastAmbushDecisionTime <
+            AmbushDecisionCooldown)
+    {
+        return false;
+    }
+
+    // 후보가 없거나 확률에 실패하더라도
+    // 매 타이머마다 반복 검사하지 않도록 판단 시간을 기록
+    LastAmbushDecisionTime = CurrentTime;
+
+    const float AmbushChance =
+        CurrentDirectorState == EBaruDirectorState::Pressure
+            ? PressureAmbushChance
+            : NormalAmbushChance;
+
+    // 현재 상태에 설정된 매복 확률 검사
+    if (FMath::FRand() >
+        FMath::Clamp(AmbushChance, 0.0f, 1.0f))
+    {
+        return false;
+    }
+
+    RemoveInvalidMonsters();
+
+    int32 ActiveAmbusherCount = 0;
+
+    // 이미 매복 명령을 수행 중인 몬스터 수 확인
+    for (const TWeakObjectPtr<ABaruMonsterCharacter>& Entry :
+         RegisteredMonsters)
+    {
+        ABaruMonsterCharacter* Monster = Entry.Get();
+
+        if (!IsValid(Monster))
+        {
+            continue;
+        }
+
+        const ABaruMonsterAIController* MonsterController =
+            Cast<ABaruMonsterAIController>(
+                Monster->GetController()
+            );
+
+        if (IsValid(MonsterController) &&
+            MonsterController->GetDirectorCommand() ==
+                EBaruMonsterDirectorCommand::Ambush)
+        {
+            ++ActiveAmbusherCount;
+        }
+    }
+
+    if (ActiveAmbusherCount >= MaxConcurrentAmbushers)
+    {
+        return false;
+    }
+
+    ABaruMonsterCharacter* BestCandidate = nullptr;
+    double BestDistanceSquared =
+        TNumericLimits<double>::Max();
+
+    const double MinimumDistanceSquared =
+        FMath::Square(
+            static_cast<double>(
+                FMath::Max(0.0f, MinimumAmbushDistance)
+            )
+        );
+
+    // 매복 가능한 몬스터 중 목표와 가장 가까운 후보 선택
+    for (const TWeakObjectPtr<ABaruMonsterCharacter>& Entry :
+         RegisteredMonsters)
+    {
+        ABaruMonsterCharacter* Monster = Entry.Get();
+
+        if (!IsValid(Monster) ||
+            ICombatInterface::Execute_IsDead(Monster))
+        {
+            continue;
+        }
+
+        const UBaruMonsterDataAsset* MonsterData =
+            Monster->GetMonsterDataAsset();
+
+        if (!IsValid(MonsterData) ||
+            !MonsterData->bCanAmbush)
+        {
+            continue;
+        }
+
+        ABaruMonsterAIController* MonsterController =
+            Cast<ABaruMonsterAIController>(
+                Monster->GetController()
+            );
+
+        if (!IsValid(MonsterController) ||
+            !MonsterController->HasAuthority())
+        {
+            continue;
+        }
+
+        // 다른 디렉터 명령을 수행 중인 몬스터는 방해하지 않음
+        if (MonsterController->GetDirectorCommand() !=
+            EBaruMonsterDirectorCommand::None)
+        {
+            continue;
+        }
+
+        // 현재 플레이어를 추적하거나 마지막 위치를
+        // 조사 중인 몬스터는 전투에서 빼내지 않음
+        if (IsValid(MonsterController->GetCurrentTarget()) ||
+            MonsterController->HasLastKnownTargetLocation())
+        {
+            continue;
+        }
+
+        const double DistanceSquared =
+            FVector::DistSquared(
+                Monster->GetActorLocation(),
+                TargetPlayer->GetActorLocation()
+            );
+
+        // 너무 가까운 몬스터가 부자연스럽게 도망쳐
+        // 숨는 행동을 하지 않도록 제외
+        if (DistanceSquared < MinimumDistanceSquared)
+        {
+            continue;
+        }
+
+        if (DistanceSquared < BestDistanceSquared)
+        {
+            BestDistanceSquared = DistanceSquared;
+            BestCandidate = Monster;
+        }
+    }
+
+    if (!IsValid(BestCandidate))
+    {
+        return false;
+    }
+
+    return RequestAmbush(
+        BestCandidate,
+        TargetPlayer
+    );
 }
 
