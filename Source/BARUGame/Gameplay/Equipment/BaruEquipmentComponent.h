@@ -172,10 +172,8 @@ public:
 		EBaruEquipmentSlot WeaponSlot,
 		FIntPoint TargetCell);
 	
-	//장착 무기 떨어뜨리기(Grid에 반환하지 않고 정리하는 서버 함수)
-	// Inventory의 서버 월드 드롭에서만 호출.
-	// 보유 슬롯/아이템은 Inventory가 제거하고, 이 함수는 장착 외형과 참조만 정리.
 	bool ReleaseWeaponForWorldDropOnServer(UBaruItemInstance* SourceItem);
+	void SetWeaponTemporarilyHolsteredOnServer(bool bHolster);
 
 protected:
 	UFUNCTION(Server, Reliable)
@@ -191,6 +189,7 @@ protected:
 
 		// 비활성 무기: DataAsset에 지정된 등/허리 소켓에 부착
 	void AttachWeaponToHolster(ABaruWeaponBase* Weapon);
+	EBaruEquipmentSlot SlotBeforeTemporaryHolster = EBaruEquipmentSlot::None;
 
 	TSubclassOf<UGameplayAbility> GetActiveWeaponFireAbilityClass() const;
 	

@@ -749,6 +749,44 @@ void UBaruEquipmentComponent::SetActiveWeaponSlotOnServer(
     OnEquipmentUpdated.Broadcast();
 }
 
+// ★[추가 09.15] 앉기 등으로 손에 든 무기를 잠깐 넣기/다시 꺼내기 (서버 전용)
+void UBaruEquipmentComponent::SetWeaponTemporarilyHolsteredOnServer(bool bHolster)
+{
+    if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority())
+    {
+        return;
+    }
+
+    if (bHolster)
+    {
+        ABaruWeaponBase* ActiveWeapon = GetActiveWeapon();
+        if (!IsValid(ActiveWeapon))
+        {
+            return;   // 맨손이면 할 게 없음
+        }
+
+        SlotBeforeTemporaryHolster = ActiveWeaponSlot;
+        AttachWeaponToHolster(ActiveWeapon);
+        ActiveWeaponSlot = EBaruEquipmentSlot::None;
+
+        // 손에 든 무기가 없어졌으니 발사·재장전 GA 도 해제 (맨손이면 Sync 가 알아서 정리)
+        SyncActiveWeaponFireAbilityOnServer();
+
+        GetOwner()->ForceNetUpdate();
+        OnEquipmentUpdated.Broadcast();
+        return;
+    }
+
+    // 다시 꺼내기: 넣기 전에 들고 있던 슬롯으로 복귀
+    const EBaruEquipmentSlot RestoreSlot = SlotBeforeTemporaryHolster;
+    SlotBeforeTemporaryHolster = EBaruEquipmentSlot::None;
+
+    if (RestoreSlot != EBaruEquipmentSlot::None && ActiveWeaponSlot == EBaruEquipmentSlot::None)
+    {
+        SetActiveWeaponSlotOnServer(RestoreSlot);   // 손에 붙이기 + GA 부여 + 복제까지 기존 함수가 처리
+    }
+}
+
     //무기를 손에 붙이기.
 // ★[추가 09.14] 슬롯별 소켓이 지정돼 있으면 그걸, 아니면 기본 소켓(ThirdPersonWeaponAttachPoint)
 FName UBaruEquipmentComponent::GetHandAttachPointForSlot(EBaruEquipmentSlot WeaponSlot) const
