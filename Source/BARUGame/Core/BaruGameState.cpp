@@ -156,3 +156,15 @@ void ABaruGameState::OnRep_TeamMonsterKillCount()
 {
     OnTeamMonsterKillCountChanged.Broadcast(TeamMonsterKillCount);
 }
+
+void ABaruGameState::AddPlayerState(APlayerState* PlayerState)
+{
+    Super::AddPlayerState(PlayerState);
+    OnPlayerArrayUpdated.Broadcast();
+}
+
+void ABaruGameState::RemovePlayerState(APlayerState* PlayerState)
+{
+    Super::RemovePlayerState(PlayerState);
+    OnPlayerArrayUpdated.Broadcast();
+}

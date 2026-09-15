@@ -1016,11 +1016,13 @@ void ABaruCharacter::ReviveFromDBNO(float HealthRatio)
    if (UWorld* World = GetWorld())
    {
       World->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+      World->GetTimerManager().ClearTimer(DBNOImmunityTimerHandle);
    }
 
    if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
    {
       ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+      ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
 
       const float MaxHP = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
       ASC->SetNumericAttributeBase(
