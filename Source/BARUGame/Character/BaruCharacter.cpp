@@ -1021,13 +1021,21 @@ void ABaruCharacter::ReviveFromDBNO(float HealthRatio)
 
    if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
    {
-      ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
-      ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+      while (ASC->HasMatchingGameplayTag(FBaruGameplayTags::Get().State_DBNO))
+      {
+         ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+      }
+      while (ASC->HasMatchingGameplayTag(FBaruGameplayTags::Get().State_Immune))
+      {
+         ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+      }
 
       const float MaxHP = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
       ASC->SetNumericAttributeBase(
          UBaruCoreAttributeSet::GetHealthAttribute(),
          FMath::Max(1.0f, MaxHP * FMath::Clamp(HealthRatio, 0.01f, 1.0f)));
+      
+      ASC->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetTensionAttribute(), 0.0f);
    }
 
    LastKiller = nullptr;
@@ -1038,8 +1046,10 @@ void ABaruCharacter::ReviveFromDBNO(float HealthRatio)
    {
       StartVoiceChat();
    }
+   
+   StartHealthRegenDelay();
 
-   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s revived."), *GetName());
+   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s revived. Health regen scheduled."), *GetName());
 }
 
 // [추가] 블리드아웃 만료 → 완전 사망
