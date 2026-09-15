@@ -14,5 +14,5 @@ void UBaruItemInstance::GetLifetimeReplicatedProps(
 		// 인벤토리 아이템 인스턴스의 실제 값을 네트워크로 복제할 변수를 등록.
 	DOREPLIFETIME(UBaruItemInstance, ItemID);
 	DOREPLIFETIME(UBaruItemInstance, Quantity);
-	
+	DOREPLIFETIME(UBaruItemInstance, LoadedAmmo);
 }

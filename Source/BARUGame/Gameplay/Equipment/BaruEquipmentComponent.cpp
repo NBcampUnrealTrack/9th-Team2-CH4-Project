@@ -60,11 +60,30 @@ void UBaruEquipmentComponent::EndPlay(
 
     if (OwnerActor && OwnerActor->HasAuthority())
     {
-        // PlayerState를 다시 찾지 않고 저장된 ASC로 GA부터 정리.
         ClearActiveWeaponFireAbilityOnServer();
 
-        UnequipWeapon(EBaruEquipmentSlot::PrimaryWeapon);
-        UnequipWeapon(EBaruEquipmentSlot::SecondaryWeapon);
+        /// [핵심 수정] 레벨 전환(심리스 이동)일 때는 인벤토리 격자로 무기를 환원하지 않음
+        if (EndPlayReason != EEndPlayReason::LevelTransition)
+        {
+            UnequipWeapon(EBaruEquipmentSlot::PrimaryWeapon);
+            UnequipWeapon(EBaruEquipmentSlot::SecondaryWeapon);
+        }
+        else
+        {
+            // 액터가 파괴되기 전에 현재 쏘고 남은 탄약을 인스턴스에 백업
+            if (IsValid(PrimaryWeapon) && IsValid(PrimaryWeaponItem))
+            {
+                PrimaryWeaponItem->LoadedAmmo = PrimaryWeapon->GetCurrentAmmo();
+            }
+            if (IsValid(SecondaryWeapon) && IsValid(SecondaryWeaponItem))
+            {
+                SecondaryWeaponItem->LoadedAmmo = SecondaryWeapon->GetCurrentAmmo();
+            }
+
+            // 액터 소멸
+            if (IsValid(PrimaryWeapon)) PrimaryWeapon->Destroy();
+            if (IsValid(SecondaryWeapon)) SecondaryWeapon->Destroy();
+        }
     }
 
     Super::EndPlay(EndPlayReason);
@@ -228,6 +247,15 @@ bool UBaruEquipmentComponent::EquipWeapon(
         // 무기별 수치의 기준을 DataAsset 한 곳으로 유지하기 위함.
     NewWeapon->InitializeFromData(WeaponData);
     
+    if (SourceItem->LoadedAmmo >= 0)
+    {
+        NewWeapon->CurrentAmmo = SourceItem->LoadedAmmo;
+    }
+    else
+    {
+        SourceItem->LoadedAmmo = NewWeapon->CurrentAmmo;
+    }
+    
     // 새 무기 액터 생성까지 성공한 뒤 격자를 비움.
     if (!InventoryComponent->SetItemEquipped(
             SourceItem,
@@ -282,6 +310,12 @@ bool UBaruEquipmentComponent::EquipWeapon(
         // 교체되는 슬롯이 현재 손에 든 슬롯이었는지 기억
     const bool bReplacingActiveSlot =
         ActiveWeaponSlot == TargetSlot;
+    
+    // 기존 무기 액터를 파괴하기 직전 잔여 탄약을 원래 아이템 인스턴스에 백업
+    if (IsValid(PreviousWeaponInSlot) && IsValid(EquippedItem))
+    {
+        EquippedItem->LoadedAmmo = PreviousWeaponInSlot->GetCurrentAmmo();
+    }
     
     // 새 무기 생성에 성공했으므로 기존 같은 슬롯 무기를 제거
     if (IsValid(PreviousWeaponInSlot))
@@ -420,6 +454,11 @@ bool UBaruEquipmentComponent::UnequipWeaponInternal( EBaruEquipmentSlot WeaponSl
     {
         if (IsValid(PrimaryWeapon))
         {
+            // [추가] 파괴 전 잔여 탄약 백업
+            if (IsValid(PrimaryWeaponItem))
+            {
+                PrimaryWeaponItem->LoadedAmmo = PrimaryWeapon->GetCurrentAmmo();
+            }
             PrimaryWeapon->Destroy();
         }
 
@@ -429,10 +468,12 @@ bool UBaruEquipmentComponent::UnequipWeaponInternal( EBaruEquipmentSlot WeaponSl
     }
     else
     {
-        if (IsValid(SecondaryWeapon))
+        // [추가] 파괴 전 잔여 탄약 백업
+        if (IsValid(SecondaryWeaponItem))
         {
-            SecondaryWeapon->Destroy();
+            SecondaryWeaponItem->LoadedAmmo = SecondaryWeapon->GetCurrentAmmo();
         }
+        SecondaryWeapon->Destroy();
 
         SecondaryWeapon = nullptr;
         SecondaryWeaponItem = nullptr;
@@ -1162,4 +1203,78 @@ void UBaruEquipmentComponent::RequestReloadActiveWeapon()
     {
         ASC->AbilityInputTagPressed(FBaruGameplayTags::Get().InputTag_Reload);
     }
+}
+
+bool UBaruEquipmentComponent::RestoreEquippedWeapon(UBaruItemInstance* SourceItem)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !IsValid(SourceItem)) return false;
+
+    UBaruInventoryComponent* InvenComp = GetOwnerInventoryComponent();
+    if (!InvenComp || !InvenComp->ItemDataTable) return false;
+
+    const FItemData* Data = InvenComp->ItemDataTable->FindRow<FItemData>(SourceItem->ItemID, TEXT("RestoreEquippedWeapon"), false);
+    if (!Data || Data->WeaponDataAsset.IsNull()) return false;
+
+    UBaruWeaponDataAsset* WeaponData = Data->WeaponDataAsset.LoadSynchronous();
+    if (!WeaponData) return false;
+
+    TSubclassOf<ABaruWeaponBase> WeaponClass = WeaponData->WeaponActorClass.LoadSynchronous();
+    if (!WeaponClass) return false;
+
+    ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (!OwnerCharacter || !OwnerCharacter->GetMesh()) return false;
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner = OwnerCharacter;
+    SpawnParams.Instigator = OwnerCharacter;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    ABaruWeaponBase* NewWeapon = GetWorld()->SpawnActor<ABaruWeaponBase>(WeaponClass, FTransform::Identity, SpawnParams);
+    if (!NewWeapon) return false;
+
+    NewWeapon->InitializeFromData(WeaponData);
+
+    if (SourceItem->LoadedAmmo >= 0)
+    {
+        NewWeapon->CurrentAmmo = SourceItem->LoadedAmmo;
+    }
+    else
+    {
+        SourceItem->LoadedAmmo = NewWeapon->CurrentAmmo;
+    }
+    
+    const EBaruEquipmentSlot TargetSlot = WeaponData->EquipmentSlot;
+    if (TargetSlot == EBaruEquipmentSlot::PrimaryWeapon)
+    {
+        PrimaryWeapon = NewWeapon;
+        PrimaryWeaponItem = SourceItem;
+        PrimaryFireAbilityClass = WeaponData->FireAbilityClass;
+        PrimaryReloadAbilityClass = WeaponData->ReloadAbilityClass;
+    }
+    else if (TargetSlot == EBaruEquipmentSlot::SecondaryWeapon)
+    {
+        SecondaryWeapon = NewWeapon;
+        SecondaryWeaponItem = SourceItem;
+        SecondaryFireAbilityClass = WeaponData->FireAbilityClass;
+        SecondaryReloadAbilityClass = WeaponData->ReloadAbilityClass;
+    }
+
+    NewWeapon->SetActorHiddenInGame(false);
+
+    if (ActiveWeaponSlot == TargetSlot || ActiveWeaponSlot == EBaruEquipmentSlot::None)
+    {
+        ActiveWeaponSlot = TargetSlot;
+        AttachWeaponToHand(NewWeapon);
+        SyncActiveWeaponFireAbilityOnServer();
+    }
+    else
+    {
+        AttachWeaponToHolster(NewWeapon);
+    }
+
+    GetOwner()->ForceNetUpdate();
+    OnEquipmentUpdated.Broadcast();
+
+    BARU_NET_LOG(GetOwner(), LogBaruItem, Log, TEXT("[LobbyItems] 무기 액터 복원 성공: %s (Slot=%d)"), *GetNameSafe(NewWeapon), static_cast<int32>(TargetSlot));
+    return true;
 }

@@ -51,16 +51,24 @@ bool UBaruGA_Reload::CanActivateAbility(
         return false;
     }
 
-    ABaruWeaponBase* ActiveWeapon = GetActiveWeaponFromActorInfo();
+    ABaruWeaponBase* ActiveWeapon = Cast<ABaruWeaponBase>(GetCurrentSourceObject());
+    if (!IsValid(ActiveWeapon))
+    {
+        ActiveWeapon = GetActiveWeaponFromActorInfo();
+    }
+    
     if (!IsValid(ActiveWeapon))
     {
         return false;
     }
 
     // 탄창이 이미 가득 차 있다면 장전 불가
-    if (ActiveWeapon->IsMagazineFull())
+    if (ActorInfo->IsNetAuthority())
     {
-        return false;
+        if (ActiveWeapon->IsMagazineFull())
+        {
+            return false;
+        }
     }
 
     return true;
@@ -109,10 +117,15 @@ void UBaruGA_Reload::ActivateAbility(
 
 void UBaruGA_Reload::OnReloadCompleted()
 {
-    // 서버 권한에서 탄창을 최대치(라이플: 30, 리볼버: 6)로 즉시 복구
-    if (HasAuthority(&CurrentActivationInfo)) // [수정]
+    if (HasAuthority(&CurrentActivationInfo))
     {
-        if (ABaruWeaponBase* ActiveWeapon = GetActiveWeaponFromActorInfo())
+        ABaruWeaponBase* ActiveWeapon = Cast<ABaruWeaponBase>(GetCurrentSourceObject());
+        if (!IsValid(ActiveWeapon))
+        {
+            ActiveWeapon = GetActiveWeaponFromActorInfo();
+        }
+
+        if (IsValid(ActiveWeapon))
         {
             ActiveWeapon->RestoreFullAmmo();
             BARU_NET_LOG(GetAvatarActorFromActorInfo(), LogBaruCombat, Log,
