@@ -41,8 +41,8 @@ void ABaruLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 {
     Super::PostLogin(NewPlayer);
 
-    // 신규 접속 시 공용 헬퍼 호출
-    InitializeLobbyPlayerState(NewPlayer);
+    // [신규 접속] bFromSeamlessTravel = false 전달
+    InitializeLobbyPlayerState(NewPlayer, false);
 }
 
 void ABaruLobbyGameMode::HandleSeamlessTravelPlayer(AController*& C)
@@ -51,7 +51,8 @@ void ABaruLobbyGameMode::HandleSeamlessTravelPlayer(AController*& C)
 
     if (APlayerController* PC = Cast<APlayerController>(C))
     {
-        InitializeLobbyPlayerState(PC);
+        // [심리스 복귀] bFromSeamlessTravel = true 전달
+        InitializeLobbyPlayerState(PC, true);
     }
 }
 
@@ -62,18 +63,49 @@ void ABaruLobbyGameMode::PostSeamlessTravel()
     OnPlayerReadyStatusChanged();
 }
 
-void ABaruLobbyGameMode::InitializeLobbyPlayerState(APlayerController* PC)
+void ABaruLobbyGameMode::InitializeLobbyPlayerState(APlayerController* PC, bool bFromSeamlessTravel)
 {
     if (!IsValid(PC)) return;
 
-    BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("Lobby Player Initialized: %s"), *PC->GetName());
+    BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("[LobbyItems] Lobby Player Initialized: %s (Seamless: %d)"), *PC->GetName(), bFromSeamlessTravel);
+
+    if (PC->IsInState(NAME_Spectating) || (PC->PlayerState && PC->PlayerState->IsOnlyASpectator()))
+    {
+        PC->PlayerState->SetIsOnlyASpectator(false);
+        PC->ChangeState(NAME_Playing);
+    }
 
     if (ABaruPlayerState* PS = PC->GetPlayerState<ABaruPlayerState>())
     {
-        PS->ResetPlayerStatusAndInventory();
+        if (!bFromSeamlessTravel)
+        {
+            // 신규 접속자: 가방/장비/스탯 전량 초기화
+            PS->ResetPlayerStatusAndInventory();
+            BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("[LobbyItems] 신규 접속 대원: 전체 초기화"));
+        }
+        else
+        {
+            if (PS->IsDead())
+            {
+                // 낙오/사망 대원: 가방/장비/스탯 초기화
+                PS->ResetPlayerStatusAndInventory();
+                BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("[LobbyItems] 낙오 사망 대원: 전체 초기화"));
+            }
+            else
+            {
+                // 생존 탈출 대원: 가방과 무기는 보존하고 상태/스탯만 회복
+                PS->ResetStatusOnly();
+                BARU_NET_LOG(PC, LogBaruSession, Log, TEXT("[LobbyItems] 생존 복귀 대원: 인벤토리 보존 및 스탯 회복"));
+            }
+        }
 
         PS->OnReadyStatusChanged.RemoveDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
         PS->OnReadyStatusChanged.AddDynamic(this, &ABaruLobbyGameMode::HandlePlayerReadyStatusChanged);
+    }
+
+    if (!PC->GetPawn())
+    {
+        RestartPlayer(PC);
     }
 
     if (!CachedLobbyGameState)

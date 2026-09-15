@@ -76,15 +76,15 @@ protected:
 
     /** 셔터가 위로 올라갈 최대 높이 (cm) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor|Movement", meta = (ClampMin = "50.0"))
-    float LiftHeight = 320.0f;
+    float LiftHeight = 640.0f;
 
     /** 2명이 누를 때 상승 속도 (cm/s, 기본 80이면 4초 동안 완개) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor|Movement", meta = (ClampMin = "10.0"))
-    float LiftSpeed = 80.0f;
+    float LiftSpeed = 120.0f;
 
     /** 아무도 안 누를 때 하강 속도 (cm/s) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "BARU|CoopDoor|Movement", meta = (ClampMin = "10.0"))
-    float LowerSpeed = 100.0f;
+    float LowerSpeed = 80.0f;
 
     UPROPERTY(ReplicatedUsing = OnRep_DoorState, BlueprintReadOnly, Category = "BARU|CoopDoor|State")
     EBaruCoopDoorState DoorState = EBaruCoopDoorState::Stopped;

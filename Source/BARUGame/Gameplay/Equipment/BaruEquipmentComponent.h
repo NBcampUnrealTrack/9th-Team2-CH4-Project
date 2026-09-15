@@ -214,4 +214,8 @@ public:
 	// 재장전 입력 요청 함수
 	UFUNCTION(BlueprintCallable, Category = "BARU|Equipment")
 	void RequestReloadActiveWeapon();
+	
+	// 심리스 이동 후 bEquipped 상태로 복사된 아이템의 3D 무기 액터를 재생성하여 장착 복구
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|Equipment")
+	bool RestoreEquippedWeapon(UBaruItemInstance* SourceItem);
 };

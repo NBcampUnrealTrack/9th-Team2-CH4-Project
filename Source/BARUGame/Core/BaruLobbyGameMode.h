@@ -52,7 +52,8 @@ protected:
     UFUNCTION()
     void HandlePlayerReadyStatusChanged(bool bIsReady);
     
-    void InitializeLobbyPlayerState(APlayerController* PC);
+    // bFromSeamlessTravel 매개변수를 추가하여 분기 처리
+    void InitializeLobbyPlayerState(APlayerController* PC, bool bFromSeamlessTravel = false);
     
 protected:
     UPROPERTY(Transient)
