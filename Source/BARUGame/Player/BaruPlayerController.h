@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "BaruPlayerController.generated.h"
 
 
@@ -45,6 +46,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSettlementReceived, const FBa
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBaruPlayCinematic);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBaruInteractionHoldStarted, AActor*, OtherActor, float, Duration, bool, bIsHolder);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBaruInteractionHoldEnded, AActor*, OtherActor, EBaruInteractionHoldEndReason, Reason, bool, bIsHolder);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruSpectatorTargetChanged, const FString&, SpectatedPlayerName);
+
 /**
  * 클라이언트 입력, 서버 RPC 라우팅 및 1회성 피드백 담당 처리
  */
@@ -64,6 +67,8 @@ public:
 	
 	UFUNCTION(Server, Reliable, WithValidation, Category = "BARU|Spectate")
 	void Server_CycleSpectatorTarget(bool bNext = true);
+	
+	void SetCurrentSpectatingPawn(APawn* InPawn) { CurrentSpectatingPawn = InPawn; }
 	
 	// Server RPC
 	// Todo : 아이템 관련 RPC의 경우 InventoryComponent 또는 EquipmentComponent로 처리 위임해야 함
@@ -110,8 +115,10 @@ public:
 	// [추가] 로비 복귀 시 클라이언트의 관전/대기 상태를 완전 해제하고 1인칭 조작/포커스를 복원하는 Client RPC
 	UFUNCTION(Client, Reliable, Category = "BARU|Feedback")
 	void Client_ResetLobbyInputAndState();
-
 	
+	UFUNCTION(Client, Reliable, Category = "BARU|Spectate")
+	void Client_NotifySpectatingTargetChanged(const FString& SpectatedPlayerName);
+
 public:
 	// UI 델리게이트
 	UPROPERTY(BlueprintAssignable, Category = "BARU|Events")
@@ -125,6 +132,9 @@ public:
 	
 	UPROPERTY(BlueprintAssignable, Category = "BARU|Events")
 	FOnBaruInteractionHoldEnded OnInteractionHoldEnded;
+	
+	UPROPERTY(BlueprintAssignable, Category = "BARU|Events")
+	FOnBaruSpectatorTargetChanged OnSpectatorTargetChanged;
 	
 protected:
 	virtual void BeginPlay() override;

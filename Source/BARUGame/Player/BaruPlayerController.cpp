@@ -418,6 +418,8 @@ void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNex
     if (Candidates.Num() == 0)
     {
         BARU_NET_LOG(this, LogBaruSession, Log, TEXT("CycleSpectatorTarget: no living teammates to spectate."));
+        // 생존 팀원이 없으면 빈 문자열 통지 (UI 숨김)
+        Client_NotifySpectatingTargetChanged(TEXT(""));
         return;
     }
 
@@ -441,6 +443,23 @@ void ABaruPlayerController::Server_CycleSpectatorTarget_Implementation(bool bNex
     {
         ClientSetViewTarget(NewTarget, FViewTargetTransitionParams());
     }
+    
+    // 관전 대상의 PlayerState에서 확정된 닉네임 추출 후 클라이언트에 통지
+    FString TargetName = TEXT("작전 대원");
+    if (IsValid(NewTarget))
+    {
+        if (const ABaruPlayerState* TargetPS = NewTarget->GetPlayerState<ABaruPlayerState>())
+        {
+            const FString BaseName = TargetPS->GetPlayerName().IsEmpty() 
+                ? FString::Printf(TEXT("대원 %d"), TargetPS->GetPlayerId()) 
+                : TargetPS->GetPlayerName();
+
+            TargetName = TargetPS->IsDBNO() 
+                ? FString::Printf(TEXT("%s (구조 대기)"), *BaseName) 
+                : BaseName;
+        }
+    }
+    Client_NotifySpectatingTargetChanged(TargetName);
 
     BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Spectating Target Changed to: %s"), *GetNameSafe(NewTarget));
 }
@@ -463,12 +482,13 @@ void ABaruPlayerController::GatherSpectatablePawns(TArray<APawn*>& OutPawns) con
             continue;
         }
 
-        if (!BaruPS->IsAlive())
+        if (BaruPS->IsDead())
         {
             continue;
         }
 
-        if (APawn* SpectatablePawn = BaruPS->GetPawn())
+        APawn* SpectatablePawn = BaruPS->GetPawn();
+        if (IsValid(SpectatablePawn) && !SpectatablePawn->IsPendingKillPending())
         {
             OutPawns.Add(SpectatablePawn);
         }
@@ -593,6 +613,9 @@ void ABaruPlayerController::Client_ResetLobbyInputAndState_Implementation()
     ResetIgnoreMoveInput();
     ResetIgnoreLookInput();
     CurrentSpectatingPawn.Reset();
+    
+    // 로비 복귀 시 켜져 있던 관전 UI 닫기
+    OnSpectatorTargetChanged.Broadcast(TEXT(""));
 
     // 2. 이전 맵에서 남은 UI 포인터 및 디바운스 타이머 초기화
     ActiveGameMenuWidget = nullptr;
@@ -613,4 +636,11 @@ void ABaruPlayerController::Client_ResetLobbyInputAndState_Implementation()
     }
 
     BARU_LOG(LogBaruUI, Log, TEXT("Client_ResetLobbyInputAndState: Spectator state cleared and Game Viewport focus restored."));
+}
+
+// 관전 대상 닉네임 수신 Client RPC 구현
+void ABaruPlayerController::Client_NotifySpectatingTargetChanged_Implementation(const FString& SpectatedPlayerName)
+{
+    BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Spectating Target Name Received: %s"), *SpectatedPlayerName);
+    OnSpectatorTargetChanged.Broadcast(SpectatedPlayerName);
 }
