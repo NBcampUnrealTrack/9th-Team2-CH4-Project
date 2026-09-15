@@ -1,8 +1,6 @@
 #include "Subsystems/BaruSessionSubsystem.h"
 #include "Subsystems/BaruSaveGameSubsystem.h"
 #include "Player/BaruPlayerState.h"
-#include "Gameplay/Inventory/BaruInventoryComponent.h"
-#include "Gameplay/Items/BaruItemInstance.h"
 #include "Core/BaruGameState.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -17,9 +15,9 @@
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "Online/OnlineSessionNames.h"
 #include "Kismet/GameplayStatics.h"
-#include "Misc/PackageName.h"
 #include "BaruLog.h"
 #include "Engine/GameInstance.h"
+#include "Async/Async.h"
 
 UBaruSessionSubsystem::UBaruSessionSubsystem()
     : CreateSessionCompleteDelegate(FOnCreateSessionCompleteDelegate::CreateUObject(this, &ThisClass::OnCreateSessionComplete))
@@ -39,10 +37,7 @@ void UBaruSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     
     if (GEngine)
     {
-       NetworkFailureDelegateHandle = GEngine->OnNetworkFailure().AddUObject(
-          this, 
-          &UBaruSessionSubsystem::HandleNetworkFailure
-       );
+       NetworkFailureDelegateHandle = GEngine->OnNetworkFailure().AddUObject(this, &UBaruSessionSubsystem::HandleNetworkFailure);
     }
 
     if (IOnlineSessionPtr SessionInterface = GetSessionInterface())
@@ -52,39 +47,9 @@ void UBaruSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     }
 }
 
-void UBaruSessionSubsystem::HandleNetworkFailure(
-    UWorld* World, 
-    UNetDriver* NetDriver, 
-    ENetworkFailure::Type FailureType, 
-    const FString& ErrorString)
+void UBaruSessionSubsystem::HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
 {
-    BARU_LOG(LogBaruSession, Warning, TEXT("Network Failure (%d): %s. Returning to MainMenuLevel."), 
-       static_cast<int32>(FailureType), *ErrorString);
-    
-    if (World)
-    {
-       if (APlayerController* LocalPC = World->GetFirstPlayerController())
-       {
-          if (ABaruPlayerState* PS = LocalPC->GetPlayerState<ABaruPlayerState>())
-          {
-             if (UGameInstance* GI = GetGameInstance())
-             {
-                if (UBaruSaveGameSubsystem* SaveSubsystem = GI->GetSubsystem<UBaruSaveGameSubsystem>())
-                {
-                   int32 SalvagedGold = 0;
-                   if (ABaruGameState* GS = World->GetGameState<ABaruGameState>())
-                   {
-                      SalvagedGold = FMath::RoundToInt(GS->GetTeamScrapValue() * 0.5f);
-                   }
-
-                   const FString PlayerName = PS->GetPlayerName().IsEmpty() ? TEXT("Operative") : PS->GetPlayerName();
-                   SaveSubsystem->RecordRaidResult(PlayerName, SalvagedGold, /*bSurvived=*/false);
-                   BARU_LOG(LogBaruSession, Log, TEXT("[EMERGENCY_SAVE] Salvaged %d Gold saved locally for %s"), SalvagedGold, *PlayerName);
-                }
-             }
-          }
-       }
-    }
+    BARU_LOG(LogBaruSession, Warning, TEXT("Network Failure (%d): %s. Returning to MainMenuLevel."), static_cast<int32>(FailureType), *ErrorString);
     
     DestroySession(false);
 
@@ -127,12 +92,6 @@ IOnlineSessionPtr UBaruSessionSubsystem::GetSessionInterface() const
         return nullptr;
     }
 
-    IOnlineIdentityPtr Identity = Subsystem->GetIdentityInterface();
-    if (!Identity.IsValid() || Identity->GetLoginStatus(0) != ELoginStatus::LoggedIn)
-    {
-        BARU_LOG(LogBaruSession, Warning, TEXT("GetSessionInterface: Local user 0 is not logged into Steam."));
-    }
-
     return Subsystem->GetSessionInterface();
 }
 
@@ -157,17 +116,14 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
     if (!SessionInterface.IsValid())
     {
        BARU_LOG(LogBaruSession, Warning, TEXT("CreateSession: OnlineSubsystem unavailable. Fallback to Local Listen Server."));
-        
        if (GetWorld() && GetWorld()->GetNetMode() != NM_ListenServer)
        {
           OpenLobbyLevelAsListenServer(StoredLobbyLevel);
        }
-
        OnCreateSessionCompleteEvent.Broadcast(true);
        return;
     }
 
-    // 이미 열린 세션이 있는 경우 정리 후 재생성 플래그 설정
     if (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
     {
        bCreateSessionAfterDestroy = true;
@@ -200,21 +156,23 @@ void UBaruSessionSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLA
     
     const FString MapAssetPath = StoredLobbyLevel.GetAssetName();
 
-    // BARU 게임 Room 식별을 위한 메타데이터 등록
-    LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_MATCH_KEY, BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    // 메타데이터 설정 (MATCH_KEY는 완전히 제거)
     LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_SERVER_NAME, ServerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
     LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_MAP_NAME, MapAssetPath, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
     LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_HOST_NAME, HostPlayerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	
+	// [추가] 방 생성 시 우리 프로젝트 고유 태그를 스팀 로비에 각인
+	LastSessionSettings->Set(BaruMatchmakingConstants::SETTING_PROJECT_ID, FString(UTF8_TO_TCHAR(BaruMatchmakingConstants::RAW_PROJECT_VALUE)), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
     FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
 
-    BARU_LOG(LogBaruSession, Log, TEXT("CreateSession: Creating Steam Lobby Session (Connections=%d, ServerName='%s')"), NumPublicConnections, *ServerName);
+    BARU_LOG(LogBaruSession, Log, TEXT("CreateSession: Creating Steam Lobby (Connections=%d, ServerName='%s')"), NumPublicConnections, *ServerName);
 
     if (!NetId.IsValid() || !NetId.GetUniqueNetId().IsValid() || !SessionInterface->CreateSession(*NetId.GetUniqueNetId(), NAME_GameSession, *LastSessionSettings))
     {
        SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(CreateSessionCompleteDelegateHandle);
-       BARU_LOG(LogBaruSession, Error, TEXT("CreateSession failed immediately on execution."));
+       BARU_LOG(LogBaruSession, Error, TEXT("CreateSession failed immediately."));
        OnCreateSessionCompleteEvent.Broadcast(false);
     }
 }
@@ -246,12 +204,9 @@ void UBaruSessionSubsystem::OnCreateSessionComplete(FName SessionName, bool bWas
         return;
     }
 
-    BARU_LOG(LogBaruSession, Log, TEXT("CreateSession complete. Advancing lifecycle to StartSession..."));
-
     StartSessionCompleteDelegateHandle = SessionInterface->AddOnStartSessionCompleteDelegate_Handle(StartSessionCompleteDelegate);
     if (!SessionInterface->StartSession(NAME_GameSession))
     {
-        BARU_LOG(LogBaruSession, Warning, TEXT("StartSession returned false immediately. Proceeding directly to map setup."));
         SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(StartSessionCompleteDelegateHandle);
         OnStartSessionComplete(NAME_GameSession, false);
     }
@@ -264,20 +219,13 @@ void UBaruSessionSubsystem::OnStartSessionComplete(FName SessionName, bool bWasS
         SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(StartSessionCompleteDelegateHandle);
     }
 
-    BARU_LOG(LogBaruSession, Log, TEXT("OnStartSessionComplete: Success=%d. Verifying host listen state..."), bWasSuccessful);
-
     const bool bAlreadyListenServer = (GetWorld() && GetWorld()->GetNetMode() == NM_ListenServer);
     const FString CurrentMapName = GetWorld() ? GetWorld()->GetMapName() : TEXT("");
     const FString TargetMapName = StoredLobbyLevel.GetAssetName();
 
     if (!bAlreadyListenServer || !CurrentMapName.Contains(TargetMapName))
     {
-        BARU_LOG(LogBaruSession, Log, TEXT("Host is not yet in ListenServer mode. Opening level with ?listen: %s"), *TargetMapName);
         OpenLobbyLevelAsListenServer(StoredLobbyLevel);
-    }
-    else
-    {
-        BARU_LOG(LogBaruSession, Log, TEXT("Host is already running ListenServer in lobby map. Skipping map reload."));
     }
 
     OnCreateSessionCompleteEvent.Broadcast(true);
@@ -285,46 +233,29 @@ void UBaruSessionSubsystem::OnStartSessionComplete(FName SessionName, bool bWasS
 
 void UBaruSessionSubsystem::FindSessions(int32 MaxSearchResults, bool bIsLANMatch)
 {
-    IOnlineSessionPtr SessionInterface = GetSessionInterface();
-    const ULocalPlayer* LocalPlayer = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr;
-    FUniqueNetIdRepl NetId = LocalPlayer ? LocalPlayer->GetPreferredUniqueNetId() : FUniqueNetIdRepl();
+	if (!SteamMatchmaking())
+	{
+		BARU_LOG(LogBaruSession, Error, TEXT("FindSessions: SteamMatchmaking is null!"));
+		OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
+		return;
+	}
 
-    BARU_LOG(LogBaruSession, Log, TEXT("FindSessions Requested. MaxResults=%d, IsLAN=%d"), MaxSearchResults, bIsLANMatch);
+	FoundSteamLobbyIDs.Empty();
+	BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Requesting Filtered Steam Lobby List..."));
 
-    if (!SessionInterface.IsValid() || !NetId.IsValid() || !NetId.GetUniqueNetId().IsValid())
-    {
-       BARU_LOG(LogBaruSession, Error, TEXT("FindSessions Failed: Invalid SessionInterface or NetId."));
-       OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
-       return;
-    }
+	// 전 세계 로비 검색 허용
+	SteamMatchmaking()->AddRequestLobbyListDistanceFilter(k_ELobbyDistanceFilterWorldwide);
+	SteamMatchmaking()->AddRequestLobbyListResultCountFilter(FMath::Clamp(MaxSearchResults, 20, 100));
 
-    FindSessionsCompleteDelegateHandle = SessionInterface->AddOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegate);
+	// [핵심] 스팀 서버에 필터 전송 (BARU_PROJECT_ID == BARU_PROJECT_2026_V1 인 방만 반환)
+	SteamMatchmaking()->AddRequestLobbyListStringFilter(
+		BaruMatchmakingConstants::RAW_PROJECT_KEY, 
+		BaruMatchmakingConstants::RAW_PROJECT_VALUE, 
+		k_ELobbyComparisonEqual
+	);
 
-    LastSessionSearch = MakeShareable(new FOnlineSessionSearch());
-    LastSessionSearch->MaxSearchResults = FMath::Clamp(MaxSearchResults, 50, 100);
-    LastSessionSearch->bIsLanQuery = bIsLANMatch;
-    LastSessionSearch->TimeoutInSeconds = 10.0f;
-
-    LastSessionSearch->QuerySettings.Set(FName(TEXT("LOBBIESSEARCH")), true, EOnlineComparisonOp::Equals);
-    LastSessionSearch->QuerySettings.Set(FName(TEXT("PRESENCESEARCH")), true, EOnlineComparisonOp::Equals);
-    
-    if (!bIsLANMatch)
-    {
-       LastSessionSearch->QuerySettings.Set(
-          BaruMatchmakingConstants::SETTING_MATCH_KEY, 
-          BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE, 
-          EOnlineComparisonOp::Equals
-       );
-    }
-    
-    BARU_LOG(LogBaruSession, Log, TEXT("FindSessions: Executing Search via Steam Matchmaking Lobbies..."));
-
-    if (!SessionInterface->FindSessions(*NetId.GetUniqueNetId(), LastSessionSearch.ToSharedRef()))
-    {
-       SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteDelegateHandle);
-       BARU_LOG(LogBaruSession, Error, TEXT("FindSessions request was rejected by Online Subsystem."));
-       OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
-    }
+	SteamAPICall_t hSteamAPICall = SteamMatchmaking()->RequestLobbyList();
+	SteamLobbyMatchListCallResult.Set(hSteamAPICall, this, &UBaruSessionSubsystem::OnSteamLobbyMatchList);
 }
 
 void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
@@ -337,27 +268,14 @@ void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
     TArray<FBaruSessionSearchResultInfo> FilteredResults;
     const int32 RawResultCount = LastSessionSearch.IsValid() ? LastSessionSearch->SearchResults.Num() : 0;
 
-    BARU_LOG(LogBaruSession, Log, TEXT("OnFindSessionsComplete: Success=%d, Total Raw Results Found=%d"), bWasSuccessful, RawResultCount);
-    
     if (bWasSuccessful && LastSessionSearch.IsValid())
     {
        for (int32 i = 0; i < LastSessionSearch->SearchResults.Num(); ++i)
        {
           const FOnlineSessionSearchResult& SearchResult = LastSessionSearch->SearchResults[i];
 
-          FString MatchKey;
-          SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_MATCH_KEY, MatchKey);
-
-          FString FoundServerName;
-          SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_SERVER_NAME, FoundServerName);
-          
-          BARU_LOG(LogBaruSession, Verbose, TEXT(" - Raw Room [%d]: ID=%s, Presence=%d, MatchKey='%s', ServerName='%s'"),
-             i, *SearchResult.GetSessionIdStr(), SearchResult.Session.SessionSettings.bUsesPresence, *MatchKey, *FoundServerName);
-          
-          const bool bHasMatchKey = (MatchKey == BaruMatchmakingConstants::BARU_MATCH_KEY_VALUE);
-          const bool bHasOpenSlots = (SearchResult.Session.NumOpenPublicConnections > 0);
-
-          if (!SearchResult.IsValid() || !bHasMatchKey || !bHasOpenSlots)
+          // 방이 유효하고 빈 슬롯이 있으면 무조건 등록 (Key 필터링 완전히 배제)
+          if (!SearchResult.IsValid() || SearchResult.Session.NumOpenPublicConnections <= 0)
           {
              continue;
           }
@@ -367,7 +285,16 @@ void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
           Info.CurrentPlayers = SearchResult.Session.SessionSettings.NumPublicConnections - SearchResult.Session.NumOpenPublicConnections;
           Info.MaxPlayers = SearchResult.Session.SessionSettings.NumPublicConnections;
           Info.PingInMs = SearchResult.PingInMs;
-          Info.ServerName = FoundServerName;
+
+          FString FoundServerName;
+          if (SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_SERVER_NAME, FoundServerName) && !FoundServerName.IsEmpty())
+          {
+              Info.ServerName = FoundServerName;
+          }
+          else
+          {
+              Info.ServerName = TEXT("Steam Lobby");
+          }
 
           SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_MAP_NAME, Info.SelectedMapName);
           SearchResult.Session.SessionSettings.Get(BaruMatchmakingConstants::SETTING_HOST_NAME, Info.HostPlayerName);
@@ -376,7 +303,7 @@ void UBaruSessionSubsystem::OnFindSessionsComplete(bool bWasSuccessful)
        }
     }
 
-    BARU_LOG(LogBaruSession, Log, TEXT("FindSessions Finished. Filtered BARU Rooms: %d / %d"), FilteredResults.Num(), RawResultCount);
+    BARU_LOG(LogBaruSession, Log, TEXT("FindSessions Finished. Rooms Found: %d / %d"), FilteredResults.Num(), RawResultCount);
     OnFindSessionsCompleteEvent.Broadcast(FilteredResults, bWasSuccessful);
 }
 
@@ -388,7 +315,6 @@ bool UBaruSessionSubsystem::JoinSessionInternal(const FOnlineSessionSearchResult
 
     if (!SessionInterface.IsValid() || !NetId.IsValid() || !NetId.GetUniqueNetId().IsValid() || !SearchResult.IsValid())
     {
-       BARU_LOG(LogBaruSession, Error, TEXT("JoinSessionInternal Failed: Invalid SessionInterface, NetId, or SearchResult."));
        OnJoinSessionCompleteEvent.Broadcast(false);
        return false;
     }
@@ -404,7 +330,6 @@ bool UBaruSessionSubsystem::JoinSessionInternal(const FOnlineSessionSearchResult
     if (!SessionInterface->JoinSession(*NetId.GetUniqueNetId(), NAME_GameSession, SessionToJoin))
     {
        SessionInterface->ClearOnJoinSessionCompleteDelegate_Handle(JoinSessionCompleteDelegateHandle);
-       BARU_LOG(LogBaruSession, Error, TEXT("JoinSession returned false immediately."));
        OnJoinSessionCompleteEvent.Broadcast(false);
        return false;
     }
@@ -414,14 +339,36 @@ bool UBaruSessionSubsystem::JoinSessionInternal(const FOnlineSessionSearchResult
 
 void UBaruSessionSubsystem::JoinSessionByIndex(int32 SessionIndex)
 {
-    if (!LastSessionSearch.IsValid() || !LastSessionSearch->SearchResults.IsValidIndex(SessionIndex))
-    {
-       BARU_LOG(LogBaruSession, Error, TEXT("JoinSessionByIndex Failed: Invalid LastSessionSearch or Index %d."), SessionIndex);
-       OnJoinSessionCompleteEvent.Broadcast(false);
-       return;
-    }
+	if (!FoundSteamLobbyIDs.IsValidIndex(SessionIndex))
+	{
+		BARU_LOG(LogBaruSession, Warning, TEXT("JoinSessionByIndex: Invalid Session Index: %d"), SessionIndex);
+		OnJoinSessionCompleteEvent.Broadcast(false);
+		return;
+	}
 
-    JoinSessionInternal(LastSessionSearch->SearchResults[SessionIndex]);
+	CSteamID TargetLobbyID = FoundSteamLobbyIDs[SessionIndex];
+	CSteamID HostSteamID = SteamMatchmaking()->GetLobbyOwner(TargetLobbyID);
+
+	if (!HostSteamID.IsValid())
+	{
+		BARU_LOG(LogBaruSession, Error, TEXT("JoinSessionByIndex: Failed to get Lobby Owner SteamID."));
+		OnJoinSessionCompleteEvent.Broadcast(false);
+		return;
+	}
+
+	// SteamSockets P2P 접속 주소: steam.<HostSteam64ID>:7777
+	FString ConnectString = FString::Printf(TEXT("steam.%llu:7777"), HostSteamID.ConvertToUint64());
+	BARU_LOG(LogBaruSession, Log, TEXT("Joining Steam Lobby: ConnectString=%s"), *ConnectString);
+
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		PC->ClientTravel(ConnectString, ETravelType::TRAVEL_Absolute);
+		OnJoinSessionCompleteEvent.Broadcast(true);
+	}
+	else
+	{
+		OnJoinSessionCompleteEvent.Broadcast(false);
+	}
 }
 
 void UBaruSessionSubsystem::OnSessionUserInviteAccepted(
@@ -430,12 +377,8 @@ void UBaruSessionSubsystem::OnSessionUserInviteAccepted(
     FUniqueNetIdPtr UserId,
     const FOnlineSessionSearchResult& InviteResult)
 {
-    BARU_LOG(LogBaruSession, Log, TEXT("Steam Overlay Invite Accepted! Success=%d, SessionId=%s"), 
-        bWasSuccessful, InviteResult.IsValid() ? *InviteResult.GetSessionIdStr() : TEXT("INVALID"));
-
     if (!bWasSuccessful || !InviteResult.IsValid())
     {
-        BARU_LOG(LogBaruSession, Warning, TEXT("OnSessionUserInviteAccepted: Invite acceptance failed or result is invalid."));
         return;
     }
 
@@ -447,7 +390,6 @@ void UBaruSessionSubsystem::OnSessionUserInviteAccepted(
 
     if (SessionInterface->GetNamedSession(NAME_GameSession))
     {
-        BARU_LOG(LogBaruSession, Log, TEXT("Pre-existing session found during invite join. Destroying previous session..."));
         SessionInterface->DestroySession(NAME_GameSession);
     }
 
@@ -473,14 +415,6 @@ void UBaruSessionSubsystem::OnJoinSessionComplete(FName SessionName, EOnJoinSess
                 return;
              }
           }
-          else
-          {
-             BARU_LOG(LogBaruSession, Error, TEXT("GetResolvedConnectString failed to retrieve Steam connect address."));
-          }
-       }
-       else
-       {
-          BARU_LOG(LogBaruSession, Error, TEXT("OnJoinSessionComplete failed with Result Code: %d"), static_cast<int32>(Result));
        }
     }
 
@@ -517,12 +451,7 @@ void UBaruSessionSubsystem::OnDestroySessionComplete(FName SessionName, bool bWa
     if (bPendingReturnToMainMenu)
     {
        bPendingReturnToMainMenu = false;
-       BARU_LOG(LogBaruSession, Log, TEXT("Session Destroyed. Returning to MainMenuLevel."));
        UGameplayStatics::OpenLevel(GetWorld(), TEXT("MainMenuLevel"));
-    }
-    else
-    {
-       BARU_LOG(LogBaruSession, Log, TEXT("Session Destroyed. Staying in Lobby (Offline Solo Mode)."));
     }
 
     OnDestroySessionCompleteEvent.Broadcast(bWasSuccessful);
@@ -543,4 +472,64 @@ void UBaruSessionSubsystem::OpenFriendInviteUI()
           ExternalUI->ShowInviteUI(0, NAME_GameSession);
        }
     }
+}
+
+void UBaruSessionSubsystem::OnSteamLobbyMatchList(LobbyMatchList_t* pLobbyMatchList, bool bIOFailure)
+{
+	if (bIOFailure || !pLobbyMatchList)
+        {
+            BARU_LOG(LogBaruSession, Error, TEXT("OnSteamLobbyMatchList: IO Failure or null response."));
+            AsyncTask(ENamedThreads::GameThread, [this]()
+            {
+                OnFindSessionsCompleteEvent.Broadcast(TArray<FBaruSessionSearchResultInfo>(), false);
+            });
+            return;
+        }
+    
+        const uint32 LobbyCount = pLobbyMatchList->m_nLobbiesMatching;
+        BARU_LOG(LogBaruSession, Log, TEXT("OnSteamLobbyMatchList: Found %d Steam Lobbies."), LobbyCount);
+    
+        TArray<FBaruSessionSearchResultInfo> ResultList;
+        TArray<CSteamID> NewLobbyIDs;
+    
+	for (uint32 i = 0; i < LobbyCount; ++i)
+	{
+		CSteamID LobbyID = SteamMatchmaking()->GetLobbyByIndex(i);
+		if (!LobbyID.IsValid())
+		{
+			continue;
+		}
+
+		// [추가] 혹시 모를 타 프로젝트 로비 2차 방어
+		const char* ProjectId = SteamMatchmaking()->GetLobbyData(LobbyID, BaruMatchmakingConstants::RAW_PROJECT_KEY);
+		if (!ProjectId || FCStringAnsi::Strcmp(ProjectId, BaruMatchmakingConstants::RAW_PROJECT_VALUE) != 0)
+		{
+			continue;
+		}
+    
+            NewLobbyIDs.Add(LobbyID);
+    
+            FBaruSessionSearchResultInfo Info;
+            Info.SessionIndex = NewLobbyIDs.Num() - 1;
+            Info.CurrentPlayers = SteamMatchmaking()->GetNumLobbyMembers(LobbyID);
+            Info.MaxPlayers = SteamMatchmaking()->GetLobbyMemberLimit(LobbyID);
+            Info.PingInMs = 0;
+    
+            const char* ServerName = SteamMatchmaking()->GetLobbyData(LobbyID, "SERVER_NAME");
+            const char* MapName = SteamMatchmaking()->GetLobbyData(LobbyID, "MAP_NAME");
+            const char* HostName = SteamMatchmaking()->GetLobbyData(LobbyID, "HOST_NAME");
+    
+            Info.ServerName = (ServerName && FCStringAnsi::Strlen(ServerName) > 0) ? UTF8_TO_TCHAR(ServerName) : TEXT("Steam Lobby");
+            Info.SelectedMapName = (MapName && FCStringAnsi::Strlen(MapName) > 0) ? UTF8_TO_TCHAR(MapName) : TEXT("MainLobbyLevel");
+            Info.HostPlayerName = (HostName && FCStringAnsi::Strlen(HostName) > 0) ? UTF8_TO_TCHAR(HostName) : TEXT("Host");
+    
+            ResultList.Add(Info);
+        }
+    
+        // [핵심] UMG 및 타이머 조작을 위해 반드시 메인 게임 스레드로 전환하여 브로드캐스트
+        AsyncTask(ENamedThreads::GameThread, [this, ResultList = MoveTemp(ResultList), NewLobbyIDs = MoveTemp(NewLobbyIDs)]() mutable
+        {
+            FoundSteamLobbyIDs = MoveTemp(NewLobbyIDs);
+            OnFindSessionsCompleteEvent.Broadcast(ResultList, true);
+        });
 }

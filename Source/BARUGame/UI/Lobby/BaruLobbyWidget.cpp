@@ -556,6 +556,9 @@ void UBaruLobbyWidget::HandleCreateRoomClicked()
     }
     
     bIsCreatingSession = true;
+   
+    // 방 생성 요청이 시작됐다는 것을 즉시 표시
+    RefreshSessionStatus();
     
     if (IsValid(Button_CreateRoom))
     {
@@ -592,14 +595,19 @@ void UBaruLobbyWidget::HandleCreateSessionComplete(
           Log,
           TEXT("방 생성에 성공했습니다.")
           );
+       
+       RefreshSessionStatus();
     }
     else
     {
        BARU_LOG(
           LogBaruUI,
           Error,
-          TEXT("방 생성에 실패했습니다.")
-          );
+          TEXT("방 생성에 실패했습니다."));
+       
+       SetSessionStatus(
+          FText::FromString(TEXT("방 생성 실패")),
+          FLinearColor(1.0f, 0.2f, 0.2f, 1.0f));
     }
 }
 
@@ -1063,6 +1071,9 @@ void UBaruLobbyWidget::NativeOnActivated()
           &ThisClass::HandleCreateSessionComplete
           );
     }
+   
+    // 새로 열린 로비에서도 현재 세션 상태를 다시 확인한다.
+    RefreshSessionStatus();
     
     // 복제 지연에 완벽 대응하는 지속 바인딩 안전장치 호출
     TryBindLobbyStates();
@@ -1262,4 +1273,79 @@ void UBaruLobbyWidget::UpdateSelectedMapPreview(
 
    Image_SelectedMapPreview->SetVisibility(
       ESlateVisibility::Collapsed);
+}
+
+void UBaruLobbyWidget::SetSessionStatus(
+   const FText& StatusText,
+   const FLinearColor& StatusColor)
+{
+    if (!IsValid(Text_SessionStatus))
+    {
+       return;
+    }
+   
+   Text_SessionStatus->SetText(StatusText);
+   Text_SessionStatus->SetColorAndOpacity(
+      FSlateColor(StatusColor));
+}
+
+void UBaruLobbyWidget::RefreshSessionStatus()
+{
+   UWorld* World = GetWorld();
+   
+   if (!IsValid(World) || !IsValid(SessionSubsystem))
+   {
+      SetSessionStatus(
+         FText::FromString(TEXT("세션 상태 확인 불가")),
+         FLinearColor(1.0f, 0.25f, 0.25f, 1.0f));
+      return;
+   }
+   
+   if (bIsCreatingSession)
+   {
+      SetSessionStatus(
+         FText::FromString(TEXT("방 생성 중...")),
+         FLinearColor(1.0f, 0.75f, 0.15f, 1.0f));
+      return;
+   }
+   
+   const bool bHasSession =
+      SessionSubsystem->IsSessionActive();
+   
+   switch (World->GetNetMode())
+   {
+   case NM_ListenServer:
+      SetSessionStatus(
+          FText::FromString(
+              bHasSession
+                  ? TEXT("방 생성 완료 · 호스트")
+                  : TEXT("호스트 서버 · 세션 없음")),
+          bHasSession
+              ? FLinearColor(0.2f, 1.0f, 0.35f, 1.0f)
+              : FLinearColor(1.0f, 0.4f, 0.15f, 1.0f));
+      break;
+
+   case NM_Client:
+      SetSessionStatus(
+          FText::FromString(TEXT("방 참가 완료 · 참가자")),
+          FLinearColor(0.25f, 0.65f, 1.0f, 1.0f));
+      break;
+
+   case NM_Standalone:
+      SetSessionStatus(
+          FText::FromString(
+              bHasSession
+                  ? TEXT("세션 생성됨 · 서버 전환 대기")
+                  : TEXT("오프라인 로비")),
+          bHasSession
+              ? FLinearColor(1.0f, 0.45f, 0.15f, 1.0f)
+              : FLinearColor(0.65f, 0.65f, 0.65f, 1.0f));
+      break;
+
+   default:
+      SetSessionStatus(
+          FText::FromString(TEXT("세션 상태 확인 중...")),
+          FLinearColor(0.65f, 0.65f, 0.65f, 1.0f));
+      break;
+   }
 }
