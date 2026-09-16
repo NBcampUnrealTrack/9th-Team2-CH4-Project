@@ -34,13 +34,20 @@
 #include "Components/BaruTensionComponent.h"
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
 #include "Animation/Character/BaruCharacterAnimSet.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Gameplay/Weapon/BaruWeaponBase.h"
+
+// VOIP 헤더
+#include "Net/VoiceConfig.h"
+#include "Sound/SoundAttenuation.h"
+
+// VFX 및 사운드 헤더
 #include "Effects/VFX/BaruVFXLibrary.h"   
 #include "NiagaraSystem.h"      
 #include "NiagaraComponent.h"
 #include "Kismet/GameplayStatics.h"       
 #include "Components/AudioComponent.h"    
-#include "Sound/SoundBase.h"              
+#include "Sound/SoundBase.h"
 
 ABaruCharacter::ABaruCharacter()
 {
@@ -82,6 +89,9 @@ ABaruCharacter::ABaruCharacter()
    // 긴장도 컴포넌트 부착
    TensionComponent = CreateDefaultSubobject<UBaruTensionComponent>(TEXT("TensionComponent"));
    
+   // [추가] 3D VOIP 토커 컴포넌트 생성 (ActorComponent이므로 SetupAttachment 호출 금지)
+   VOIPTalker = CreateDefaultSubobject<UVOIPTalker>(TEXT("VOIPTalker"));
+   
    // [추가] 헤드라이트.
    //   카메라에 붙이면 시선 방향과 정확히 일치하고,
    //   다른 클라에서도 RemoteViewPitch 로 위아래 각도가 대략 맞습니다.
@@ -117,6 +127,8 @@ void ABaruCharacter::PossessedBy(AController* NewController)
 
    InitAbilityActorInfo();
    
+   SetupVoiceChat();
+   
    if (HasAuthority())
    {
       if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
@@ -145,6 +157,9 @@ void ABaruCharacter::OnRep_PlayerState()
 {
     Super::OnRep_PlayerState();
     InitAbilityActorInfo();
+   
+   // [추가] 클라이언트에서 PlayerState가 복제되었을 때 보이스 스트림 연결
+   SetupVoiceChat();
 }
 
 
@@ -408,6 +423,11 @@ void ABaruCharacter::PawnClientRestart()
 
    if (PC && PC->IsLocalController())
    {
+      // [추가] 로컬 컨트롤러 입력 대기 플래그 완전 초기화
+      PC->bPlayerIsWaiting = false;
+      PC->ResetIgnoreMoveInput();
+      PC->ResetIgnoreLookInput();
+      
       // 1. 카메라 시점을 내 캐릭터로 확실하게 전환
       PC->SetViewTarget(this);
 
@@ -426,6 +446,17 @@ void ABaruCharacter::PawnClientRestart()
             Subsystem->AddMappingContext(DefaultMappingContext, 0);
             BARU_LOG(LogBaru, Log, TEXT("PawnClientRestart: [SUCCESS] ViewTarget & IMC applied for %s"), *GetName());
          }
+      }
+      
+      if (FSlateApplication::IsInitialized())
+      {
+         FSlateApplication::Get().SetAllUserFocusToGameViewport();
+      }
+      
+      // [추가] 로컬 플레이어일 경우 마이크 입력 상시 송출 시작
+      if (IsLocallyControlled())
+      {
+         StartVoiceChat();
       }
    }
 }
@@ -604,12 +635,12 @@ void ABaruCharacter::Input_ToggleHeadlight()
 
 void ABaruCharacter::Input_Reload()
 {
+   // 사망, DBNO, 앉기, 공중 체공(점프/낙하) 중에는 재장전 불가
    if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling()) 
    {
       return;
    }
 
-   // 장비 컴포넌트를 통해 InputTag.Reload 트리거
    if (EquipmentComponent)
    {
       EquipmentComponent->RequestReloadActiveWeapon();
@@ -1145,22 +1176,40 @@ void ABaruCharacter::ReviveFromDBNO(float HealthRatio)
    if (UWorld* World = GetWorld())
    {
       World->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+      World->GetTimerManager().ClearTimer(DBNOImmunityTimerHandle);
    }
 
    if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
    {
-      ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+      while (ASC->HasMatchingGameplayTag(FBaruGameplayTags::Get().State_DBNO))
+      {
+         ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+      }
+      while (ASC->HasMatchingGameplayTag(FBaruGameplayTags::Get().State_Immune))
+      {
+         ASC->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+      }
 
       const float MaxHP = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMaxHealthAttribute());
       ASC->SetNumericAttributeBase(
          UBaruCoreAttributeSet::GetHealthAttribute(),
          FMath::Max(1.0f, MaxHP * FMath::Clamp(HealthRatio, 0.01f, 1.0f)));
+      
+      ASC->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetTensionAttribute(), 0.0f);
    }
 
    LastKiller = nullptr;
    BaruPS->SetDBNOState(false);
+   
+   // [추가] 소생 시 로컬 플레이어 마이크 송출 재개
+   if (IsLocallyControlled())
+   {
+      StartVoiceChat();
+   }
+   
+   StartHealthRegenDelay();
 
-   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s revived."), *GetName());
+   BARU_NET_LOG(this, LogBaruCombat, Log, TEXT("Character %s revived. Health regen scheduled."), *GetName());
 }
 
 // [추가] 블리드아웃 만료 → 완전 사망
@@ -1211,6 +1260,8 @@ void ABaruCharacter::HandleDBNOStatusChanged(bool bNewDBNO)
          InteractionTraceChannel,
          bNewDBNO ? ECR_Block : ECR_Overlap);
    }
+   // [추가] 다운 진입 시 켜고, 소생 시 끔
+   UpdateDBNOVisuals(bNewDBNO);
    
    OnDBNOCosmetic(bNewDBNO);   // 몽타주·포스트프로세스는 BP 에서
 
@@ -1315,6 +1366,15 @@ void ABaruCharacter::OnRep_IsDead()
    {
       return;   // 리스폰으로 false 가 복제된 경우
    }
+   
+   // [추가] 사망 시 마이크 송출 즉시 중단 (중복 조건문 제거)
+   if (IsLocallyControlled())
+   {
+      StopVoiceChat();
+   }
+   
+   // [추가] 완전 사망 시 DBNO 외곽선 끄기
+   UpdateDBNOVisuals(false);
 
    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
    {
@@ -2002,5 +2062,111 @@ void ABaruCharacter::UpdateAimingEffects(float DeltaSeconds)
    else if (CurrentFringe != CurrentTargetFringe)
    {
       CurrentFringe = CurrentTargetFringe;
+   }
+}
+
+// [추가] 외곽선 및 발광 연출 적용/해제 구현부
+void ABaruCharacter::UpdateDBNOVisuals(bool bIsDowned)
+{
+   if (!bEnableDBNOOutline)
+   {
+      return;
+   }
+
+   USkeletalMeshComponent* BodyMesh = GetMesh();
+   if (!IsValid(BodyMesh))
+   {
+      return;
+   }
+
+   // 메시에 Custom Depth와 Overlay Material을 적용하는 람다
+   auto ApplyVisualToMesh = [this, bIsDowned](USkeletalMeshComponent* TargetMesh)
+   {
+      if (!IsValid(TargetMesh)) return;
+
+      // 1. Custom Depth & Stencil 설정 (포스트 프로세스 아웃라인용)
+      TargetMesh->SetRenderCustomDepth(bIsDowned);
+      TargetMesh->SetCustomDepthStencilValue(bIsDowned ? DBNOCustomDepthStencilValue : 0);
+
+      // 2. UE5 Overlay Material 설정 (표면 프레넬 글로우용)
+      if (DBNOOverlayMaterial)
+      {
+         TargetMesh->SetOverlayMaterial(bIsDowned ? DBNOOverlayMaterial.Get() : nullptr);
+      }
+   };
+
+   // 3인칭 기본 몸체 메시에 적용
+   ApplyVisualToMesh(BodyMesh);
+
+   // [수정] AActor::Children 과의 이름 충돌 방지를 위해 ChildComponents 로 변경
+   TArray<USceneComponent*> ChildComponents;
+   BodyMesh->GetChildrenComponents(false, ChildComponents);
+   for (USceneComponent* Child : ChildComponents)
+   {
+      if (USkeletalMeshComponent* PartMesh = Cast<USkeletalMeshComponent>(Child))
+      {
+         ApplyVisualToMesh(PartMesh);
+      }
+   }
+}
+
+// [추가] VOIP 감쇠 설정 주입 및 PlayerState 등록 함수
+void ABaruCharacter::SetupVoiceChat()
+{
+   if (!VOIPTalker)
+   {
+      return;
+   }
+
+   // 1. 3D 거리 감쇠 에셋 연결
+   if (VoiceAttenuation)
+   {
+      VOIPTalker->Settings.AttenuationSettings = VoiceAttenuation;
+   }
+
+   // 2. 음성 수신 스트림 바인딩
+   if (APlayerState* PS = GetPlayerState())
+   {
+      // '다른 사람 캐릭터(!IsLocallyControlled())'일 때만 수신 스피커로 등록
+      if (!IsLocallyControlled())
+      {
+         VOIPTalker->RegisterWithPlayerState(PS);
+      }
+   }
+
+   // 3. 내 캐릭터인 경우에만 마이크 캡처(송출) 가동
+   if (IsLocallyControlled())
+   {
+      StartVoiceChat();
+   }
+}
+
+// [추가] APlayerController 내장 표준 함수를 통한 마이크 송출 시작
+void ABaruCharacter::StartVoiceChat()
+{
+   if (!IsLocallyControlled())
+   {
+      return;
+   }
+
+   if (APlayerController* PC = Cast<APlayerController>(GetController()))
+   {
+      PC->ToggleSpeaking(true);
+      BARU_NET_LOG(this, LogBaru, Verbose, TEXT("Voice Chat Transmission Started"));
+   }
+}
+
+// [추가] APlayerController 내장 표준 함수를 통한 마이크 송출 차단
+void ABaruCharacter::StopVoiceChat()
+{
+   if (!IsLocallyControlled())
+   {
+      return;
+   }
+
+   if (APlayerController* PC = Cast<APlayerController>(GetController()))
+   {
+      PC->ToggleSpeaking(false);
+      BARU_NET_LOG(this, LogBaru, Verbose, TEXT("Voice Chat Transmission Stopped"));
    }
 }

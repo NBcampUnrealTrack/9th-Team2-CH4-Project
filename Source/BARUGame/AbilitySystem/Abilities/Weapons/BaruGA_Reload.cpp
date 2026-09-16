@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "BaruLog.h"
 #include "GameFramework/Character.h"
+#include "Animation/AnimMontage.h"
 #include "Character/BaruCharacter.h"
 #include "Gameplay/Equipment/BaruEquipmentComponent.h"
 #include "Gameplay/Weapon/BaruWeaponBase.h"
@@ -63,12 +64,9 @@ bool UBaruGA_Reload::CanActivateAbility(
     }
 
     // 탄창이 이미 가득 차 있다면 장전 불가
-    if (ActorInfo->IsNetAuthority())
+    if (ActiveWeapon->IsMagazineFull())
     {
-        if (ActiveWeapon->IsMagazineFull())
-        {
-            return false;
-        }
+        return false;
     }
 
     return true;
@@ -90,7 +88,7 @@ void UBaruGA_Reload::ActivateAbility(
 
     float Duration = FallbackReloadDuration;
 
-    // 몽타주 재생
+    // 몽타주 재생 (시각 연출)
     if (ReloadMontage && ActorInfo->AvatarActor.IsValid())
     {
         if (ACharacter* Char = Cast<ACharacter>(ActorInfo->AvatarActor.Get()))
@@ -103,15 +101,19 @@ void UBaruGA_Reload::ActivateAbility(
         }
     }
 
-    if (UWorld* World = GetWorld())
+    // 서버 권한에서만 타이머 가동 (클라이언트 레이스 컨디션 방지)
+    if (ActorInfo && ActorInfo->IsNetAuthority())
     {
-        World->GetTimerManager().SetTimer(
-            ReloadTimerHandle,
-            this,
-            &UBaruGA_Reload::OnReloadCompleted,
-            Duration,
-            false
-        );
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().SetTimer(
+                ReloadTimerHandle,
+                this,
+                &UBaruGA_Reload::OnReloadCompleted,
+                Duration,
+                false
+            );
+        }
     }
 }
 
@@ -132,9 +134,10 @@ void UBaruGA_Reload::OnReloadCompleted()
                 TEXT("재장전 완료. 탄약 복구 완료: %d / %d"),
                 ActiveWeapon->GetCurrentAmmo(), ActiveWeapon->GetMagazineCapacity());
         }
-    }
 
-    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+        // 서버 종료 복제를 통해 클라이언트 어빌리티도 함께 종료
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+    }
 }
 
 void UBaruGA_Reload::EndAbility(

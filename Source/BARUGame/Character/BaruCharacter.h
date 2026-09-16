@@ -11,6 +11,8 @@
 #include "Gameplay/Equipment/DataTypes/BaruEquipmentTypes.h"   
 #include "BaruCharacter.generated.h"     
 
+class UMaterialInterface;
+
 // [09.13] 총기 반동 데이터 구조체
 USTRUCT(BlueprintType)
 struct FBaruRecoilData
@@ -55,6 +57,10 @@ class USoundAttenuation;
 class UAudioComponent;     
 struct FOnAttributeChangeData;
 enum class EBaruInteractionHoldEndReason : uint8;
+
+// [추가] VOIP 3D 음성 컴포넌트 및 사운드 감쇠 에셋 전방 선언
+class UVOIPTalker;
+class USoundAttenuation;
 
 UCLASS()
 class BARUGAME_API ABaruCharacter : public ACharacter,public IAbilitySystemInterface, public ICombatInterface , public IInteractableInterface,public IGameplayCueInterface
@@ -460,7 +466,7 @@ protected:
 
     // 다운 중 1회 피격 시 차감될 출혈 시간 (초 단위, 기본 15초)
     UPROPERTY(EditDefaultsOnly, Category = "BARU|Combat")
-    float DBNODamageBleedReduction = 15.0f;
+    float DBNODamageBleedReduction = 2.0f;
     
     // [09.13] R키 수동 재장전 InputAction 에셋 포인터
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Input")
@@ -548,4 +554,39 @@ private:
     float CurrentTargetFringe = 0.0f;
 
     void UpdateAimingEffects(float DeltaSeconds);
+
+protected:
+    // [추가] 다운 상태 외곽선/글로우 연출 설정
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Visual|DBNO")
+    bool bEnableDBNOOutline = true;
+
+    // 포스트 프로세스 스텐실 마스크 값 (기본 250)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Visual|DBNO")
+    int32 DBNOCustomDepthStencilValue = 250;
+
+    // UE5 오버레이 머티리얼 (선택 사항: 프레넬/림라이트 발광 머티리얼 할당 시 캐릭터 외곽 발광)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Visual|DBNO")
+    TObjectPtr<UMaterialInterface> DBNOOverlayMaterial;
+
+    // DBNO 외곽선 및 비주얼 On/Off 갱신 함수
+    void UpdateDBNOVisuals(bool bIsDowned);
+    
+    // [추가] 근접 3D 음성 통신 컴포넌트
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BARU|Voice")
+    TObjectPtr<UVOIPTalker> VOIPTalker;
+
+    // [추가] 3D 음성 거리 감쇠 에셋 (에디터 디폴트 할당용)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "BARU|Voice")
+    TObjectPtr<USoundAttenuation> VoiceAttenuation;
+    
+    // [추가] PlayerState 동기화 시 보이스 스트림 연결 헬퍼
+    void SetupVoiceChat();
+
+    // [추가] 로컬 마이크 송출 시작 및 중단 제어 헬퍼 (엔진 VoiceInterface 호출용)
+    void StartVoiceChat();
+    void StopVoiceChat();
+    
+private:
+    // [추가] PlayerState의 Steam UniqueNetId 복제 대기용 타이머 핸들
+    FTimerHandle VoiceSetupRetryTimerHandle;
 };

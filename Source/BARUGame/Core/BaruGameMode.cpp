@@ -418,7 +418,10 @@ void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerAc
 
     if (APlayerController* VictimPC = Cast<APlayerController>(VictimController))
     {
-        if (APawn* DeadPawn = VictimPC->GetPawn())
+        // [수정] DeadPawn을 함수 스코프 상단에 선언하여 if문 밖에서도 안전하게 참조할 수 있도록 해결
+        APawn* DeadPawn = VictimPC->GetPawn();
+
+        if (DeadPawn)
         {
             VictimPC->SetViewTargetWithBlend(DeadPawn, 0.5f);
             if (!VictimPC->IsLocalController())
@@ -427,6 +430,19 @@ void ABaruGameMode::OnPlayerDied(AController* VictimController, AActor* KillerAc
             }
         }
         VictimPC->UnPossess();
+        
+        // [수정] 사망한 DeadPawn을 이미 보고 있던 다른 관전자들이 있을 경우, 즉시 다른 생존/다운 팀원으로 관전 타깃 자동 변경
+        if (DeadPawn)
+        {
+            for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+            {
+                APlayerController* OtherPC = Iterator->Get();
+                if (IsValid(OtherPC) && OtherPC != VictimPC && OtherPC->GetViewTarget() == DeadPawn)
+                {
+                    StartSpectating(OtherPC);
+                }
+            }
+        }
         
         if (CachedBaruGameState && CachedBaruGameState->GetAlivePlayerCount() > 0)
         {
@@ -450,7 +466,8 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
         {
             if (const ABaruPlayerState* PS = OtherPC->GetPlayerState<ABaruPlayerState>())
             {
-                if (PS->IsAlive() && OtherPC->GetPawn())
+                // 다운(DBNO) 상태인 팀원도 관전 가능 (!PS->IsDead())
+                if (!PS->IsDead() && OtherPC->GetPawn())
                 {
                     DeadController->SetViewTargetWithBlend(OtherPC->GetPawn(), 1.0f);
 
@@ -458,11 +475,36 @@ void ABaruGameMode::StartSpectating(APlayerController* DeadController)
                     {
                         DeadController->ClientSetViewTarget(OtherPC->GetPawn(), FViewTargetTransitionParams());
                     }
+
+                    if (ABaruPlayerController* DeadBaruPC = Cast<ABaruPlayerController>(DeadController))
+                    {
+                        // 첫 번째 마우스 클릭 시 대상이 반복되는 현상 방지를 위해 현재 관전 Pawn 포인터 동기화
+                        DeadBaruPC->SetCurrentSpectatingPawn(OtherPC->GetPawn());
+
+                        // TargetName 변수 중복 선언 및 BaseName 누락 에러 수정
+                        const FString BaseName = PS->GetPlayerName().IsEmpty() 
+                            ? FString::Printf(TEXT("대원 %d"), PS->GetPlayerId()) 
+                            : PS->GetPlayerName();
+                        
+                        const FString TargetName = PS->IsDBNO() 
+                            ? FString::Printf(TEXT("%s (구조 대기)"), *BaseName) 
+                            : BaseName;
+
+                        DeadBaruPC->Client_NotifySpectatingTargetChanged(TargetName);
+                    }
+
                     BARU_NET_LOG(DeadController, LogBaruSession, Log, TEXT("Spectating Target Set to: %s"), *OtherPC->GetName());
                     return;
                 }
             }
         }
+    }
+
+    // [수정] 관전 가능한 팀원이 아무도 없을 경우 포인터 및 UI 초기화
+    if (ABaruPlayerController* DeadBaruPC = Cast<ABaruPlayerController>(DeadController))
+    {
+        DeadBaruPC->SetCurrentSpectatingPawn(nullptr);
+        DeadBaruPC->Client_NotifySpectatingTargetChanged(TEXT(""));
     }
 }
 

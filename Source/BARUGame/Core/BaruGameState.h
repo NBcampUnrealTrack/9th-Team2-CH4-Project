@@ -38,6 +38,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruGlobalNotificationReceived, 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBaruMonsterCountChanged, int32, RemainingCount, int32, TotalCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBaruTeamMonsterKillCountChanged, int32, NewTeamKillCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBaruAllMonstersEliminated);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBaruPlayerArrayUpdated);
 
 /**
  * 생존자 수, 팀 수집물 총 가치등 GameState 및 전역 브로드캐스트(Notification) 관리
@@ -52,6 +53,8 @@ public:
 	ABaruGameState();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void AddPlayerState(APlayerState* PlayerState) override;
+	virtual void RemovePlayerState(APlayerState* PlayerState) override;
 
 	// Getter
 	UFUNCTION(BlueprintPure, Category = "BARU|GameState")
@@ -142,6 +145,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
 	FOnBaruAllMonstersEliminated OnAllMonstersEliminated;
+	
+	UPROPERTY(BlueprintAssignable, Category = "BARU|GameState|Events")
+	FOnBaruPlayerArrayUpdated OnPlayerArrayUpdated;
 	
 protected:
 	// Replicated Properties & RepNotifies
