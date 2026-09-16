@@ -36,8 +36,18 @@
 #include "Animation/Character/BaruCharacterAnimSet.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Gameplay/Weapon/BaruWeaponBase.h"
+
+// VOIP 헤더
 #include "Net/VoiceConfig.h"
 #include "Sound/SoundAttenuation.h"
+
+// VFX 및 사운드 헤더
+#include "Effects/VFX/BaruVFXLibrary.h"   
+#include "NiagaraSystem.h"      
+#include "NiagaraComponent.h"
+#include "Kismet/GameplayStatics.h"       
+#include "Components/AudioComponent.h"    
+#include "Sound/SoundBase.h"
 
 ABaruCharacter::ABaruCharacter()
 {
@@ -240,6 +250,7 @@ void ABaruCharacter::HandleReloadingTagChanged(const FGameplayTag Tag, int32 New
          CurrentReloadMontage = *Found;
          PlayAnimMontage(CurrentReloadMontage);
       }
+      PlayReloadSound(EquipmentComponent->GetActiveWeaponSlot());
       return;
    }
 
@@ -253,9 +264,13 @@ void ABaruCharacter::HandleReloadingTagChanged(const FGameplayTag Tag, int32 New
       }
       CurrentReloadMontage = nullptr;
    }
+   if (CurrentReloadAudio && CurrentReloadAudio->IsPlaying())
+   {
+      CurrentReloadAudio->FadeOut(0.15f, 0.0f);
+   }
+   CurrentReloadAudio = nullptr;
 }
 
-// ★[추가 09.14] 발사 신호가 오면 그 무기의 발사 몽타주 재생 (연출 전용, 모든 PC 에서 각자 실행)
 void ABaruCharacter::HandleGameplayCue(UObject* Self, FGameplayTag GameplayCueTag, EGameplayCueEvent::Type EventType, const FGameplayCueParameters& Parameters)
 {
    // 엔진 기본 동작 유지
@@ -271,11 +286,75 @@ void ABaruCharacter::HandleGameplayCue(UObject* Self, FGameplayTag GameplayCueTa
    {
       PlayAnimMontage(*Found);
    }
+   PlayMuzzleFlash(GameplayCueTag);
+}
+
+void ABaruCharacter::PlayMuzzleFlash(const FGameplayTag& FireCueTag)
+{
+   const TObjectPtr<UNiagaraSystem>* FoundFX = MuzzleFlashByCue.Find(FireCueTag);
+   if (!FoundFX || !*FoundFX || !EquipmentComponent)
+   {
+      return;
+   }
+
+   ABaruWeaponBase* Weapon = EquipmentComponent->GetActiveWeapon();
+   if (!IsValid(Weapon))
+   {
+      return;
+   }
+
+   // 무기 코드가 Muzzle 소켓이 달린 메쉬를 찾아서 돌려줌
+   USceneComponent* AttachComp = Weapon->GetFireEffectAttachComponent();
+   if (!AttachComp)
+   {
+      return;
+   }
+
+   static const FName MuzzleSocketName(TEXT("Muzzle"));
+   const FName AttachPoint = AttachComp->DoesSocketExist(MuzzleSocketName) ? MuzzleSocketName : NAME_None;   // 소켓이 없으면 무기 원점
+   
+   UNiagaraComponent* FlashComp = UBaruVFXLibrary::SpawnLocalVFXAttached(*FoundFX, AttachComp, AttachPoint,
+      FVector::ZeroVector, MuzzleFlashRotationOffset, MuzzleFlashScale);
+
+   if (FlashComp && MuzzleFlashLifetime > 0.0f)
+   {
+      TWeakObjectPtr<UNiagaraComponent> WeakFlash = FlashComp;
+      FTimerHandle FlashStopHandle;
+      GetWorldTimerManager().SetTimer(FlashStopHandle, FTimerDelegate::CreateLambda([WeakFlash]()
+      {
+         if (WeakFlash.IsValid())
+         {
+            WeakFlash->Deactivate();  
+         }
+      }), MuzzleFlashLifetime, false);
+   }
+}
+
+void ABaruCharacter::PlayReloadSound(EBaruEquipmentSlot WeaponSlot)
+{
+   const TObjectPtr<USoundBase>* FoundSound = ReloadSoundBySlot.Find(WeaponSlot);
+   if (!FoundSound || !*FoundSound)
+   {
+      return;
+   }
+
+   USceneComponent* AttachComp = GetMesh();
+   if (EquipmentComponent)
+   {
+      if (ABaruWeaponBase* Weapon = EquipmentComponent->GetActiveWeapon())
+      {
+         AttachComp = Weapon->GetRootComponent();
+      }
+   }
+
+   CurrentReloadAudio = UGameplayStatics::SpawnSoundAttached(
+      *FoundSound, AttachComp, NAME_None, FVector::ZeroVector,
+      EAttachLocation::KeepRelativeOffset, /*bStopWhenAttachedToDestroyed=*/true,
+      1.0f, 1.0f, 0.0f, WeaponSoundAttenuation);
 }
 
 void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-   // [09.13] 타이머 메모리 정리
    StopHealthRegen();
    
    if (UAbilitySystemComponent* ASC = CachedASC.Get())
@@ -538,7 +617,7 @@ void ABaruCharacter::Input_StopInteract()
 
 void ABaruCharacter::Input_Fire()
 {
-   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || !EquipmentComponent)
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling() || !EquipmentComponent)
    {
       return;
    }
@@ -556,13 +635,12 @@ void ABaruCharacter::Input_ToggleHeadlight()
 
 void ABaruCharacter::Input_Reload()
 {
-   // 앉아 있으면 재장전 무시
-   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched)
+   // 사망, DBNO, 앉기, 공중 체공(점프/낙하) 중에는 재장전 불가
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling()) 
    {
       return;
    }
 
-   // 장비 컴포넌트를 통해 InputTag.Reload 트리거
    if (EquipmentComponent)
    {
       EquipmentComponent->RequestReloadActiveWeapon();
@@ -625,7 +703,7 @@ void ABaruCharacter::Input_SelectSecondaryWeapon()
 
 void ABaruCharacter::HandleWeaponSlotInput(EBaruEquipmentSlot DesiredSlot)
 {
-   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || !EquipmentComponent)
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling() || !EquipmentComponent)
    {
       return;
    }
@@ -812,9 +890,91 @@ void ABaruCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightA
 {
    Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
 
-   if (HasAuthority() && EquipmentComponent && !bIsDead && !Execute_IsDBNO(this))
+   if (HasAuthority() && EquipmentComponent && !bIsDead && !Execute_IsDBNO(this)&& !GetCharacterMovement()->IsFalling())
    {
       EquipmentComponent->SetWeaponTemporarilyHolsteredOnServer(false);
+   }
+}
+
+void ABaruCharacter::OnJumped_Implementation()
+{
+   Super::OnJumped_Implementation();
+
+   if (IsLocallyControlled())
+   {
+      SetAiming(false);
+      if (EquipmentComponent)
+      {
+         EquipmentComponent->RequestStopFireActiveWeapon();
+      }
+   }
+
+   if (HasAuthority() && EquipmentComponent)
+   {
+      EquipmentComponent->SetWeaponTemporarilyHolsteredOnServer(true);
+   }
+}
+
+void ABaruCharacter::Landed(const FHitResult& Hit)
+{
+   Super::Landed(Hit);
+
+   if (HasAuthority() && EquipmentComponent && !bIsCrouched && !bIsDead && !Execute_IsDBNO(this))
+   {
+      EquipmentComponent->SetWeaponTemporarilyHolsteredOnServer(false);
+   }
+}
+
+
+// ★[추가 09.16] 내 화면이 이 캐릭터를 관전하기 시작 — 관전 카메라가 이 캐릭터 눈 위치라서, 내 화면에서만 머리를 숨김
+void ABaruCharacter::BecomeViewTarget(APlayerController* PC)
+{
+   Super::BecomeViewTarget(PC);
+
+   if (PC && PC->IsLocalController() && !IsLocallyControlled() && !bIsDead)
+   {
+      bIsViewedBySpectator = true;
+      SetHeadHiddenForLocalView(true);
+   }
+}
+
+// ★[추가 09.16] 관전이 끝나면(다른 사람으로 전환 등) 머리 복구
+void ABaruCharacter::EndViewTarget(APlayerController* PC)
+{
+   if (bIsViewedBySpectator && PC && PC->IsLocalController())
+   {
+      bIsViewedBySpectator = false;
+      SetHeadHiddenForLocalView(false);
+   }
+
+   Super::EndViewTarget(PC);
+}
+
+// ★[추가 09.16] 머리·목 뼈를 내 화면에서만 숨기기/보이기 (숨겨도 카메라가 머리를 따라가도록 뼈 계산은 유지)
+void ABaruCharacter::SetHeadHiddenForLocalView(bool bHide)
+{
+   USkeletalMeshComponent* BodyMesh = GetMesh();
+   if (!BodyMesh)
+   {
+      return;
+   }
+
+   static const FName HeadBones[] = { TEXT("head"), TEXT("neck_02"), TEXT("neck_01") };
+
+   if (bHide)
+   {
+      BodyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+      for (const FName& Bone : HeadBones)
+      {
+         BodyMesh->HideBoneByName(Bone, EPhysBodyOp::PBO_None);
+      }
+   }
+   else
+   {
+      for (const FName& Bone : HeadBones)
+      {
+         BodyMesh->UnHideBoneByName(Bone);
+      }
    }
 }
 
@@ -1727,8 +1887,15 @@ void ABaruCharacter::StopHealthRegen()
 void ABaruCharacter::Tick(float DeltaSeconds)
 {
    Super::Tick(DeltaSeconds);
-
-   // 로컬 클라이언트만 연산 (서버 및 원격 프록시 스킵)
+   
+   if (bIsViewedBySpectator)
+   {
+      UpdateCameraFollow(DeltaSeconds);
+      if (FollowCamera)
+      {
+         FollowCamera->SetWorldRotation(GetBaseAimRotation());   // 남의 캐릭터는 카메라가 마우스를 안 따라가서 직접 맞춤
+      }
+   }
    if (!IsLocallyControlled())
    {
       return;
@@ -1840,7 +2007,7 @@ void ABaruCharacter::ApplyRecoil(const FBaruRecoilData& InRecoilData)
 // [09.13] 조준 기능 추가
 void ABaruCharacter::Input_AimStart()
 {
-   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched) return;
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling()) return;
    SetAiming(true);
 }
 

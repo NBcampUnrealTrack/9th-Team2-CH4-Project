@@ -189,17 +189,18 @@ void UBaruMainHUDWidget::NativeOnActivated()
 	
 	PlayerStateBindRetryCount = 0;
 	
-	// 기존 PlayerState 연결
-	// 내부에서 InventoryComponent도 연결할 예정
+	// 기존 PlayerState 연결 (내부에서 InventoryComponent 연결 포함)
 	BindToPlayerState();
 	
 	// 기존 GameState 연결
 	BindToGameState();
-	
-	// 부활 시작/종료 이벤트를 받기 위해
-	// PlayerController와 연결한다.
+
+	// 세션 참여 시 아군 목록 복제 지연 대응 재시도 루프
+	StartAllyStatusListRetry();
+
+	// 부활 시작/종료 이벤트를 받기 위해 PlayerController와 연결
 	BindToPlayerController();
-	
+
 	BARU_LOG(
 		LogBaruUI,
 		Log,
@@ -230,13 +231,16 @@ void UBaruMainHUDWidget::NativeOnDeactivated()
 	{
 		Border_HitScreenEffect->SetRenderOpacity(0.0f);
 	}
-	
+
+	// 아군 목록 갱신 타이머 정지
+	StopAllyStatusListRetry();
+
 	// PlayerController 부활 이벤트 해제
 	UnbindFromPlayerController();
 	
 	// InventoryComponent 획득 이벤트 해제
 	UnbindFromInventoryComponent();
-	
+
 	// 기존 연결 해제
 	UnbindFromGameState();
 	UnbindFromPlayerState();
@@ -565,6 +569,59 @@ void UBaruMainHUDWidget::PlayHitScreenEffect()
 		1,
 		EUMGSequencePlayMode::Forward,
 		1.0f);
+}
+
+void UBaruMainHUDWidget::StartAllyStatusListRetry()
+{
+	StopAllyStatusListRetry();
+	
+	AllyStatusListRetryCount = 0;
+	
+	// 타이머를 기다리지 않고 즉시 한 번 갱신한다.
+	RebuildAllyStatusList();
+	
+	UWorld* World = GetWorld();
+	if (!IsValid(World))
+	{
+		return;
+	}
+	
+	World->GetTimerManager().SetTimer(
+		AllyStatusListRetryTimerHandle,
+		this,
+		&ThisClass::RetryRebuildAllyStatusList,
+		0.25f,
+		true);
+}
+
+void UBaruMainHUDWidget::RetryRebuildAllyStatusList()
+{
+	++AllyStatusListRetryCount;
+	
+	// GameState 자체가 늦게 준비된 경우에도 다시 연결한다.
+	if (!IsValid(BoundGameState))
+	{
+		BindToGameState();
+	}
+	
+	RebuildAllyStatusList();
+	
+	// 0.25초 x 20회 = 최대 약 5초
+	if (AllyStatusListRetryCount >= 20)
+	{
+		StopAllyStatusListRetry();
+	}
+}
+
+void UBaruMainHUDWidget::StopAllyStatusListRetry()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			AllyStatusListRetryTimerHandle);
+	}
+	
+	AllyStatusListRetryCount = 0;
 }
 
 void UBaruMainHUDWidget::BindToInventoryComponent()
