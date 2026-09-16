@@ -131,6 +131,15 @@ protected:
 	
 	// PlayerArray를 읽어 아군 목록을 다시 만든다.
 	void RebuildAllyStatusList();
+	
+	// PlayerArray 복제 지연에 대응해 아군 목록 갱신을 재시도한다.
+	void StartAllyStatusListRetry();
+	
+	// 재시도 타이머에서 호출된다.
+	void RetryRebuildAllyStatusList();
+	
+	// 아군 목록 재시도 타이머를 종료한다.
+	void StopAllyStatusListRetry();
 
 	// 로컬 플레이어가 피해를 받았을 때 피격 화면 효과를 재생한다.
 	void PlayHitScreenEffect();
@@ -300,4 +309,10 @@ private:
 	
 	// 현재까지 시도한 횟수
 	int32 PlayerStateBindRetryCount = 0;
+	
+	// 아군 PlayerState 복제 지연 대응용 타이머
+	FTimerHandle AllyStatusListRetryTimerHandle;
+	
+	// 현재까지 아군 목록 갱신을 재시도한 횟수
+	int32 AllyStatusListRetryCount = 0;
 };
