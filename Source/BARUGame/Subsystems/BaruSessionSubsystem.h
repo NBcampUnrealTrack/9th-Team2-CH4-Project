@@ -13,14 +13,18 @@ class UNetDriver;
 
 namespace BaruMatchmakingConstants
 {
+    // 언리얼 OSS FOnlineSessionSettings에 넘기는 키 (언리얼 내부에서 _s 접미사를 자동 부착)
     const FName SETTING_SERVER_NAME = FName(TEXT("SERVER_NAME"));
     const FName SETTING_MAP_NAME = FName(TEXT("MAP_NAME"));
     const FName SETTING_HOST_NAME = FName(TEXT("HOST_NAME"));
-    
-    // [추가] 우리 게임 전용 식별 키와 고유 값
     const FName SETTING_PROJECT_ID = FName(TEXT("BARU_PROJECT_ID"));
-    inline const char* RAW_PROJECT_KEY = "BARU_PROJECT_ID";
+
+    // 스팀 네이티브 SDK(SteamMatchmaking)로 직접 쿼리/조회할 때 쓰는 실제 키 이름 (_s 반영)
+    inline const char* RAW_PROJECT_KEY = "BARU_PROJECT_ID_s";
     inline const char* RAW_PROJECT_VALUE = "BARU_PROJECT_2026_V1";
+    inline const char* RAW_SERVER_NAME_KEY = "SERVER_NAME_s";
+    inline const char* RAW_MAP_NAME_KEY = "MAP_NAME_s";
+    inline const char* RAW_HOST_NAME_KEY = "HOST_NAME_s";
 }
 
 USTRUCT(BlueprintType)
@@ -161,10 +165,8 @@ private:
     bool bPendingReturnToMainMenu = false;
     
 private:
-    // Steamworks 비동기 로비 검색 콜백
     CCallResult<UBaruSessionSubsystem, LobbyMatchList_t> SteamLobbyMatchListCallResult;
     void OnSteamLobbyMatchList(LobbyMatchList_t* pLobbyMatchList, bool bIOFailure);
 
-    // 검색된 로비 SteamID 보관 (Index 매핑용)
     TArray<CSteamID> FoundSteamLobbyIDs;
 };

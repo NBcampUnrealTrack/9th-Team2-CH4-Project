@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "UI/Foundation/BaruActivatableWidget.h"
+#include "Gameplay/Inventory/DataTypes/BaruInventoryNotification.h"
+#include "Player/BaruPlayerController.h"
 
 #include "TimerManager.h"
 
@@ -13,6 +15,7 @@ class ABaruGameState;
 class ABaruPlayerState;
 
 class UBaruHealthComponent;
+class UBaruInventoryComponent;
 class UBorder;
 class UListView;
 class UProgressBar;
@@ -140,7 +143,35 @@ protected:
 
 	// 로컬 플레이어가 피해를 받았을 때 피격 화면 효과를 재생한다.
 	void PlayHitScreenEffect();
-
+	
+	// 아이템 획득 결과물 InventoryComponent와 연결한다.
+	void BindToInventoryComponent();
+	void UnbindFromInventoryComponent();
+	
+	UFUNCTION()
+	void HandleInventoryPickupResult(
+		const FBaruInventoryPickupNotification& Notification);
+	
+	void HidePickupNotification();
+	
+	// 부활 진행 이벤트를 PlayerController와 연결한다.
+	void BindToPlayerController();
+	void UnbindFromPlayerController();
+	
+	UFUNCTION()
+	void HandleInteractionHoldStarted(
+		AActor* OtherActor,
+		float Duration,
+		bool bIsHolder);
+	
+	UFUNCTION()
+	void HandleInteractionHoldEnded(
+		AActor* OtherActor,
+		EBaruInteractionHoldEndReason Reason,
+		bool bIsHolder);
+	
+	void HideReviveProgress();
+	
 	// 현재 체력이 변경됐을 때 호출된다.
 	UFUNCTION()
 	void HandleHealthChanged(
@@ -223,6 +254,32 @@ protected:
 	// 피격 화면 효과 애니메이션
 	UPROPERTY(Transient, meta = (BindWidgetAnim))
 	TObjectPtr<UWidgetAnimation> Anim_HitScreenEffect;
+	
+	// 아이템 획득 알림
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UBorder> Border_PickupNotification;
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> Text_PickupTitle;
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> Text_PickupDetail;
+	
+	UPROPERTY(Transient, meta = (BindWidgetAnim))
+	TObjectPtr<UWidgetAnimation> Anim_PickupNotification;
+	
+	// 부활 진행 UI
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UBorder> Border_ReviveProgress;
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UProgressBar> ProgressBar_ReviveProgressBar;
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> Text_ReviveProgress;
+	
+	UPROPERTY(Transient, meta = (BindWidgetAnim))
+	TObjectPtr<UWidgetAnimation> Anim_ReviveProgress;
 
 private:
 	// 현재 HUD가 관찰하고있는 로컬 PlayerState
@@ -241,6 +298,14 @@ private:
 	
 	// 클라이언트 PlayerState 연결 재시도용 타이머
 	FTimerHandle PlayerStateBindRetryTimerHandle;
+	
+	UPROPERTY(Transient)
+	TObjectPtr<UBaruInventoryComponent> BoundInventoryComponent;
+	
+	UPROPERTY(Transient)
+	TObjectPtr<ABaruPlayerController> BoundPlayerController;
+	
+	FTimerHandle PickupNotificationTimerHandle;
 	
 	// 현재까지 시도한 횟수
 	int32 PlayerStateBindRetryCount = 0;

@@ -84,18 +84,19 @@ void ABaruPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 // [추가] 레벨 이동 시 값 인수인계
 void ABaruPlayerState::CopyProperties(APlayerState* PlayerState)
 {
-    Super::CopyProperties(PlayerState);
+	Super::CopyProperties(PlayerState);
 
-    if (ABaruPlayerState* NewPS = Cast<ABaruPlayerState>(PlayerState))
-    {
-        // 새 레벨 진입 시 레디 상태 초기화
-        NewPS->bIsReady = false;
+	if (ABaruPlayerState* NewPS = Cast<ABaruPlayerState>(PlayerState))
+	{
+		NewPS->bIsReady = false;
+		NewPS->bIsDead = this->bIsDead; // [수정] 원본 사망 상태를 그대로 인계하여 로비가 식별하게 함
+		NewPS->bIsDBNO = false;
         
-        if (InventoryComponent && NewPS->InventoryComponent)
-        {
-            NewPS->InventoryComponent->CopyInventoryFrom(InventoryComponent);
-        }
-    }
+		if (InventoryComponent && NewPS->InventoryComponent)
+		{
+			NewPS->InventoryComponent->CopyInventoryFrom(InventoryComponent);
+		}
+	}
 }
 
 UAbilitySystemComponent* ABaruPlayerState::GetAbilitySystemComponent() const
@@ -321,4 +322,38 @@ void ABaruPlayerState::ResetPlayerStatusAndInventory()
 	}
 
 	BARU_NET_LOG(this, LogBaruSession, Log, TEXT("Player '%s' reset complete (ID retained, stats/items wiped)."), *GetPlayerName());
+}
+
+void ABaruPlayerState::ResetStatusOnly()
+{
+	if (!HasAuthority()) return;
+
+	SetDeadState(false);
+	SetDBNOState(false);
+	Server_SetReadyStatus(false);
+	MonsterKillCount = 0;
+	OnRep_MonsterKillCount();
+
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->CancelAllAbilities();
+
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Dead);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_DBNO);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Immune);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Combat_Reloading);
+		AbilitySystemComponent->RemoveLooseGameplayTag(FBaruGameplayTags::Get().State_Combat_Aiming);
+
+		if (CoreAttributeSet)
+		{
+			AbilitySystemComponent->SetNumericAttributeBase(UBaruCoreAttributeSet::GetHealthAttribute(), CoreAttributeSet->GetMaxHealth());
+		}
+		if (PlayerAttributeSet)
+		{
+			AbilitySystemComponent->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetSanityAttribute(), PlayerAttributeSet->GetMaxSanity());
+			AbilitySystemComponent->SetNumericAttributeBase(UBaruPlayerAttributeSet::GetTensionAttribute(), 0.0f);
+		}
+	}
+
+	BARU_NET_LOG(this, LogBaruSession, Log, TEXT("[LobbyItems] Player '%s' 상태 스탯 리셋 완료 (인벤토리 보존)."), *GetPlayerName());
 }

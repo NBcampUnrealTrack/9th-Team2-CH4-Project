@@ -114,6 +114,10 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|PlayerState")
     void ResetPlayerStatusAndInventory();
     
+    // 인벤토리와 장착 무기는 보존한 채 체력, 정신력, 전투 태그만 초기화
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "BARU|PlayerState")
+    void ResetStatusOnly();
+    
 public:
     // UI 델리게이트
     UPROPERTY(BlueprintAssignable, Category = "BARU|PlayerState|Event")

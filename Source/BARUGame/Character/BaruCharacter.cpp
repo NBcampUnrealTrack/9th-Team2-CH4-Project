@@ -1,4 +1,6 @@
 #include "Character/BaruCharacter.h" 
+#include "Animation/AnimMontage.h"    
+#include "Animation/AnimInstance.h"   
 #include "Camera/CameraComponent.h"
 #include "Components/SkeletalMeshComponent.h" 
 #include "Components/CapsuleComponent.h"                          
@@ -31,6 +33,14 @@
 #include "BaruLog.h"
 #include "Components/BaruTensionComponent.h"
 #include "AbilitySystem/Attributes/BaruPlayerAttributeSet.h"
+#include "Animation/Character/BaruCharacterAnimSet.h"
+#include "Gameplay/Weapon/BaruWeaponBase.h"
+#include "Effects/VFX/BaruVFXLibrary.h"   
+#include "NiagaraSystem.h"      
+#include "NiagaraComponent.h"
+#include "Kismet/GameplayStatics.h"       
+#include "Components/AudioComponent.h"    
+#include "Sound/SoundBase.h"              
 
 ABaruCharacter::ABaruCharacter()
 {
@@ -60,7 +70,7 @@ ABaruCharacter::ABaruCharacter()
     Mesh1P->bCastDynamicShadow = false;
    
     GetMesh()->SetOwnerNoSee(true);        
-    GetMesh()->bCastHiddenShadow = true;    
+    GetMesh()->bCastHiddenShadow = false;
 
     // 1인칭 캐릭터 회전 제어 
     bUseControllerRotationYaw = true; // 마우스 좌우 회전 시 캐릭터 몸통도 함께 회전
@@ -112,6 +122,20 @@ void ABaruCharacter::PossessedBy(AController* NewController)
       if (ABaruPlayerState* BaruPS = GetPlayerState<ABaruPlayerState>())
       {
          BaruPS->SetDeadState(false);
+         
+         if (UBaruInventoryComponent* Inven = BaruPS->GetInventoryComponent())
+         {
+            if (UBaruEquipmentComponent* EquipComp = FindComponentByClass<UBaruEquipmentComponent>())
+            {
+               for (const FInventorySlot& Slot : Inven->GetSlots())
+               {
+                  if (Slot.bEquipped && IsValid(Slot.Item))
+                  {
+                     EquipComp->RestoreEquippedWeapon(Slot.Item);
+                  }
+               }
+            }
+         }
       }
    }
 }
@@ -139,6 +163,14 @@ void ABaruCharacter::InitAbilityActorInfo()
    }
    
    ASC->InitAbilityActorInfo(BaruPS, this);
+   
+   if (HasAuthority())
+   {
+      if (UBaruInventoryComponent* Inventory = BaruPS->GetInventoryComponent())
+      {
+         Inventory->RefreshCarryWeight();
+      }
+   }
 
    if (UBaruHealthComponent* PSHealthComp = BaruPS->GetHealthComponent())
    {
@@ -159,18 +191,22 @@ void ABaruCharacter::InitAbilityActorInfo()
    CachedASC = ASC;
    
    MoveSpeedChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
-       UBaruCoreAttributeSet::GetMoveSpeedAttribute()).AddUObject(this, &ABaruCharacter::HandleMoveSpeedChanged);
+      UBaruCoreAttributeSet::GetMoveSpeedAttribute()).AddUObject(this, &ABaruCharacter::HandleMoveSpeedChanged);
+   
+   CarryWeightChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
+      UBaruPlayerAttributeSet::GetCarryWeightAttribute()).AddUObject(this, &ABaruCharacter::HandleCarryWeightChanged);
+
+   MaxCarryWeightChangedHandle = ASC->GetGameplayAttributeValueChangeDelegate(
+      UBaruPlayerAttributeSet::GetMaxCarryWeightAttribute()).AddUObject(this, &ABaruCharacter::HandleCarryWeightChanged);
+   
+   ReloadingTagChangedHandle = ASC->RegisterGameplayTagEvent(
+     FBaruGameplayTags::Get().State_Combat_Reloading, EGameplayTagEventType::NewOrRemoved)
+     .AddUObject(this, &ABaruCharacter::HandleReloadingTagChanged);
 
   
    const float InitialMoveSpeed = ASC->GetNumericAttribute(UBaruCoreAttributeSet::GetMoveSpeedAttribute());
-   if (InitialMoveSpeed > 0.0f)
-   {
-      GetCharacterMovement()->MaxWalkSpeed = InitialMoveSpeed;
-   }
-   else
-   {
-      GetCharacterMovement()->MaxWalkSpeed = 450.0f;
-   } 
+   BaseWalkSpeed = (InitialMoveSpeed > 0.0f) ? InitialMoveSpeed : 450.0f;
+   UpdateMaxWalkSpeed();
 }
 
 void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& ChangeData)
@@ -179,15 +215,146 @@ void ABaruCharacter::HandleMoveSpeedChanged(const FOnAttributeChangeData& Change
    UpdateMaxWalkSpeed();
 }
 
+void ABaruCharacter::HandleCarryWeightChanged(const FOnAttributeChangeData& ChangeData)
+{
+   UpdateMaxWalkSpeed();
+}
+
+void ABaruCharacter::HandleReloadingTagChanged(const FGameplayTag Tag, int32 NewCount)
+{
+   if (NewCount > 0)
+   {
+      if (bIsDead || !EquipmentComponent)
+      {
+         return;
+      }
+
+      const TObjectPtr<UAnimMontage>* Found = ReloadMontageBySlot.Find(EquipmentComponent->GetActiveWeaponSlot());
+      if (Found && *Found)
+      {
+         CurrentReloadMontage = *Found;
+         PlayAnimMontage(CurrentReloadMontage);
+      }
+      PlayReloadSound(EquipmentComponent->GetActiveWeaponSlot());
+      return;
+   }
+
+   // 재장전이 끝났거나 취소됨 → 아직 재생 중이면 부드럽게 멈춤
+   if (CurrentReloadMontage)
+   {
+      UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+      if (AnimInstance && AnimInstance->Montage_IsPlaying(CurrentReloadMontage))
+      {
+         StopAnimMontage(CurrentReloadMontage);
+      }
+      CurrentReloadMontage = nullptr;
+   }
+   if (CurrentReloadAudio && CurrentReloadAudio->IsPlaying())
+   {
+      CurrentReloadAudio->FadeOut(0.15f, 0.0f);
+   }
+   CurrentReloadAudio = nullptr;
+}
+
+void ABaruCharacter::HandleGameplayCue(UObject* Self, FGameplayTag GameplayCueTag, EGameplayCueEvent::Type EventType, const FGameplayCueParameters& Parameters)
+{
+   // 엔진 기본 동작 유지
+   IGameplayCueInterface::HandleGameplayCue(Self, GameplayCueTag, EventType, Parameters);
+
+   if (EventType != EGameplayCueEvent::Executed || bIsDead)
+   {
+      return;
+   }
+
+   const TObjectPtr<UAnimMontage>* Found = FireMontageByCue.Find(GameplayCueTag);
+   if (Found && *Found)
+   {
+      PlayAnimMontage(*Found);
+   }
+   PlayMuzzleFlash(GameplayCueTag);
+}
+
+void ABaruCharacter::PlayMuzzleFlash(const FGameplayTag& FireCueTag)
+{
+   const TObjectPtr<UNiagaraSystem>* FoundFX = MuzzleFlashByCue.Find(FireCueTag);
+   if (!FoundFX || !*FoundFX || !EquipmentComponent)
+   {
+      return;
+   }
+
+   ABaruWeaponBase* Weapon = EquipmentComponent->GetActiveWeapon();
+   if (!IsValid(Weapon))
+   {
+      return;
+   }
+
+   // 무기 코드가 Muzzle 소켓이 달린 메쉬를 찾아서 돌려줌
+   USceneComponent* AttachComp = Weapon->GetFireEffectAttachComponent();
+   if (!AttachComp)
+   {
+      return;
+   }
+
+   static const FName MuzzleSocketName(TEXT("Muzzle"));
+   const FName AttachPoint = AttachComp->DoesSocketExist(MuzzleSocketName) ? MuzzleSocketName : NAME_None;   // 소켓이 없으면 무기 원점
+   
+   UNiagaraComponent* FlashComp = UBaruVFXLibrary::SpawnLocalVFXAttached(*FoundFX, AttachComp, AttachPoint,
+      FVector::ZeroVector, MuzzleFlashRotationOffset, MuzzleFlashScale);
+
+   if (FlashComp && MuzzleFlashLifetime > 0.0f)
+   {
+      TWeakObjectPtr<UNiagaraComponent> WeakFlash = FlashComp;
+      FTimerHandle FlashStopHandle;
+      GetWorldTimerManager().SetTimer(FlashStopHandle, FTimerDelegate::CreateLambda([WeakFlash]()
+      {
+         if (WeakFlash.IsValid())
+         {
+            WeakFlash->Deactivate();  
+         }
+      }), MuzzleFlashLifetime, false);
+   }
+}
+
+void ABaruCharacter::PlayReloadSound(EBaruEquipmentSlot WeaponSlot)
+{
+   const TObjectPtr<USoundBase>* FoundSound = ReloadSoundBySlot.Find(WeaponSlot);
+   if (!FoundSound || !*FoundSound)
+   {
+      return;
+   }
+
+   USceneComponent* AttachComp = GetMesh();
+   if (EquipmentComponent)
+   {
+      if (ABaruWeaponBase* Weapon = EquipmentComponent->GetActiveWeapon())
+      {
+         AttachComp = Weapon->GetRootComponent();
+      }
+   }
+
+   CurrentReloadAudio = UGameplayStatics::SpawnSoundAttached(
+      *FoundSound, AttachComp, NAME_None, FVector::ZeroVector,
+      EAttachLocation::KeepRelativeOffset, /*bStopWhenAttachedToDestroyed=*/true,
+      1.0f, 1.0f, 0.0f, WeaponSoundAttenuation);
+}
+
 void ABaruCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-   // [09.13] 타이머 메모리 정리
    StopHealthRegen();
    
    if (UAbilitySystemComponent* ASC = CachedASC.Get())
    {
       ASC->GetGameplayAttributeValueChangeDelegate(
           UBaruCoreAttributeSet::GetMoveSpeedAttribute()).Remove(MoveSpeedChangedHandle);
+      
+      ASC->GetGameplayAttributeValueChangeDelegate(
+          UBaruPlayerAttributeSet::GetCarryWeightAttribute()).Remove(CarryWeightChangedHandle);
+      ASC->GetGameplayAttributeValueChangeDelegate(
+          UBaruPlayerAttributeSet::GetMaxCarryWeightAttribute()).Remove(MaxCarryWeightChangedHandle);
+      
+      ASC->RegisterGameplayTagEvent(
+          FBaruGameplayTags::Get().State_Combat_Reloading, EGameplayTagEventType::NewOrRemoved)
+          .Remove(ReloadingTagChangedHandle);
    }
    CachedASC.Reset();
 
@@ -198,6 +365,10 @@ void ABaruCharacter::BeginPlay()
 {
    Super::BeginPlay();
    
+   if (FollowCamera)
+   {
+      DefaultCameraRelativeLocation = FollowCamera->GetRelativeLocation();
+   }
    if (USkeletalMeshComponent* BodyMesh = GetMesh())
    {
       TArray<USceneComponent*> ChildComponents;
@@ -219,12 +390,14 @@ void ABaruCharacter::BeginPlay()
 void ABaruCharacter::PawnClientRestart()
 {
    Super::PawnClientRestart();
-
+   
    if (IsLocallyControlled() && GetMesh())
    {
+      GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
       GetMesh()->HideBoneByName(TEXT("head"), EPhysBodyOp::PBO_None);
       GetMesh()->HideBoneByName(TEXT("neck_02"), EPhysBodyOp::PBO_None);
       GetMesh()->HideBoneByName(TEXT("neck_01"), EPhysBodyOp::PBO_None);
+      GetWorldTimerManager().SetTimer(WeaponShadowTimerHandle, this, &ABaruCharacter::HideLocalWeaponShadows, 0.5f, true);
    }
    
    APlayerController* PC = Cast<APlayerController>(GetController());
@@ -413,7 +586,7 @@ void ABaruCharacter::Input_StopInteract()
 
 void ABaruCharacter::Input_Fire()
 {
-   if (bIsDead || Execute_IsDBNO(this) || !EquipmentComponent)
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling() || !EquipmentComponent)
    {
       return;
    }
@@ -429,10 +602,9 @@ void ABaruCharacter::Input_ToggleHeadlight()
    Server_SetHeadlightOn(!bHeadlightOn);
 }
 
-// [09.13] 재장전 입력 처리 함수 추가
 void ABaruCharacter::Input_Reload()
 {
-   if (bIsDead || Execute_IsDBNO(this))
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling()) 
    {
       return;
    }
@@ -500,11 +672,11 @@ void ABaruCharacter::Input_SelectSecondaryWeapon()
 
 void ABaruCharacter::HandleWeaponSlotInput(EBaruEquipmentSlot DesiredSlot)
 {
-   if (bIsDead || Execute_IsDBNO(this) || !EquipmentComponent)
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling() || !EquipmentComponent)
    {
       return;
    }
-   
+
    if (EquipmentComponent->GetActiveWeaponSlot() == DesiredSlot)
    {
       return;
@@ -664,7 +836,114 @@ void ABaruCharacter::Input_ToggleCrouch()
    }
    else
    {
+      SetAiming(false);
+      if (EquipmentComponent)
+      {
+         EquipmentComponent->RequestStopFireActiveWeapon();
+      }
       Crouch();
+   }
+}
+
+void ABaruCharacter::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+   Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+
+   if (HasAuthority() && EquipmentComponent)
+   {
+      EquipmentComponent->SetWeaponTemporarilyHolsteredOnServer(true);
+   }
+}
+
+void ABaruCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+   Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+
+   if (HasAuthority() && EquipmentComponent && !bIsDead && !Execute_IsDBNO(this)&& !GetCharacterMovement()->IsFalling())
+   {
+      EquipmentComponent->SetWeaponTemporarilyHolsteredOnServer(false);
+   }
+}
+
+void ABaruCharacter::OnJumped_Implementation()
+{
+   Super::OnJumped_Implementation();
+
+   if (IsLocallyControlled())
+   {
+      SetAiming(false);
+      if (EquipmentComponent)
+      {
+         EquipmentComponent->RequestStopFireActiveWeapon();
+      }
+   }
+
+   if (HasAuthority() && EquipmentComponent)
+   {
+      EquipmentComponent->SetWeaponTemporarilyHolsteredOnServer(true);
+   }
+}
+
+void ABaruCharacter::Landed(const FHitResult& Hit)
+{
+   Super::Landed(Hit);
+
+   if (HasAuthority() && EquipmentComponent && !bIsCrouched && !bIsDead && !Execute_IsDBNO(this))
+   {
+      EquipmentComponent->SetWeaponTemporarilyHolsteredOnServer(false);
+   }
+}
+
+
+// ★[추가 09.16] 내 화면이 이 캐릭터를 관전하기 시작 — 관전 카메라가 이 캐릭터 눈 위치라서, 내 화면에서만 머리를 숨김
+void ABaruCharacter::BecomeViewTarget(APlayerController* PC)
+{
+   Super::BecomeViewTarget(PC);
+
+   if (PC && PC->IsLocalController() && !IsLocallyControlled() && !bIsDead)
+   {
+      bIsViewedBySpectator = true;
+      SetHeadHiddenForLocalView(true);
+   }
+}
+
+// ★[추가 09.16] 관전이 끝나면(다른 사람으로 전환 등) 머리 복구
+void ABaruCharacter::EndViewTarget(APlayerController* PC)
+{
+   if (bIsViewedBySpectator && PC && PC->IsLocalController())
+   {
+      bIsViewedBySpectator = false;
+      SetHeadHiddenForLocalView(false);
+   }
+
+   Super::EndViewTarget(PC);
+}
+
+// ★[추가 09.16] 머리·목 뼈를 내 화면에서만 숨기기/보이기 (숨겨도 카메라가 머리를 따라가도록 뼈 계산은 유지)
+void ABaruCharacter::SetHeadHiddenForLocalView(bool bHide)
+{
+   USkeletalMeshComponent* BodyMesh = GetMesh();
+   if (!BodyMesh)
+   {
+      return;
+   }
+
+   static const FName HeadBones[] = { TEXT("head"), TEXT("neck_02"), TEXT("neck_01") };
+
+   if (bHide)
+   {
+      BodyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+      for (const FName& Bone : HeadBones)
+      {
+         BodyMesh->HideBoneByName(Bone, EPhysBodyOp::PBO_None);
+      }
+   }
+   else
+   {
+      for (const FName& Bone : HeadBones)
+      {
+         BodyMesh->UnHideBoneByName(Bone);
+      }
    }
 }
 
@@ -676,8 +955,25 @@ void ABaruCharacter::UpdateMaxWalkSpeed()
       return;
    }
 
-   MoveComp->MaxWalkSpeedCrouched = CrouchedWalkSpeed;
-   MoveComp->MaxWalkSpeed = bIsSprinting ? (BaseWalkSpeed * SprintSpeedMultiplier) : BaseWalkSpeed;
+   float WeightMultiplier = 1.0f;
+
+   if (UAbilitySystemComponent* ASC = CachedASC.Get())
+   {
+      const float Weight = ASC->GetNumericAttribute(UBaruPlayerAttributeSet::GetCarryWeightAttribute());
+      const float MaxWeight = ASC->GetNumericAttribute(UBaruPlayerAttributeSet::GetMaxCarryWeightAttribute());
+
+      if (MaxWeight > KINDA_SMALL_NUMBER)
+      {
+         // 80%에서 감속 시작, 100%에서 최대 감속 (50% 속도)
+         const float Alpha = FMath::Clamp((Weight / MaxWeight - 0.8f) / 0.2f, 0.0f, 1.0f);
+         WeightMultiplier = FMath::Lerp(1.0f, 0.5f, Alpha);
+      }
+   }
+
+   const float SprintMultiplier = bIsSprinting ? SprintSpeedMultiplier : 1.0f;
+
+   MoveComp->MaxWalkSpeed = BaseWalkSpeed * SprintMultiplier * WeightMultiplier;
+   MoveComp->MaxWalkSpeedCrouched = CrouchedWalkSpeed * WeightMultiplier;
 }
 
 void ABaruCharacter::OnRep_Controller()
@@ -898,6 +1194,11 @@ void ABaruCharacter::HandleDBNOStatusChanged(bool bNewDBNO)
       {
          MoveComp->SetMovementMode(MOVE_Walking);
          UpdateMaxWalkSpeed();
+         
+         if (APlayerController* PC = Cast<APlayerController>(GetController()))
+         {
+            PC->SetViewTarget(this);
+         }
       }
    }
    // [추가] 다운 중에만 상호작용 트레이스에 걸리게 합니다.
@@ -1038,11 +1339,49 @@ void ABaruCharacter::OnRep_IsDead()
    if (USkeletalMeshComponent* BodyMesh = GetMesh())
    {
       BodyMesh->SetOwnerNoSee(false);
+      BodyMesh->UnHideBoneByName(TEXT("head"));
+      BodyMesh->UnHideBoneByName(TEXT("neck_02"));
+      BodyMesh->UnHideBoneByName(TEXT("neck_01"));
+   }
+   float RagdollDelay = 0.0f;
+   if (AnimSet && AnimSet->DeathMontages.Num() > 0)
+   {
+      const int32 Seed = GetPlayerState() ? GetPlayerState()->GetPlayerId() : 0;
+      const int32 Index = FMath::Abs(Seed) % AnimSet->DeathMontages.Num();
+      if (UAnimMontage* DeathMontage = AnimSet->DeathMontages[Index])
+      {
+         const float MontageLength = PlayAnimMontage(DeathMontage);   // 재생 길이(초) 반환
+         RagdollDelay = MontageLength * DeathRagdollStartRatio;
+      }
+   }
+
+   if (RagdollDelay > 0.0f)
+   {
+      GetWorldTimerManager().SetTimer(DeathRagdollTimerHandle, this, &ABaruCharacter::StartDeathRagdoll, RagdollDelay, false);
+   }
+   else
+   {
+      StartDeathRagdoll();
    }
 
    OnDeathCosmetic();   // 래그돌 / 사망 몽타주는 BP 에서
 }
 
+void ABaruCharacter::StartDeathRagdoll()
+{
+   USkeletalMeshComponent* BodyMesh = GetMesh();
+   if (!BodyMesh || !BodyMesh->GetPhysicsAsset())
+   {
+      return;
+   }
+
+   BodyMesh->SetCollisionProfileName(TEXT("Ragdoll"));
+   BodyMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+   BodyMesh->SetAllBodiesSimulatePhysics(true);
+   BodyMesh->SetSimulatePhysics(true);
+   BodyMesh->WakeAllRigidBodies();
+   BodyMesh->bBlendPhysics = true;
+}
 
 bool ABaruCharacter::IsDead_Implementation() const
 {
@@ -1488,8 +1827,15 @@ void ABaruCharacter::StopHealthRegen()
 void ABaruCharacter::Tick(float DeltaSeconds)
 {
    Super::Tick(DeltaSeconds);
-
-   // 로컬 클라이언트만 연산 (서버 및 원격 프록시 스킵)
+   
+   if (bIsViewedBySpectator)
+   {
+      UpdateCameraFollow(DeltaSeconds);
+      if (FollowCamera)
+      {
+         FollowCamera->SetWorldRotation(GetBaseAimRotation());   // 남의 캐릭터는 카메라가 마우스를 안 따라가서 직접 맞춤
+      }
+   }
    if (!IsLocallyControlled())
    {
       return;
@@ -1510,6 +1856,69 @@ void ABaruCharacter::Tick(float DeltaSeconds)
 
    // 2. 조준 집중 연출 보간 (FOV, 터널비전 비네팅, 색수차)
    UpdateAimingEffects(DeltaSeconds);
+   UpdateCameraFollow(DeltaSeconds);
+}
+
+void ABaruCharacter::UpdateCameraFollow(float DeltaSeconds)
+{
+   USkeletalMeshComponent* BodyMesh = GetMesh();
+   if (!FollowCamera || !BodyMesh || !GetRootComponent())
+   {
+      return;
+   }
+
+   FVector TargetRelative = DefaultCameraRelativeLocation;
+
+   const bool bFollowHead = bCameraAlwaysFollowHead || bIsCrouched || Execute_IsDBNO(this);
+   const bool bHasFollowPoint = BodyMesh->DoesSocketExist(CameraFollowSocketName)
+      || BodyMesh->GetBoneIndex(CameraFollowSocketName) != INDEX_NONE;
+
+   if (bFollowHead && bHasFollowPoint)
+   {
+      const FVector HeadWorld = BodyMesh->GetSocketLocation(CameraFollowSocketName);
+      TargetRelative = GetRootComponent()->GetComponentTransform().InverseTransformPosition(HeadWorld) + CameraFollowOffset;
+   }
+   
+   if (Controller)
+   {
+      const float ViewPitch = FRotator::NormalizeAxis(GetControlRotation().Pitch);   // 아래를 볼수록 음수
+      const float LookDownAlpha = FMath::Clamp(-ViewPitch / 90.0f, 0.0f, 1.0f);
+      TargetRelative.X += CameraLookDownForwardPush * LookDownAlpha;
+   }
+
+   FollowCamera->SetRelativeLocation(
+      FMath::VInterpTo(FollowCamera->GetRelativeLocation(), TargetRelative, DeltaSeconds, CameraFollowInterpSpeed));
+}
+
+// ★[추가 09.15] 내 화면에서만 무기 그림자 끄기 — 그림자 설정은 복제되지 않아서 다른 사람 화면엔 그대로 남습니다.
+//   무기는 줍기·전환·앉기로 수시로 붙었다 떨어지므로 0.5초마다 확인합니다.
+void ABaruCharacter::HideLocalWeaponShadows()
+{
+   if (!IsLocallyControlled())
+   {
+      // 사망 등으로 조종이 끝나면 확인 중지
+      GetWorldTimerManager().ClearTimer(WeaponShadowTimerHandle);
+      return;
+   }
+
+   TArray<AActor*> AttachedActors;
+   GetAttachedActors(AttachedActors, /*bResetArray=*/true, /*bRecursivelyIncludeAttachedActors=*/true);
+
+   for (AActor* Attached : AttachedActors)
+   {
+      if (!Cast<ABaruWeaponBase>(Attached))
+      {
+         continue;
+      }
+
+      Attached->ForEachComponent<UPrimitiveComponent>(false, [](UPrimitiveComponent* Prim)
+      {
+         if (Prim && Prim->CastShadow)
+         {
+            Prim->SetCastShadow(false);
+         }
+      });
+   }
 }
 
 // [09.13] 사격 시 카메라 킥 및 복구량 계산
@@ -1538,7 +1947,7 @@ void ABaruCharacter::ApplyRecoil(const FBaruRecoilData& InRecoilData)
 // [09.13] 조준 기능 추가
 void ABaruCharacter::Input_AimStart()
 {
-   if (bIsDead || Execute_IsDBNO(this)) return;
+   if (bIsDead || Execute_IsDBNO(this) || bIsCrouched || GetCharacterMovement()->IsFalling()) return;
    SetAiming(true);
 }
 
